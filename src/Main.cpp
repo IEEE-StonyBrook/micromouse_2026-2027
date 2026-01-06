@@ -50,6 +50,30 @@
 
 #ifdef MOTORLAB_MODE
 #include "Platform/Pico/MotorLab/MotorLab.h"
+#include <stdarg.h>
+
+// Global bluetooth pointer for printf override
+static BluetoothInterface* g_bluetooth = nullptr;
+
+// Override printf to send to both USB and Bluetooth
+extern "C" int printf(const char* format, ...) {
+    char buffer[256];
+    va_list args;
+    va_start(args, format);
+    int ret = vsnprintf(buffer, sizeof(buffer), format, args);
+    va_end(args);
+
+    // Send to USB (stdio)
+    fputs(buffer, stdout);
+    fflush(stdout);
+
+    // Send to Bluetooth if initialized
+    if (g_bluetooth) {
+        g_bluetooth->write(buffer);
+    }
+
+    return ret;
+}
 #endif
 
 #ifndef MOTORLAB_MODE
@@ -414,14 +438,28 @@ int main()
  */
 int main()
 {
-    // Initialize USB serial for CLI
-    stdio_init_all();
+    // Initialize USB serial only (not UART - we'll handle that manually)
+    stdio_usb_init();
     sleep_ms(3000);  // Wait for USB connection
 
-    printf("\n\n");
-    printf("===========================================\n");
-    printf("  MOTORLAB MODE - Motor Characterization  \n");
-    printf("===========================================\n\n");
+    // Initialize Bluetooth on UART0 (GP16=TX, GP17=RX) at 9600 baud for HM-10
+    BluetoothInterface bluetooth(uart0, 9600, 16, 17);
+    bluetooth.init();
+
+    // Set global pointer so printf can use it
+    g_bluetooth = &bluetooth;
+
+    // Initialize LogSystem to route output to Bluetooth
+    LogSystem::init(&bluetooth);
+
+    LOG_INFO("\n");
+    LOG_INFO("===========================================");
+    LOG_INFO("  MOTORLAB MODE - Motor Characterization  ");
+    LOG_INFO("===========================================");
+    LOG_INFO("");
+    LOG_INFO("Serial output on USB and Bluetooth (UART0)");
+    LOG_INFO("USB: 115200 baud, Bluetooth: 9600 baud (HM-10)");
+    LOG_INFO("");
 
     // ========================================================================
     // Hardware Initialization

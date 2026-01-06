@@ -39,8 +39,9 @@ constexpr int MOTORLAB_MAX_ARGC = 8;
 /**
  * @brief CLI argument structure
  */
-struct MotorLabArgs {
-    int argc;
+struct MotorLabArgs
+{
+    int   argc;
     char* argv[MOTORLAB_MAX_ARGC];
 };
 
@@ -50,7 +51,8 @@ struct MotorLabArgs {
  * Provides serial CLI for running motor tests and adjusting parameters.
  * Designed to work with the existing Drivetrain and Motor classes.
  */
-class MotorLab {
+class MotorLab
+{
   public:
     /**
      * @brief Construct motor lab with hardware references
@@ -61,8 +63,7 @@ class MotorLab {
      * @param right_encoder Pointer to right encoder
      * @param battery_monitor Pointer to battery monitor
      */
-    MotorLab(Motor* left_motor, Motor* right_motor,
-             Encoder* left_encoder, Encoder* right_encoder,
+    MotorLab(Motor* left_motor, Motor* right_motor, Encoder* left_encoder, Encoder* right_encoder,
              BatteryMonitor* battery_monitor);
 
     /**
@@ -151,11 +152,11 @@ class MotorLab {
      *
      * Results: Plot voltage vs speed. Slope = 1/Km, y-intercept = bias_ff
      *
-     * @param max_voltage Maximum voltage to test (default 5V)
+     * @param max_voltage Maximum voltage to test (default 6V)
      * @param step_voltage Voltage increment (default 0.5V)
      * @param settle_time_ms Time to wait for steady state (default 500ms)
      */
-    void runOpenLoopTrial(float max_voltage = 5.0f, float step_voltage = 0.5f,
+    void runOpenLoopTrial(float max_voltage = 6.0f, float step_voltage = 0.5f,
                           uint32_t settle_time_ms = 500);
 
     /**
@@ -214,34 +215,34 @@ class MotorLab {
 
   private:
     // Hardware references
-    Motor* left_motor_;
-    Motor* right_motor_;
-    Encoder* left_encoder_;
-    Encoder* right_encoder_;
+    Motor*          left_motor_;
+    Motor*          right_motor_;
+    Encoder*        left_encoder_;
+    Encoder*        right_encoder_;
     BatteryMonitor* battery_monitor_;
 
     // Settings and utilities
     MotorLabSettings settings_;
-    MotorLabProfile profile_;
+    MotorLabProfile  profile_;
     MotorLabReporter reporter_;
 
     // CLI input buffer
     char input_buffer_[MOTORLAB_INPUT_BUFFER_SIZE];
-    int input_index_;
+    int  input_index_;
     bool echo_enabled_;
 
     // Encoder velocity tracking
     int32_t prev_left_ticks_;
     int32_t prev_right_ticks_;
-    float left_velocity_degps_;
-    float right_velocity_degps_;
+    float   left_velocity_degps_;
+    float   right_velocity_degps_;
 
     // CLI parsing helpers
-    int readSerialLine();
+    int          readSerialLine();
     MotorLabArgs tokenize();
-    void executeCommand(const MotorLabArgs& args);
-    void clearInput();
-    void printPrompt();
+    void         executeCommand(const MotorLabArgs& args);
+    void         clearInput();
+    void         printPrompt();
 
     /**
      * @brief Helper to parse float argument with bounds checking
@@ -252,8 +253,8 @@ class MotorLab {
      * @param result Output parameter for parsed value
      * @return true if valid, false otherwise
      */
-    bool parseFloat(const MotorLabArgs& args, int index,
-                    float min_val, float max_val, float& result);
+    bool parseFloat(const MotorLabArgs& args, int index, float min_val, float max_val,
+                    float& result);
 };
 
-#endif  // MOTORLAB_H
+#endif // MOTORLAB_H

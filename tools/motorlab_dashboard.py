@@ -609,9 +609,22 @@ class Dashboard(QMainWindow):
         """Send a message and return the response."""
         if not self.device:
             return []
+
+        # Temporarily pause monitor to avoid conflicts
+        was_monitoring = self.monitoring
+        if was_monitoring:
+            self.monitoring = False
+            time.sleep(0.1)  # Let monitor thread finish current read
+
         self.serial.flushInput()
         self.serial.write(message.encode('ascii'))
-        return self.get_response()
+        response = self.get_response()
+
+        # Resume monitor if it was running
+        if was_monitoring:
+            self.monitoring = True
+
+        return response
 
     # ========== DEVICE OPERATIONS ==========
 
@@ -709,8 +722,11 @@ class Dashboard(QMainWindow):
     def get_id(self):
         """Query device ID and run open-loop test."""
         if not self.device:
+            self.log_message("ERROR: Not connected to device")
             return
+        self.log_message("Sending OL command...")
         self.data = self.query('OL\n')
+        self.log_message(f"Received {len(self.data)} lines")
         self.log_data()
 
         # Parse CSV data
