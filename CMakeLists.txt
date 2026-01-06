@@ -58,7 +58,10 @@ add_executable(Jurababa
     src/Navigation/PathUtils.cpp
     src/Navigation/Diagonalizer.cpp
     src/Platform/Pico/API.cpp
-    # src/Platform/Simulator/API.cpp
+    src/Platform/Pico/MotorLab/MotorLabSettings.cpp
+    src/Platform/Pico/MotorLab/MotorLabProfile.cpp
+    src/Platform/Pico/MotorLab/MotorLabReporter.cpp
+    src/Platform/Pico/MotorLab/MotorLab.cpp
     src/Main.cpp
 )
 

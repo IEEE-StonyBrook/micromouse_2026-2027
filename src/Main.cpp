@@ -8,7 +8,18 @@
  * Communication:
  *   - Core 0 → Core 1: Commands via CommandHub (non-blocking FIFO)
  *   - Core 1 → Core 0: Sensor data via MulticoreSensorHub
+ *
+ * Build Modes:
+ *   - MOTORLAB_MODE: Enable UKMARS-style motor characterization interface
+ *   - Normal mode: Standard maze-solving operation
  */
+
+// ============================================================================
+// BUILD MODE SELECTION
+// ============================================================================
+// Uncomment the following line to enable MotorLab mode for motor testing
+#define MOTORLAB_MODE
+// ============================================================================
 
 #include <array>
 #include <stdio.h>
@@ -36,6 +47,16 @@
 #include "Platform/Pico/Robot/ToF.h"
 #include "pico/multicore.h"
 #include "pico/stdlib.h"
+
+#ifdef MOTORLAB_MODE
+#include "Platform/Pico/MotorLab/MotorLab.h"
+#endif
+
+#ifndef MOTORLAB_MODE
+
+// ============================================================================
+// NORMAL MODE - Maze-solving operation with dual-core architecture
+// ============================================================================
 
 // ============================================================================
 // Global Battery Monitor (shared between cores)
@@ -372,3 +393,102 @@ int main()
 
     return 0;
 }
+
+#else  // MOTORLAB_MODE
+
+// ============================================================================
+// MOTORLAB MODE - Motor characterization and tuning interface
+// ============================================================================
+// This mode provides a UKMARS-style CLI for motor testing:
+//   - Open-loop voltage sweeps (for Km, bias_ff calibration)
+//   - Step response tests (for Tm tuning)
+//   - Closed-loop move trials (for validating feedforward + controller)
+//
+// Connect via USB serial (115200 baud) and use the Python dashboard:
+//   python tools/motorlab_dashboard.py
+// ============================================================================
+
+/**
+ * MotorLab main entry point
+ * Single-core operation for simplicity during calibration
+ */
+int main()
+{
+    // Initialize USB serial for CLI
+    stdio_init_all();
+    sleep_ms(3000);  // Wait for USB connection
+
+    printf("\n\n");
+    printf("===========================================\n");
+    printf("  MOTORLAB MODE - Motor Characterization  \n");
+    printf("===========================================\n\n");
+
+    // ========================================================================
+    // Hardware Initialization
+    // ========================================================================
+
+    // Battery monitor (ADC0 on GP26)
+    BatteryMonitor battery(26, 10000.0f, 5100.0f);  // R1=10k, R2=5.1k
+    battery.init();
+
+    // Take initial battery readings
+    for (int i = 0; i < 10; i++) {
+        battery.update();
+        sleep_ms(10);
+    }
+    printf("Battery voltage: %.2f V\n", battery.getVoltage());
+
+    // Encoders (PIO-based quadrature)
+    Encoder left_encoder(pio0, 20, true);   // GPIO 20, inverted
+    Encoder right_encoder(pio0, 8, false);  // GPIO 8, normal
+
+    // Motors (PWM-based)
+    Motor left_motor(18, 19, true);   // GPIO 18/19, inverted
+    Motor right_motor(6, 7, false);   // GPIO 6/7, normal
+
+    // ========================================================================
+    // MotorLab Interface
+    // ========================================================================
+
+    MotorLab motorlab(&left_motor, &right_motor,
+                      &left_encoder, &right_encoder,
+                      &battery);
+    motorlab.init();
+
+    printf("\nHardware initialized. Ready for testing.\n");
+    printf("Type '?' for command help.\n\n");
+
+    // ========================================================================
+    // Main Loop - CLI processing and encoder updates
+    // ========================================================================
+
+    const uint32_t LOOP_PERIOD_MS = static_cast<uint32_t>(LOOP_INTERVAL_S * 1000.0f);
+    absolute_time_t next_tick = make_timeout_time_ms(LOOP_PERIOD_MS);
+
+    uint32_t last_battery_update_ms = 0;
+    const uint32_t BATTERY_UPDATE_INTERVAL_MS = 1000;
+
+    while (true) {
+        uint32_t now_ms = to_ms_since_boot(get_absolute_time());
+
+        // Update encoder velocities at control loop rate
+        motorlab.updateEncoders(LOOP_INTERVAL_S);
+
+        // Process serial commands (non-blocking)
+        motorlab.processSerial();
+
+        // Periodic battery update
+        if (now_ms - last_battery_update_ms >= BATTERY_UPDATE_INTERVAL_MS) {
+            battery.update();
+            last_battery_update_ms = now_ms;
+        }
+
+        // Sleep until next tick
+        sleep_until(next_tick);
+        next_tick = delayed_by_ms(next_tick, LOOP_PERIOD_MS);
+    }
+
+    return 0;
+}
+
+#endif  // MOTORLAB_MODE
