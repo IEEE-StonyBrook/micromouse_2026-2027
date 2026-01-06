@@ -80,7 +80,7 @@ class Dashboard(QMainWindow):
         self.data = []
         self.parameters = {}
         self.move_mode = ONLY_FF
-        self.auto_connect = True
+        self.auto_connect = False  # Disable auto-connect (BLE port may not exist yet)
         self.custom_ports = []  # User-added custom ports
         self.monitor_thread = None
         self.monitoring = False
@@ -656,9 +656,14 @@ class Dashboard(QMainWindow):
         self.motion_plot.clear()
         self.log_message('Device Reset')
         if self.serial:
-            self.serial.setDTR(0)
-            time.sleep(0.1)
-            self.serial.setDTR(1)
+            try:
+                # Try DTR reset (works for real USB serial ports)
+                self.serial.setDTR(0)
+                time.sleep(0.1)
+                self.serial.setDTR(1)
+            except (OSError, AttributeError):
+                # Ignore for virtual ports like /tmp/ttyBLE that don't support DTR
+                pass
         self.log_message('----------------')
         self.device_init()
         self.read_settings()
