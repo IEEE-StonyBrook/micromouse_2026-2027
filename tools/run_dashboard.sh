@@ -15,5 +15,9 @@ else
     source "$VENV_DIR/bin/activate"
 fi
 
+# Set Qt plugin path for PyQt6
+export QT_QPA_PLATFORM_PLUGIN_PATH="$VENV_DIR/lib/python3.14/site-packages/PyQt6/Qt6/plugins"
+export QT_PLUGIN_PATH="$VENV_DIR/lib/python3.14/site-packages/PyQt6/Qt6/plugins"
+
 # Run the dashboard
 python "$SCRIPT_DIR/motorlab_dashboard.py"

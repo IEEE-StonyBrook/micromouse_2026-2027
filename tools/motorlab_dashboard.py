@@ -82,6 +82,8 @@ class Dashboard(QMainWindow):
         self.move_mode = ONLY_FF
         self.auto_connect = True
         self.custom_ports = []  # User-added custom ports
+        self.monitor_thread = None
+        self.monitoring = False
 
         self.nChannels = 8
         self.nPoints = 400
@@ -152,6 +154,12 @@ class Dashboard(QMainWindow):
         port_button_layout.addWidget(self.btn_add_port)
 
         port_layout.addLayout(port_button_layout)
+
+        # Monitor checkbox
+        self.chk_monitor = QRadioButton("Monitor")
+        self.chk_monitor.setToolTip("Show live serial data")
+        self.chk_monitor.toggled.connect(self.toggle_monitor)
+        port_layout.addWidget(self.chk_monitor)
 
         port_group.setLayout(port_layout)
 
@@ -337,6 +345,9 @@ class Dashboard(QMainWindow):
         current_text = self.port_combo.currentText()
         self.port_combo.clear()
 
+        # Always add BLE serial port option
+        self.port_combo.addItem("/tmp/ttyBLE (BLE)", "/tmp/ttyBLE")
+
         # Add detected ports
         for p in serial.tools.list_ports.comports():
             # Format: /dev/cu.usbmodem1234 (Pico)
@@ -353,7 +364,7 @@ class Dashboard(QMainWindow):
 
         # Add custom ports
         for port in self.custom_ports:
-            if not any(p.device == port for p in serial.tools.list_ports.comports()):
+            if port != '/tmp/ttyBLE' and not any(p.device == port for p in serial.tools.list_ports.comports()):
                 self.port_combo.addItem(f"{port} (Custom)", port)
 
         # Restore selection if still available
@@ -410,6 +421,8 @@ class Dashboard(QMainWindow):
 
     def disconnect_device(self):
         """Disconnect from current device."""
+        self.stop_monitoring()
+        self.chk_monitor.setChecked(False)
         if self.serial and self.serial.is_open:
             self.serial.close()
         self.device = None
@@ -514,6 +527,7 @@ class Dashboard(QMainWindow):
             self.disconnect_device()
 
     def closeEvent(self, unused_event):
+        self.stop_monitoring()
         if self.serial and self.serial.is_open:
             self.serial.close()
 
@@ -781,6 +795,68 @@ class Dashboard(QMainWindow):
                          '<br>Jurababa MotorLab Dashboard<br>'
                          'Based on UKMARS MotorLab by Peter Harrison<br>',
                          '')
+
+    # ========== SERIAL MONITOR ==========
+
+    def toggle_monitor(self, checked):
+        """Enable or disable serial monitoring."""
+        if checked and self.device:
+            self.start_monitoring()
+        else:
+            self.stop_monitoring()
+
+    def start_monitoring(self):
+        """Start monitoring serial port in background thread."""
+        if self.monitoring or not self.device:
+            return
+
+        self.monitoring = True
+        self.monitor_thread = SerialMonitor(self.serial)
+        self.monitor_thread.data_received.connect(self.on_monitor_data)
+        self.monitor_thread.start()
+
+    def stop_monitoring(self):
+        """Stop monitoring serial port."""
+        if not self.monitoring:
+            return
+
+        self.monitoring = False
+        if self.monitor_thread:
+            self.monitor_thread.stop()
+            self.monitor_thread.wait()
+            self.monitor_thread = None
+
+    @Slot(str)
+    def on_monitor_data(self, line):
+        """Handle incoming serial monitor data."""
+        self.text_box.appendPlainText(line)
+
+
+class SerialMonitor(QThread):
+    """Background thread to monitor serial port."""
+    data_received = Signal(str)
+
+    def __init__(self, serial_port):
+        super().__init__()
+        self.serial = serial_port
+        self.running = True
+
+    def run(self):
+        """Read serial data continuously."""
+        while self.running:
+            try:
+                if self.serial and self.serial.is_open and self.serial.in_waiting:
+                    line = self.serial.readline().decode('ascii', errors='ignore').strip()
+                    if line:
+                        self.data_received.emit(line)
+                else:
+                    time.sleep(0.01)
+            except Exception:
+                time.sleep(0.1)
+
+    def stop(self):
+        """Stop the monitor thread."""
+        self.running = False
 
 
 if __name__ == "__main__":
