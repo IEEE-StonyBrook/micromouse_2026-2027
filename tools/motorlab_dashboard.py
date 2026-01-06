@@ -138,7 +138,7 @@ class Dashboard(QMainWindow):
 
         self.btn_refresh = QPushButton("Refresh")
         self.btn_refresh.clicked.connect(self.refresh_ports)
-        self.btn_refresh.setFixedWidth(60)
+        self.btn_refresh.setFixedWidth(70)
         port_select_layout.addWidget(self.btn_refresh)
 
         port_layout.addLayout(port_select_layout)
@@ -155,11 +155,19 @@ class Dashboard(QMainWindow):
 
         port_layout.addLayout(port_button_layout)
 
-        # Monitor checkbox
+        # Monitor and Clear buttons
+        monitor_layout = QHBoxLayout()
         self.chk_monitor = QRadioButton("Monitor")
         self.chk_monitor.setToolTip("Show live serial data")
         self.chk_monitor.toggled.connect(self.toggle_monitor)
-        port_layout.addWidget(self.chk_monitor)
+        monitor_layout.addWidget(self.chk_monitor)
+
+        self.btn_clear = QPushButton("Clear")
+        self.btn_clear.clicked.connect(self.clear_monitor)
+        self.btn_clear.setFixedWidth(60)
+        monitor_layout.addWidget(self.btn_clear)
+
+        port_layout.addLayout(monitor_layout)
 
         port_group.setLayout(port_layout)
 
@@ -321,8 +329,8 @@ class Dashboard(QMainWindow):
         main_splitter = QSplitter(Qt.Orientation.Horizontal)
         main_splitter.addWidget(plot_splitter)
         main_splitter.addWidget(self.side_bar)
-        main_splitter.setStretchFactor(0, 3)
-        main_splitter.setStretchFactor(1, 1)
+        # Set initial sizes: plots get 60%, sidebar gets 40%
+        main_splitter.setSizes([700, 300])
 
         # Vertical app layout
         main_vbox = QVBoxLayout()
@@ -836,6 +844,10 @@ class Dashboard(QMainWindow):
     def on_monitor_data(self, line):
         """Handle incoming serial monitor data."""
         self.text_box.appendPlainText(line)
+
+    def clear_monitor(self):
+        """Clear the text box."""
+        self.text_box.clear()
 
 
 class SerialMonitor(QThread):
