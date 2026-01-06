@@ -30,7 +30,7 @@ from PyQt6.QtWidgets import (
     QDoubleSpinBox, QComboBox,
     QGridLayout, QHBoxLayout, QVBoxLayout,
     QPlainTextEdit, QPushButton,
-    QRadioButton, QLabel)
+    QRadioButton, QLabel, QSplitter)
 
 import pyqtgraph as pg
 
@@ -165,7 +165,7 @@ class Dashboard(QMainWindow):
 
         # Text box for serial output
         self.text_box = QPlainTextEdit()
-        self.text_box.setFont(QFont('monospace'))
+        self.text_box.setFont(QFont('Menlo'))
         self.text_box.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
 
         # ========== SETTINGS GROUP ==========
@@ -300,7 +300,7 @@ class Dashboard(QMainWindow):
         side_layout.addLayout(button_layout)
         side_layout.addWidget(settings_group)
         self.side_bar.setLayout(side_layout)
-        self.side_bar.setFixedWidth(300)
+        self.side_bar.setMinimumWidth(250)
 
         # ========== STATUS BAR ==========
         self.status_bar = QStatusBar()
@@ -309,18 +309,24 @@ class Dashboard(QMainWindow):
         self.setStatusBar(self.status_bar)
         self.show_connection_message('warning', 'Not connected')
 
-        # ========== DATA PLOTS ==========
-        plot_layout = QVBoxLayout()
-        plot_layout.addWidget(self.output_plot)
-        plot_layout.addWidget(self.motion_plot)
+        # ========== DATA PLOTS WITH SPLITTERS ==========
+        # Vertical splitter for plots
+        plot_splitter = QSplitter(Qt.Orientation.Vertical)
+        plot_splitter.addWidget(self.output_plot)
+        plot_splitter.addWidget(self.motion_plot)
+        plot_splitter.setStretchFactor(0, 1)
+        plot_splitter.setStretchFactor(1, 1)
 
-        center_layout = QHBoxLayout()
-        center_layout.addLayout(plot_layout)
-        center_layout.addWidget(self.side_bar)
+        # Horizontal splitter for plots and sidebar
+        main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        main_splitter.addWidget(plot_splitter)
+        main_splitter.addWidget(self.side_bar)
+        main_splitter.setStretchFactor(0, 3)
+        main_splitter.setStretchFactor(1, 1)
 
         # Vertical app layout
         main_vbox = QVBoxLayout()
-        main_vbox.addLayout(center_layout)
+        main_vbox.addWidget(main_splitter)
 
         # Wrap the layout into a widget
         main_widget = QWidget()
