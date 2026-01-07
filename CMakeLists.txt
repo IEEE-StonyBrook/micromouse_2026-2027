@@ -37,26 +37,26 @@ pico_sdk_init()
 # Add executable. Default name is the project name, version 0.1
 # Add all cpp files here
 add_executable(Jurababa
-    Src/Platform/Pico/Robot/Drivetrain.cpp
-    Src/Platform/Pico/Robot/Motor.cpp
-    Src/Platform/Pico/Robot/Encoder.cpp
-    Src/Platform/Pico/Robot/IMU.cpp
-    Src/Platform/Pico/Robot/ToF.cpp
-    Src/Platform/Pico/Robot/Battery.cpp
-    Src/Platform/Pico/Robot/Odometry.cpp
-    Src/Platform/Pico/Robot/Motion.cpp
-    Src/Platform/Pico/Robot/Profile.cpp
-    Src/Common/PIDController.cpp
-    Src/Common/LogSystem.cpp
-    Src/Common/Bluetooth.cpp
-    Src/Maze/InternalMouse.cpp
-    Src/Maze/MazeGraph.cpp
-    Src/Maze/MazeNode.cpp
-    Src/Navigation/AStarSolver.cpp
-    Src/Navigation/PathConverter.cpp
-    Src/Platform/Pico/API.cpp
-    # Src/Platform/Simulator/API.cpp
-    Src/Main.cpp
+    src/Platform/Pico/Robot/Drivetrain.cpp
+    src/Platform/Pico/Robot/Motor.cpp
+    src/Platform/Pico/Robot/Encoder.cpp
+    src/Platform/Pico/Robot/IMU.cpp
+    src/Platform/Pico/Robot/ToF.cpp
+    src/Platform/Pico/Robot/Battery.cpp
+    src/Platform/Pico/Robot/Odometry.cpp
+    src/Platform/Pico/Robot/Motion.cpp
+    src/Platform/Pico/Robot/Profile.cpp
+    src/Common/PIDController.cpp
+    src/Common/LogSystem.cpp
+    src/Common/Bluetooth.cpp
+    src/Maze/InternalMouse.cpp
+    src/Maze/MazeGraph.cpp
+    src/Maze/MazeNode.cpp
+    src/Navigation/AStarSolver.cpp
+    src/Navigation/PathConverter.cpp
+    src/Platform/Pico/API.cpp
+    # src/Platform/Simulator/API.cpp
+    src/Main.cpp
 )
 
 pico_set_program_name(Jurababa "Jurababa")

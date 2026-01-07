@@ -19,6 +19,7 @@
 // #include "../Include/Platform/Simulator/API.h"
 
 void interpretLFRPath(API* apiPtr, std::string lfrPath);
+void processBluetoothCommands(Bluetooth* bt);
 
 void publishSensors(Encoder* leftEncoder, Encoder* rightEncoder, ToF* leftToF, ToF* frontToF,
                     ToF* rightToF, IMU* imu)
@@ -86,13 +87,8 @@ void processCommand(Motion* motion)
 // Publisher for Core1: All robot specific logic
 static void core1_Publisher()
 {
-    Bluetooth bt(uart0, 16, 17, 9600);
-    bt.init();
-
-    // Bluetooth
-    LogSystem::attachBluetooth(&bt);
-    LOG_INFO("System initialized");
-    LOG_DEBUG("Bluetooth logging enabled");
+    LOG_INFO("Core1 initialized");
+    LOG_DEBUG("Sensor and motor systems ready");
 
     // Sensors
     Encoder leftEncoder(pio0, 20, true);
@@ -124,10 +120,30 @@ static void core1_Publisher()
     }
 }
 
+void processBluetoothCommands(Bluetooth* bt)
+{
+    // Simple test: just print any received data
+    if (bt->available())
+    {
+        char c = bt->readChar();
+        // Log each character received (including its ASCII code)
+        LOG_DEBUG("BT RX: '" + std::string(1, c) + "' (ASCII: " + std::to_string((int)c) + ")");
+    }
+}
+
 int main()
 {
     stdio_init_all();
     sleep_ms(3000);
+
+    // Initialize Bluetooth on Core0
+    Bluetooth bt(uart0, 16, 17, 9600);
+    bt.init();
+    LogSystem::attachBluetooth(&bt);
+    LOG_INFO("System initialized");
+    LOG_DEBUG("Bluetooth logging enabled");
+    LOG_DEBUG("UART0: TX=GP16, RX=GP17, Baud=9600");
+    LOG_DEBUG("Waiting for Bluetooth commands...");
 
     MulticoreSensorHub::init();
     multicore_launch_core1(core1_Publisher);
@@ -150,8 +166,18 @@ int main()
     // interpretLFRPath(&api, path);
 
     // Main loop: high-level planning, sensor reads, etc.
+    uint32_t loopCount = 0;
     while (true)
     {
+        // Process incoming Bluetooth commands
+        processBluetoothCommands(&bt);
+
+        // Periodic heartbeat every 1000 loops to show we're checking BT
+        if (++loopCount % 1000 == 0)
+        {
+            LOG_DEBUG("Main loop active, checking BT... (count: " + std::to_string(loopCount) + ")");
+        }
+
         MulticoreSensorData sensors;
         MulticoreSensorHub::snapshot(sensors); // lock-free read
 
