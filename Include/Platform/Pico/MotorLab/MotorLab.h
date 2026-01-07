@@ -103,6 +103,18 @@ class MotorLab
     void setMotorVoltage(float volts);
 
     /**
+     * @brief Apply voltage to left motor only (right motor stopped)
+     * @param volts Voltage to apply (battery-compensated)
+     */
+    void setLeftMotorVoltage(float volts);
+
+    /**
+     * @brief Apply voltage to right motor only (left motor stopped)
+     * @param volts Voltage to apply (battery-compensated)
+     */
+    void setRightMotorVoltage(float volts);
+
+    /**
      * @brief Get current battery voltage
      * @return Battery voltage in volts
      */
@@ -209,6 +221,8 @@ class MotorLab
     void cmdStep(const MotorLabArgs& args);
     void cmdMove(const MotorLabArgs& args);
     void cmdVoltage(const MotorLabArgs& args);
+    void cmdVoltageLeft(const MotorLabArgs& args);
+    void cmdVoltageRight(const MotorLabArgs& args);
     void cmdStop();
 
     // TODO: Add WRITE/READ commands for Flash persistence (UKMARS uses EEPROM.put/get)

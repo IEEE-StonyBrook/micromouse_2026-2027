@@ -5,6 +5,7 @@
 #include "Platform/Pico/Robot/Motor.h"
 
 #include "pico/stdlib.h"
+#include "hardware/uart.h"
 
 #include <cctype>
 #include <cmath>
@@ -60,7 +61,20 @@ void MotorLab::setMotorVoltage(float volts)
     float battery_volts = getBatteryVoltage();
     left_motor_->applyVoltage(volts, battery_volts);
     right_motor_->applyVoltage(volts, battery_volts);
-    // Removed debug print - was causing incorrect output
+}
+
+void MotorLab::setLeftMotorVoltage(float volts)
+{
+    float battery_volts = getBatteryVoltage();
+    left_motor_->applyVoltage(volts, battery_volts);
+    right_motor_->applyVoltage(0, battery_volts);
+}
+
+void MotorLab::setRightMotorVoltage(float volts)
+{
+    float battery_volts = getBatteryVoltage();
+    left_motor_->applyVoltage(0, battery_volts);
+    right_motor_->applyVoltage(volts, battery_volts);
 }
 
 float MotorLab::getBatteryVoltage() const
@@ -345,13 +359,30 @@ int MotorLab::readSerialLine()
 {
     while (true)
     {
-        int c = getchar_timeout_us(0);
+        // Check both USB and UART for input
+        int c = getchar_timeout_us(0);  // Check USB
+        bool from_uart = false;
+
+        // Also check UART directly (for Bluetooth input)
+        if (c == PICO_ERROR_TIMEOUT && uart_is_readable(uart0))
+        {
+            c = uart_getc(uart0);
+            from_uart = true;
+            // Debug what we're receiving
+            printf("<U:0x%02X>", c);
+        }
+
         if (c == PICO_ERROR_TIMEOUT)
         {
             return 0; // No data available
         }
 
         char ch = static_cast<char>(c);
+
+        // Debug all characters
+        if (from_uart) {
+            printf("[%c]", (ch >= 32 && ch < 127) ? ch : '?');
+        }
 
         // Handle newline (command complete)
         if (ch == '\n' || ch == '\r')
@@ -496,6 +527,14 @@ void MotorLab::executeCommand(const MotorLabArgs& args)
     else if (strcmp(cmd, "VOLTS") == 0 || strcmp(cmd, "V") == 0)
     {
         cmdVoltage(args);
+    }
+    else if (strcmp(cmd, "VL") == 0)
+    {
+        cmdVoltageLeft(args);
+    }
+    else if (strcmp(cmd, "VR") == 0)
+    {
+        cmdVoltageRight(args);
     }
     else if (strcmp(cmd, "STOP") == 0 || strcmp(cmd, "X") == 0)
     {
@@ -826,7 +865,43 @@ void MotorLab::cmdVoltage(const MotorLabArgs& args)
         volts = -MAX_VOLTAGE;
 
     setMotorVoltage(volts);
-    printf("Applied %.2f V\n", volts);
+    printf("Applied %.2f V to both motors\n", volts);
+}
+
+void MotorLab::cmdVoltageLeft(const MotorLabArgs& args)
+{
+    if (args.argc < 2)
+    {
+        printf("Usage: VL <voltage>\n");
+        return;
+    }
+
+    float volts = static_cast<float>(atof(args.argv[1]));
+    if (volts > MAX_VOLTAGE)
+        volts = MAX_VOLTAGE;
+    if (volts < -MAX_VOLTAGE)
+        volts = -MAX_VOLTAGE;
+
+    setLeftMotorVoltage(volts);
+    printf("Applied %.2f V to LEFT motor only\n", volts);
+}
+
+void MotorLab::cmdVoltageRight(const MotorLabArgs& args)
+{
+    if (args.argc < 2)
+    {
+        printf("Usage: VR <voltage>\n");
+        return;
+    }
+
+    float volts = static_cast<float>(atof(args.argv[1]));
+    if (volts > MAX_VOLTAGE)
+        volts = MAX_VOLTAGE;
+    if (volts < -MAX_VOLTAGE)
+        volts = -MAX_VOLTAGE;
+
+    setRightMotorVoltage(volts);
+    printf("Applied %.2f V to RIGHT motor only\n", volts);
 }
 
 void MotorLab::cmdStop()

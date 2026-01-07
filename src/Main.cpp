@@ -52,10 +52,14 @@
 #include "Platform/Pico/MotorLab/MotorLab.h"
 #include <stdarg.h>
 
-// Global bluetooth pointer for printf override
-static BluetoothInterface* g_bluetooth = nullptr;
+// Helper to write string to UART for Bluetooth output
+static void uart_write_str(const char* str) {
+    while (*str) {
+        uart_putc_raw(uart0, *str++);
+    }
+}
 
-// Override printf to send to both USB and Bluetooth
+// Override printf to send to both USB and Bluetooth UART
 extern "C" int printf(const char* format, ...) {
     char buffer[256];
     va_list args;
@@ -63,14 +67,12 @@ extern "C" int printf(const char* format, ...) {
     int ret = vsnprintf(buffer, sizeof(buffer), format, args);
     va_end(args);
 
-    // Send to USB (stdio)
+    // Send to USB
     fputs(buffer, stdout);
     fflush(stdout);
 
-    // Send to Bluetooth if initialized
-    if (g_bluetooth) {
-        g_bluetooth->write(buffer);
-    }
+    // Send to UART (Bluetooth)
+    uart_write_str(buffer);
 
     return ret;
 }
@@ -438,28 +440,29 @@ int main()
  */
 int main()
 {
-    // Initialize USB serial only (not UART - we'll handle that manually)
+    // Initialize USB stdio only
     stdio_usb_init();
-    sleep_ms(3000);  // Wait for USB connection
 
-    // Initialize Bluetooth on UART0 (GP16=TX, GP17=RX) at 9600 baud for HM-10
-    BluetoothInterface bluetooth(uart0, 9600, 16, 17);
-    bluetooth.init();
+    // Manually initialize UART0 at 9600 baud for HM-10 Bluetooth
+    uart_init(uart0, 9600);
+    gpio_set_function(16, GPIO_FUNC_UART);  // TX
+    gpio_set_function(17, GPIO_FUNC_UART);  // RX
 
-    // Set global pointer so printf can use it
-    g_bluetooth = &bluetooth;
+    // Enable UART RX and TX
+    uart_set_hw_flow(uart0, false, false);  // Disable hardware flow control
+    uart_set_format(uart0, 8, 1, UART_PARITY_NONE);  // 8N1
+    uart_set_fifo_enabled(uart0, true);  // Enable FIFO
 
-    // Initialize LogSystem to route output to Bluetooth
-    LogSystem::init(&bluetooth);
+    sleep_ms(3000);  // Wait for connections
 
-    LOG_INFO("\n");
-    LOG_INFO("===========================================");
-    LOG_INFO("  MOTORLAB MODE - Motor Characterization  ");
-    LOG_INFO("===========================================");
-    LOG_INFO("");
-    LOG_INFO("Serial output on USB and Bluetooth (UART0)");
-    LOG_INFO("USB: 115200 baud, Bluetooth: 9600 baud (HM-10)");
-    LOG_INFO("");
+    printf("\n\n");
+    printf("===========================================\n");
+    printf("  MOTORLAB MODE - Motor Characterization  \n");
+    printf("===========================================\n");
+    printf("Serial I/O: USB (115200) and UART0 (9600)\n");
+    printf("UART0 on GP16/GP17 for Bluetooth\n");
+    printf("UART TX/RX enabled, flow control disabled\n");
+    printf("Type 'ECHO ON' to enable character echo\n\n");
 
     // ========================================================================
     // Hardware Initialization

@@ -79,7 +79,7 @@ target_compile_definitions(Jurababa PRIVATE
 )
 
 # Modify the below lines to enable/disable output over UART/USB
-# USB only - UART handled manually via BluetoothInterface
+# USB only - UART will be handled manually in MotorLab at 9600 baud
 pico_enable_stdio_uart(Jurababa 0)
 pico_enable_stdio_usb(Jurababa 1)
 
