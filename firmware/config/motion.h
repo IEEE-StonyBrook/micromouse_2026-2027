@@ -1,72 +1,97 @@
 /**
  * @file motion.h
- * @brief Motion control speeds, accelerations, and tolerances
- *
- * Adjust these values to change robot behavior without touching control code.
+ * @brief Speed limits, accelerations, and control behavior
  */
 #ifndef CONFIG_MOTION_H
 #define CONFIG_MOTION_H
 
-// ================= Control Loop ================= //
-#define LOOP_FREQUENCY_HZ 100.0f
+// ===================== Control Loop ===================== //
+// Forward and rotation controllers run at 500 Hz, matching mazerunner-core /
+// motorlab. Jurababa's rotation feedback still comes from the 100 Hz BNO085
+// RVC stream; IMU::robot_rot_change() distributes the latest packet-rate yaw
+// delta into an equivalent per-500 Hz tick change so the controller keeps the
+// UKMARS single-rate shape without switching away from the IMU.
+#define LOOP_FREQUENCY_HZ 500.0f
 #define LOOP_INTERVAL_S   (1.0f / LOOP_FREQUENCY_HZ)
 
-// ================= Linear Motion ================= //
-// Speed limits (mm/s)
-#define FORWARD_TOP_SPEED               300.0f // Max forward speed
-#define FORWARD_FINAL_SPEED             0.0f   // End speed for moves
-#define ROBOT_MAX_SEARCH_SPEED_MMPS     300.0f // Search mode speed
-#define ROBOT_BACKUP_SPEED_MMPS         100.0f // Reverse speed
-#define ROBOT_MIN_CRUISE_VELOCITY_MMPS  80.0f  // Minimum cruise before decel
-#define ROBOT_FINAL_APPROACH_SPEED_MMPS 30.0f  // Final positioning speed
+// 8-tap moving average over per-tick encoder deltas, applied in
+// Drivetrain::update() and DriverLab::sampleEncoders() to mirror
+// ukmars/motorlab/src/encoders.h:108. Adds ~16 ms phase lag at 500 Hz
+// in exchange for quantization rejection on the D-term and a clean plot
+// trace. Forward PD gains are tuned against this smoothed input.
+//
+// CAUTION (per Peter Harrison's encoders.h header): changing this length
+// adds delay to the feedback loop and forces re-tuning of the forward
+// PD controller. Rotation PD uses the IMU, except during smooth-turn arcs
+// (see SMOOTH_TURN_ENCODER_HOLDOVER_MS), where it reads this averaged yaw.
+#define ENCODER_AVERAGER_LENGTH 8
 
-// Acceleration (mm/s²)
-#define FORWARD_ACCEL          200.0f
-#define ROBOT_BASE_ACCEL_MMPS2 1500.0f
+// ================ Forward Speed Limits ================= //
+#define ROBOT_MAX_SEARCH_SPEED_MMPS  400.0f  // Search mode cruise speed
+#define ROBOT_MAX_FAST_SPEED_MMPS    1500.0f // Stage 3+ explored-path cruise (Mouse::cruiseSpeed)
+#define ROBOT_SEARCH_TURN_SPEED_MMPS 300.0f  // Orion SEARCH_TURN_SPEED
 
-// ================= Rotational Motion ================= //
-// Speed limits (deg/s)
-#define TURN_TOP_SPEED              100.0f
-#define TURN_FINAL_SPEED            0.0f
-#define ROBOT_MAX_ANGULAR_VEL_DEGPS 360.0f
-#define ROBOT_MAX_TURN_SPEED_DEGPS  360.0f // Alias for clarity
+// ================ Forward Acceleration ================= //
+#define ROBOT_BASE_ACCEL_MMPS2   2500.0f
+#define ROBOT_SEARCH_ACCEL_MMPS2 2000.0f // mazerunner-core (Orion) SEARCH_ACCELERATION
 
-// Acceleration (deg/s²)
-#define TURN_ACCEL                      50.0f
-#define ROBOT_BASE_ANGULAR_ACCEL_DEGPS2 720.0f
+// ================= Rotation Limits ===================== //
+// Jurababa-validated IMU spin-turn defaults. These are deliberately gentler
+// than Orion-class UKMARS values because our rotation feedback comes from the
+// BNO085 RVC stream rather than 500 Hz encoder yaw.
+#define ROBOT_MAX_TURN_SPEED_DEGPS       270.0f  // 360 slipped 1-8.6 deg short per 180 in search
+#define ROBOT_BASE_ANGULAR_ACCEL_DEGPS2  1200.0f // 1800 slipped on the maze floor (2026-10-10)
+#define ROBOT_MAX_SMOOTH_TURN_SPEED_MMPS 250.0f  // Linear speed during smooth turns
+#define ROBOT_SMOOTH_TURN_OMEGA_DEGPS    280.0f  // Orion SS90E omega; ~61 mm radius
+#define ROBOT_SMOOTH_TURN_ALPHA_DEGPS2   4000.0f // mazerunner-core (Orion) SS90E alpha
+// mazerunner-core SS90E offsets: how far before the turn cell centre the arc
+// starts, and how far past the centre (on the new heading) it ends. Tuned, not
+// derived — the alpha ramps make the real reach longer than v/omega.
+#define ROBOT_SMOOTH_TURN_ENTRY_LEFT_MM  76.0f // Same as right; 6 runs at 300 mm/s
+#define ROBOT_SMOOTH_TURN_ENTRY_RIGHT_MM 76.0f // ToF-tuned at 300 mm/s, 3 runs: exit -2.7 mm
+// Where the arc ends past the turn-cell centre. Left ruler-measured 2026-10-10
+// (SMOOTH RUN L, 8.1 V): 80 left the robot 19-20 mm short, 61 lands within 2 mm.
+#define ROBOT_SMOOTH_TURN_EXIT_LEFT_MM  61.0f
+#define ROBOT_SMOOTH_TURN_EXIT_RIGHT_MM 61.0f // Same as left; not ruler-measured
+// Encoder arc size. Tyre scrub at 300 mm/s turns the body ~4 deg less than
+// the wheels; 95 lands it on 90 (+0.7 deg mean over 3 runs).
+#define ROBOT_SMOOTH_TURN_ANGLE_RIGHT_DEG 95.0f
+// Front ToF reading that starts the arc early (wall ahead). mazerunner sets
+// its threshold at its odometry turn point so the two coincide. With the
+// 37.0 mm wheel that point reads ~120 mm static, ~132 at 300 mm/s (ToF lag);
+// 125 fires once the robot is ~7 mm long, above ToF noise.
+#define ROBOT_SMOOTH_TURN_FRONT_TRIGGER_MM 125.0f
+#define ROBOT_SMOOTH_TURN_ANGLE_LEFT_DEG   95.5f // 95 and 96 tested: +0.9 deg, +3.6 mm mean
+// Smooth-turn arcs feed encoder yaw to the rotation PD: the BNO085 lags ~40 ms,
+// enough to reverse the inside wheel and overshoot the arc. Encoder yaw stays
+// on this long after the arc ends so the IMU lag has drained before it takes over.
+#define SMOOTH_TURN_ENCODER_HOLDOVER_MS 100
+// 1: encoder yaw is the rotation PD's inner loop on every motion (mazerunner-
+// core); the IMU corrects absolute heading through heading hold and ToF
+// through wall steering. 0: IMU inner loop, encoder yaw only for arcs.
+// Re-measure ROT_KM/ROT_TM in DriverLab after changing it: the IMU fit
+// counts the BNO085's ~40 ms lag as part of ROT_TM.
+#define ROT_FEEDBACK_ENCODER 1
 
-// ================= Arc Turns ================= //
-#define ARC_TURN_VELOCITY_MMPS      300.0f  // Linear speed during arc
-#define ARC_CENTRIPETAL_ACCEL_MMPS2 1500.0f // Centripetal limit
-#define ARC_TURN_RADIUS_MM                                                                         \
-    ((ARC_TURN_VELOCITY_MMPS * ARC_TURN_VELOCITY_MMPS) / ARC_CENTRIPETAL_ACCEL_MMPS2)
-#define ARC_90_DEGREE_LENGTH_MM          (ARC_TURN_RADIUS_MM * 1.5708f)
-#define ARC_45_DEGREE_LENGTH_MM          (ARC_TURN_RADIUS_MM * 0.7854f)
-#define ROBOT_MAX_SMOOTH_TURN_SPEED_MMPS 250.0f
+// ================ Maze Heading Hold =================== //
+// Competition maze-running can use the logical maze heading as a gentle
+// steering correction through the existing rotation PID. This is separate from
+// ToF wall steering: ToF may classify walls while heading hold uses IMU yaw to
+// keep the physical mouse aligned to N/NE/E/... headings.
+#define MAZE_HEADING_HOLD_ENABLE           1
+#define MAZE_HEADING_HOLD_KP_DEGPS_PER_DEG 3.0f
+#define MAZE_HEADING_HOLD_MAX_DEGPS        45.0f
 
-// Velocity profiles for path execution
-#define VELOCITY_PROFILE_STRAIGHT_MMPS 500.0f
-#define VELOCITY_PROFILE_TURN_MMPS     300.0f
+// ================ Blind Path Test Defaults ============= //
+// PATH defaults stay gentle so manually-entered race paths and RAW drivetrain
+// benchmarks start safely.
+#define CLI_PATH_SPEED_MMPS   180.0f
+#define CLI_PATH_ACCEL_MMPS2  700.0f
+#define CLI_PATH_OMEGA_DEGPS  240.0f
+#define CLI_PATH_ALPHA_DEGPS2 800.0f
 
-// ================= Completion Tolerances ================= //
-#define ROBOT_YAW_TOLERANCE_DEG        0.5f  // Turn completion (degrees)
-#define ROBOT_YAW_ERROR_THRESHOLD_DEG  0.5f  // Min error for correction
-#define ROBOT_STOPPING_DISTANCE_MM     2.0f  // Move completion (mm)
-#define ROBOT_STOPPING_VELOCITY_MMPS   50.0f // Stop velocity threshold
-#define ROBOT_TURN_STABILITY_DEGPS     3.0f  // Angular velocity for stable
-#define ARC_TURN_DISTANCE_TOLERANCE_MM 3.0f
-#define ARC_TURN_YAW_TOLERANCE_DEG     1.0f
-
-// ================= Control Limits ================= //
-#define ROBOT_MAX_WHEEL_SPEED_MMPS   800.0f // Absolute wheel speed limit
-#define ROBOT_MAX_YAW_DIFF_MMPS      300.0f // Max differential for yaw
-#define ROBOT_MIN_TURN_SPEED_MMPS    50.0f  // Min diff for turning
-#define ROBOT_MAX_DUTY               1.0f
-#define ROBOT_MAX_DUTY_SLEW_PER_SEC  10.0f
-#define ROBOT_MAX_VOLTS_SLEW_PER_SEC 60.0f
-
-// ================= Wall Calibration ================= //
-#define WALL_CONTACT_THRESHOLD_MM 30.0f // Distance indicating contact
-#define BACK_WALL_TO_CENTER_MM    90.0f // Back wall to cell center
+// =============== Completion Tolerances ================= //
+// Used by line_follower yaw-snap; main Motion now relies purely on profile.finished().
+#define ROBOT_YAW_TOLERANCE_DEG 0.5f
 
 #endif // CONFIG_MOTION_H

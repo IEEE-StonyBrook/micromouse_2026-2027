@@ -5,6 +5,7 @@
 
 #include "common/log.h"
 #include "common/utils.h"
+#include "config/motion.h"
 #include "drivers/battery.h"
 #include "drivers/encoder.h"
 #include "drivers/motor.h"
@@ -32,19 +33,14 @@ class Drivetrain
      * @param side Which wheel (WheelSide::LEFT or WheelSide::RIGHT)
      * @return Distance in millimeters
      */
-    float position(WheelSide side);
+    float   position(WheelSide side);
+    int32_t ticks(WheelSide side) const;
 
     /**
      * @brief Returns wheel velocity
      * @return Velocity in millimeters per second
      */
     float velocity(WheelSide side);
-
-    /**
-     * @brief Returns distance traveled since last call (incremental tracking)
-     * @return Distance delta in millimeters since last call
-     */
-    float delta(WheelSide side);
 
     /**
      * @brief Calculates feedforward duty cycle for target velocity and acceleration
@@ -54,29 +50,43 @@ class Drivetrain
     float feedforward(WheelSide side, float speed_mmps, float accel_mmps2 = 0.0f);
 
     /**
-     * @brief Updates velocity estimates from encoder readings
-     * @param dt Time step in seconds since last update
+     * @brief Overrides feedforward coefficients for runtime tuning (DriverLab)
+     *
+     * Sets both forward and reverse coefficients for the given wheel side.
      */
-    void update(float dt);
+    void setFeedforward(WheelSide side, float kv, float ks, float ka);
 
     /**
-     * @brief Sets motor duty cycles
+     * @brief Reads encoders, computes per-tick deltas and velocity estimates.
+     *        Runs on the fixed control tick — no dt argument.
      */
-    void setDuty(float left, float right);
+    void update();
+
+    /**
+     * @brief Average per-tick forward position delta in mm, since the last update().
+     *        This is the "measured_change" fed to the forward PD controller.
+     */
+    float fwdChangeMm() const { return fwd_change_mm_; }
+
+    /**
+     * @brief Per-tick yaw delta from the wheel difference, deg, positive CCW.
+     *        Same 8-tap averaged deltas as fwdChangeMm().
+     */
+    float rotChangeDeg() const { return rot_change_deg_; }
 
     /**
      * @brief Sets motor voltages (scaled by current battery voltage)
      */
     void setVoltage(float left_volts, float right_volts);
 
-    /**
-     * @brief Returns current battery voltage reading
-     */
-    float batteryVoltage() const;
-
     void stop();
 
   private:
+    // Returns current battery voltage; falls back to DEFAULT_BATTERY_VOLTAGE
+    // when no battery driver is wired (sim, bench testing). Consumed by
+    // setVoltage() to scale per-wheel volts.
+    float batteryVoltage() const;
+
     Motor*   left_motor_;
     Motor*   right_motor_;
     Encoder* left_encoder_;
@@ -89,8 +99,29 @@ class Drivetrain
     float left_velocity_mmps_  = 0.0f;
     float right_velocity_mmps_ = 0.0f;
 
-    float last_left_pos_mm_  = 0.0f;
-    float last_right_pos_mm_ = 0.0f;
+    // 8-tap moving average of per-tick deltas (mm) refreshed by update();
+    // consumed by Motion's PD loop via fwdChangeMm(). Mirrors
+    // ukmars/motorlab/src/encoders.h::m_fwd_change.
+    float fwd_change_mm_  = 0.0f;
+    float rot_change_deg_ = 0.0f;
+
+    // 8-tap moving averager state, mirroring ukmars/motorlab/src/encoders.h.
+    // Operates on integer tick deltas so the ring buffer can store int8_t
+    // exactly; conversion to mm happens after averaging. Same window for
+    // both wheels keeps fwd_change_mm_ consistent with the per-wheel
+    // velocities.
+    int8_t left_history_[ENCODER_AVERAGER_LENGTH]  = {};
+    int8_t right_history_[ENCODER_AVERAGER_LENGTH] = {};
+    int    left_history_total_                     = 0;
+    int    right_history_total_                    = 0;
+    int    averager_index_                         = 0;
+
+    // Feedforward coefficients (initialized from config, mutable for tuning)
+    struct FFCoeffs
+    {
+        float kv, ks, ka;
+    };
+    FFCoeffs ff_fwd_left_, ff_fwd_right_;
 };
 
 #endif

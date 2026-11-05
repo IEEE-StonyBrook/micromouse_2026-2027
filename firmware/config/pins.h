@@ -10,38 +10,58 @@
 
 // ================= Motor Pins ================= //
 // Left motor (TB6552FNG + hardware inverter)
-#define PIN_MOTOR_L_DIR 2 // Left motor direction (CTRL → inverter → IN1/IN2)
-#define PIN_MOTOR_L_PWM 3 // Left motor speed PWM
+#define PIN_MOTOR_L_DIR 6 // Left motor direction (CTRL → inverter → IN1/IN2)
+#define PIN_MOTOR_L_PWM 7 // Left motor speed PWM
 
 // Right motor (TB6552FNG + hardware inverter)
-#define PIN_MOTOR_R_DIR 6 // Right motor direction (CTRL → inverter → IN1/IN2)
-#define PIN_MOTOR_R_PWM 7 // Right motor speed PWM
+#define PIN_MOTOR_R_DIR 2 // Right motor direction (CTRL → inverter → IN1/IN2)
+#define PIN_MOTOR_R_PWM 3 // Right motor speed PWM
 
 // ================= Encoder Pins ================= //
 // Quadrature encoders (PIO-driven)
-#define PIN_ENCODER_L 20 // Left encoder channel A (B is next pin)
-#define PIN_ENCODER_R 8  // Right encoder channel A (B is next pin)
+#define PIN_ENCODER_L_A 0  // Left encoder channel A (OUT_A_1)
+#define PIN_ENCODER_L_B 1  // Left encoder channel B (OUT_B_1)
+#define PIN_ENCODER_R_A 10 // Right encoder channel A (OUT_A_2)
+#define PIN_ENCODER_R_B 11 // Right encoder channel B (OUT_B_2)
 
 // ================= IMU Pins ================= //
 // BNO085 IMU (UART RVC mode)
-#define PIN_IMU_RX 5 // IMU UART receive (TX from IMU)
+#define PIN_IMU_RX 9 // IMU UART receive (TX from IMU)
 
 // ================= ToF Sensor Pins ================= //
-// VL53L0X Time-of-Flight sensors (I2C with XSHUT control)
-#define PIN_TOF_LEFT_XSHUT  2 // Left ToF shutdown
-#define PIN_TOF_FRONT_XSHUT 3 // Front ToF shutdown
-#define PIN_TOF_RIGHT_XSHUT 4 // Right ToF shutdown
+// VL53L0X Time-of-Flight sensors (I2C0: GP4=SDA, GP5=SCL).
+// All three sensors are wired and live; main.cpp instantiates each one and
+// the COMP-mode gesture detector reads all three. The `(not connected)`
+// comments that used to live here were stale.
+#define PIN_TOF_LEFT_XSHUT  8  // Left ToF shutdown
+#define PIN_TOF_FRONT_XSHUT 29 // Front ToF shutdown
+#define PIN_TOF_RIGHT_XSHUT 15 // Right ToF shutdown
+// We don't use the INTERRUPT PINS for the ToF yet.
+// They are wired to GP14, 26, 27 for future development.
+
+// ================= Panic-Abort Button ================= //
+// The Waveshare RP2040-Zero BOOTSEL button is reused at runtime as the
+// competition panic-abort. It is read via a brief XIP-suspend trick (see
+// firmware/app/bootsel_button.cpp) rather than via a GPIO pin. No GPIO is
+// reserved for it. If a larger external abort button is later added, GPIO
+// 14, 26, or 27 are the practical candidates (currently unused).
 
 // ================= Battery Monitor Pins ================= //
-#define PIN_BATTERY_ADC 26 // ADC0 for battery voltage divider
+#define PIN_BATTERY_ADC 28 // ADC0 for battery voltage divider
 
 // ================= Bluetooth Pins ================= //
 // HC-05/06 Bluetooth module (UART0)
-#define PIN_BT_TX 0 // Bluetooth transmit
-#define PIN_BT_RX 1 // Bluetooth receive
+#define PIN_BT_TX 12 // Bluetooth transmit
+#define PIN_BT_RX 13 // Bluetooth receive
+
+// ================= Cheese Hunt IR Pins ================= //
+// Cheese Hunt disables Bluetooth and reuses GP12/GP13 for the beacon
+// handshake. Do not enable Bluetooth in that boot mode.
+#define PIN_IR_EMITTER  12 // IR LED output burst to deactivate beacon
+#define PIN_IR_RECEIVER 13 // Active-low IR receiver input from beacon
 
 // ================= Line Sensor Pins (I2C0) ================= //
-#define PIN_LINE_SDA 0 // I2C0 SDA
-#define PIN_LINE_SCL 1 // I2C0 SCL
+#define PIN_LINE_SDA 4 // I2C0 SDA
+#define PIN_LINE_SCL 5 // I2C0 SCL
 
 #endif // CONFIG_PINS_H

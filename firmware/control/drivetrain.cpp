@@ -4,34 +4,68 @@
 #include <string>
 
 #include "config/config.h"
+#include "config/motion.h"
 
 Drivetrain::Drivetrain(Motor* left_motor, Motor* right_motor, Encoder* left_encoder,
                        Encoder* right_encoder, Battery* battery)
     : left_motor_(left_motor), right_motor_(right_motor), left_encoder_(left_encoder),
-      right_encoder_(right_encoder), battery_(battery)
+      right_encoder_(right_encoder), battery_(battery),
+      ff_fwd_left_{FORWARD_KVL, FORWARD_KSL, FORWARD_KAL},
+      ff_fwd_right_{FORWARD_KVR, FORWARD_KSR, FORWARD_KAR}
 {
 }
 
 void Drivetrain::reset()
 {
-    left_encoder_->reset();
-    right_encoder_->reset();
+    if (left_encoder_)
+    {
+        left_encoder_->reset();
+        prev_left_ticks_ = left_encoder_->ticks();
+    }
+    else
+    {
+        prev_left_ticks_ = 0;
+    }
 
-    prev_left_ticks_  = left_encoder_->ticks();
-    prev_right_ticks_ = right_encoder_->ticks();
+    if (right_encoder_)
+    {
+        right_encoder_->reset();
+        prev_right_ticks_ = right_encoder_->ticks();
+    }
+    else
+    {
+        prev_right_ticks_ = 0;
+    }
+
+    for (int i = 0; i < ENCODER_AVERAGER_LENGTH; i++)
+    {
+        left_history_[i]  = 0;
+        right_history_[i] = 0;
+    }
+    left_history_total_  = 0;
+    right_history_total_ = 0;
+    averager_index_      = 0;
 
     left_velocity_mmps_  = 0.0f;
     right_velocity_mmps_ = 0.0f;
 
-    last_left_pos_mm_  = 0.0f;
-    last_right_pos_mm_ = 0.0f;
+    fwd_change_mm_  = 0.0f;
+    rot_change_deg_ = 0.0f;
 }
 
 float Drivetrain::position(WheelSide side)
 {
-    bool is_left    = (side == WheelSide::LEFT);
-    int  tick_count = is_left ? left_encoder_->ticks() : right_encoder_->ticks();
-    return tick_count * MM_PER_TICK;
+    bool     is_left = (side == WheelSide::LEFT);
+    Encoder* enc     = is_left ? left_encoder_ : right_encoder_;
+    if (!enc)
+        return 0.0f;
+    return enc->ticks() * (is_left ? MM_PER_TICK_LEFT : MM_PER_TICK_RIGHT);
+}
+
+int32_t Drivetrain::ticks(WheelSide side) const
+{
+    Encoder* enc = (side == WheelSide::LEFT) ? left_encoder_ : right_encoder_;
+    return enc != nullptr ? enc->ticks() : 0;
 }
 
 float Drivetrain::velocity(WheelSide side)
@@ -39,74 +73,77 @@ float Drivetrain::velocity(WheelSide side)
     return (side == WheelSide::LEFT) ? left_velocity_mmps_ : right_velocity_mmps_;
 }
 
-float Drivetrain::delta(WheelSide side)
-{
-    float  current_pos = position(side);
-    float& last_pos    = (side == WheelSide::LEFT) ? last_left_pos_mm_ : last_right_pos_mm_;
-    float  d           = current_pos - last_pos;
-    last_pos           = current_pos;
-    return d;
-}
-
 float Drivetrain::feedforward(WheelSide side, float speed_mmps, float accel_mmps2)
 {
-    if (std::fabs(speed_mmps) < DRIVETRAIN_FF_DEADZONE_MMPS)
-        return 0.0f;
+    bool            is_left = (side == WheelSide::LEFT);
+    const FFCoeffs& c       = is_left ? ff_fwd_left_ : ff_fwd_right_;
 
-    bool is_left = (side == WheelSide::LEFT);
-
+    // Mazerunner shape: KV*v + sign(v)*KS + KA*a, with no deadzone.
+    // KS is zero-d only when v is exactly 0 (stationary hold). At any nonzero
+    // command the static-friction term must be present, otherwise low-speed
+    // commands produce zero motor voltage and the wheel stalls.
+    float ks_term = 0.0f;
     if (speed_mmps > 0.0f)
-    {
-        float kv = is_left ? FORWARD_KVL : FORWARD_KVR;
-        float ks = is_left ? FORWARD_KSL : FORWARD_KSR;
-        float ka = is_left ? FORWARD_KAL : FORWARD_KAR;
-        return kv * speed_mmps + ks + ka * accel_mmps2;
-    }
+        ks_term = c.ks;
+    else if (speed_mmps < 0.0f)
+        ks_term = -c.ks;
+    return c.kv * speed_mmps + ks_term + c.ka * accel_mmps2;
+}
+
+void Drivetrain::setFeedforward(WheelSide side, float kv, float ks, float ka)
+{
+    if (side == WheelSide::LEFT)
+        ff_fwd_left_ = {kv, ks, ka};
     else
-    {
-        float kv = is_left ? REVERSE_KVL : REVERSE_KVR;
-        float ks = is_left ? REVERSE_KSL : REVERSE_KSR;
-        float ka = is_left ? REVERSE_KAL : REVERSE_KAR;
-        return kv * speed_mmps - ks + ka * accel_mmps2;
-    }
+        ff_fwd_right_ = {kv, ks, ka};
 }
 
-void Drivetrain::update(float dt)
+void Drivetrain::update()
 {
-    if (dt < DRIVETRAIN_MIN_DT)
-        return;
+    int d_left  = 0;
+    int d_right = 0;
 
-    int32_t curr_left  = left_encoder_->ticks();
-    int32_t curr_right = right_encoder_->ticks();
-
-    int32_t d_left  = curr_left - prev_left_ticks_;
-    int32_t d_right = curr_right - prev_right_ticks_;
-
-    prev_left_ticks_  = curr_left;
-    prev_right_ticks_ = curr_right;
-
-    left_velocity_mmps_  = (d_left * MM_PER_TICK) / dt;
-    right_velocity_mmps_ = (d_right * MM_PER_TICK) / dt;
-
-    if (left_velocity_mmps_ > DRIVETRAIN_MAX_VELOCITY_MMPS ||
-        right_velocity_mmps_ > DRIVETRAIN_MAX_VELOCITY_MMPS)
+    if (left_encoder_)
     {
-        LOG_ERROR("Velocity spike: L=" + std::to_string(left_velocity_mmps_) +
-                  " R=" + std::to_string(right_velocity_mmps_) + " mm/s");
+        int32_t curr_left = left_encoder_->ticks();
+        d_left            = static_cast<int>(curr_left - prev_left_ticks_);
+        prev_left_ticks_  = curr_left;
     }
-}
+    if (right_encoder_)
+    {
+        int32_t curr_right = right_encoder_->ticks();
+        d_right            = static_cast<int>(curr_right - prev_right_ticks_);
+        prev_right_ticks_  = curr_right;
+    }
 
-void Drivetrain::setDuty(float left, float right)
-{
-    left_motor_->applyDuty(left);
-    right_motor_->applyDuty(right);
+    // 8-tap moving averager — drop the oldest sample at this index, add the
+    // newest. Mirrors ukmars/motorlab/src/encoders.h::update(). Both the PD's
+    // measured_change input (fwdChangeMm()) and external velocity observers
+    // see the smoothed value.
+    left_history_total_ -= left_history_[averager_index_];
+    right_history_total_ -= right_history_[averager_index_];
+    left_history_total_ += d_left;
+    right_history_total_ += d_right;
+    left_history_[averager_index_]  = static_cast<int8_t>(d_left);
+    right_history_[averager_index_] = static_cast<int8_t>(d_right);
+    averager_index_                 = (averager_index_ + 1) % ENCODER_AVERAGER_LENGTH;
+
+    constexpr float inv_avg = 1.0f / static_cast<float>(ENCODER_AVERAGER_LENGTH);
+    const float left_change = static_cast<float>(left_history_total_) * inv_avg * MM_PER_TICK_LEFT;
+    const float right_change =
+        static_cast<float>(right_history_total_) * inv_avg * MM_PER_TICK_RIGHT;
+
+    left_velocity_mmps_  = left_change / LOOP_INTERVAL_S;
+    right_velocity_mmps_ = right_change / LOOP_INTERVAL_S;
+    fwd_change_mm_       = 0.5f * (left_change + right_change);
+    rot_change_deg_      = (right_change - left_change) * DEG_PER_MM_DIFFERENCE;
 }
 
 void Drivetrain::setVoltage(float left_volts, float right_volts)
 {
     float batt = batteryVoltage();
-    left_motor_->applyVoltage(left_volts, batt);
-    right_motor_->applyVoltage(right_volts, batt);
+    left_motor_->set_motor_volts(left_volts, batt);
+    right_motor_->set_motor_volts(right_volts, batt);
 }
 
 float Drivetrain::batteryVoltage() const

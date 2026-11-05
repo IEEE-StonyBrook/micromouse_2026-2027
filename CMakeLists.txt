@@ -11,9 +11,9 @@ if(WIN32)
 else()
     set(USERHOME $ENV{HOME})
 endif()
-set(sdkVersion 2.2.0)
+set(sdkVersion 2.3.0)
 set(toolchainVersion 14_2_Rel1)
-set(picotoolVersion 2.2.0-a4)
+set(picotoolVersion 2.3.0)
 set(picoVscode ${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake)
 if (EXISTS ${picoVscode})
     include(${picoVscode})
@@ -37,19 +37,20 @@ set(DRIVER_SOURCES
     firmware/drivers/tof.cpp
     firmware/drivers/battery.cpp
     firmware/drivers/line_sensor.cpp
+    firmware/drivers/beacon_ir.cpp
 )
 
 set(CONTROL_SOURCES
     firmware/control/pid.cpp
     firmware/control/profile.cpp
     firmware/control/drivetrain.cpp
-    firmware/control/robot.cpp
+    firmware/control/motion.cpp
     firmware/control/line_follower.cpp
 )
 
 set(MAZE_SOURCES
     firmware/maze/maze.cpp
-    firmware/maze/mouse.cpp
+    firmware/maze/maze_mouse.cpp
 )
 
 set(NAVIGATION_SOURCES
@@ -62,17 +63,23 @@ set(NAVIGATION_SOURCES
 
 set(APP_SOURCES
     firmware/app/bluetooth.cpp
-    firmware/app/api.cpp
+    firmware/app/mouse.cpp
+    firmware/app/firmware_mouse.cpp
+    firmware/app/start_gesture.cpp
+    firmware/app/cli.cpp
+    firmware/app/bootsel_button.cpp
+    firmware/app/leds.cpp
 )
 
-set(MOTOR_LAB_SOURCES
-    firmware/motor_lab/motor_lab.cpp
-    firmware/motor_lab/profile.cpp
-    firmware/motor_lab/reporter.cpp
-    firmware/motor_lab/settings.cpp
+set(DRIVER_LAB_SOURCES
+    firmware/driver_lab/driver_lab.cpp
+    firmware/driver_lab/profile.cpp
+    firmware/driver_lab/reporter.cpp
+    firmware/driver_lab/settings.cpp
 )
 
 set(COMMON_SOURCES
+    firmware/common/breadcrumb.cpp
     firmware/common/log.cpp
 )
 
@@ -83,10 +90,12 @@ add_executable(Jurababa
     ${MAZE_SOURCES}
     ${NAVIGATION_SOURCES}
     ${APP_SOURCES}
-    ${MOTOR_LAB_SOURCES}
+    ${DRIVER_LAB_SOURCES}
     ${COMMON_SOURCES}
     firmware/main.cpp
 )
+
+pico_generate_pio_header(Jurababa ${CMAKE_CURRENT_LIST_DIR}/firmware/drivers/ws2812.pio)
 
 # Define PICO_BUILD for conditional compilation
 target_compile_definitions(Jurababa PRIVATE PICO_BUILD)
@@ -94,14 +103,8 @@ target_compile_definitions(Jurababa PRIVATE PICO_BUILD)
 pico_set_program_name(Jurababa "Jurababa")
 pico_set_program_version(Jurababa "1.0")
 
-# Configure UART stdio pins for HM-10 Bluetooth (GP16=TX, GP17=RX)
-target_compile_definitions(Jurababa PRIVATE
-    PICO_DEFAULT_UART=0
-    PICO_DEFAULT_UART_TX_PIN=16
-    PICO_DEFAULT_UART_RX_PIN=17
-)
-
-# USB only - UART will be handled manually in MotorLab at 9600 baud
+# USB only. Bluetooth UART is owned manually by firmware/app/bluetooth.cpp and
+# DriverLab's stdio mirror, using PIN_BT_TX/PIN_BT_RX from config/pins.h.
 pico_enable_stdio_uart(Jurababa 0)
 pico_enable_stdio_usb(Jurababa 1)
 
@@ -111,6 +114,7 @@ add_subdirectory(third_party/vl53l0x_api_rp2040)
 # Link libraries
 target_link_libraries(Jurababa
     pico_stdlib
+    hardware_clocks
     hardware_gpio
     hardware_pio
     hardware_pwm
@@ -120,7 +124,6 @@ target_link_libraries(Jurababa
     hardware_adc
     hardware_spi
     vl53l0x_api_rp2040
-    pico_multicore
 )
 
 # Include directories

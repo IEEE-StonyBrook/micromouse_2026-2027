@@ -7,15 +7,82 @@
 
 // ================= ToF Sensor Configuration ================= //
 // VL53L0X timing and measurement settings
-#define TOF_TIMING_BUDGET_US      20000 // Measurement time budget (µs)
-#define TOF_MEASUREMENT_PERIOD_MS 30    // Inter-measurement period (ms)
-#define TOF_MAX_RANGE_MM          500   // Maximum reliable range (mm)
+#define TOF_TIMING_BUDGET_US      20000   // Measurement time budget (µs)
+#define TOF_MEASUREMENT_PERIOD_MS 20      // Match timing budget for 50Hz updates
+#define TOF_MAX_RANGE_MM          500     // Maximum reliable range (mm)
+#define TOF_OUT_OF_RANGE_MM       8191.0f // VL53L0X invalid/open-space sentinel
 
-// Wall detection thresholds (mm)
-#define TOF_LEFT_WALL_THRESHOLD_MM  100
-#define TOF_RIGHT_WALL_THRESHOLD_MM 100
-#define TOF_FRONT_WALL_THRESHOLD_MM 120
-#define TOF_CELL_DEPTH_TO_CHECK_MM  40
+// Median-of-3 filter for the hardware mouse ToF polling path. At 50 Hz this
+// rejects a single bad sample while clearing a vanished wall after two fresh
+// open readings (~40 ms, about 20 mm at 500 mm/s search speed).
+#define TOF_FILTER_WINDOW      3
+#define TOF_WALL_HYSTERESIS_MM 20.0f
+
+// UKMARS mazerunner-core SIDE_NOMINAL pattern. Each side's raw mm reading
+// at the centered-between-walls pose is captured here as a constant. The
+// per-side scale factors normalize both sides to TOF_SIDE_NOMINAL so that
+// downstream CTE math operates on a single symmetric unit, regardless of
+// per-unit chip bias, mounting angle, or cover thickness.
+//
+// To recalibrate (after sensor swap or remount):
+//   1. Boot DriverLab (press 'M' within 3 s of boot).
+//   2. Center robot between two walls (1 mm symmetry is the goal; use
+//      spacers if needed).
+//   3. Run LTOF and RTOF — note the printed mm values.
+//   4. Update TOF_LEFT_CALIBRATION_MM and TOF_RIGHT_CALIBRATION_MM here.
+//   5. Rebuild, flash. Same centered pose should now produce ~0
+//      side_error_norm (verify via S snapshot or steering CSV).
+//
+// The chip-level offset bias (±10–30 mm typical per ST UM2039) is fully
+// absorbed by the scale: any value the chip outputs at the centered pose
+// becomes "100" after multiplication. We don't need accurate mm; we need
+// symmetric normalized units, which compile-time scaling delivers for free.
+#define TOF_SIDE_NOMINAL         100.0f
+#define TOF_LEFT_CALIBRATION_MM  75.5f // Mean of 10 S reads, centred to 1 mm (2026-10-09)
+#define TOF_RIGHT_CALIBRATION_MM 82.6f // Mean of 10 S reads; 10 mm offset moved L -11.8, R +10.3
+#define TOF_LEFT_SCALE           (TOF_SIDE_NOMINAL / TOF_LEFT_CALIBRATION_MM)
+#define TOF_RIGHT_SCALE          (TOF_SIDE_NOMINAL / TOF_RIGHT_CALIBRATION_MM)
+
+// Wall-detection thresholds stay in raw chip-mm. Side thresholds classify the
+// adjacent cell walls. The front threshold is the SEARCH mapping threshold at
+// SENSING_POSITION_MM, and is intentionally separate from the smooth-turn
+// front trigger and the front-wall centering reference.
+#define TOF_SIDE_WALL_MARGIN_MM     50.0f
+#define TOF_LEFT_WALL_THRESHOLD_MM  (TOF_LEFT_CALIBRATION_MM + TOF_SIDE_WALL_MARGIN_MM)
+#define TOF_RIGHT_WALL_THRESHOLD_MM (TOF_RIGHT_CALIBRATION_MM + TOF_SIDE_WALL_MARGIN_MM)
+// At the sensing point a wall at the far end of the next cell reads ~148 mm
+// stationary (+~12 mm of ToF lag at 300 mm/s); one a cell further reads
+// >=328 mm. 190 sat inside that spread: a search read 193 and drove into
+// the wall. 250 is the midpoint, tolerant of +-40 mm of position error.
+#define TOF_FRONT_WALL_THRESHOLD_MM 250.0f
+
+// Front ToF model for the search's odometry check (SEARCH MAP fwd[...]):
+// reading = GAIN * (wall face - position) - OFFSET + v * FRONT_TOF_LAG_S,
+// position in the cell frame (axle reference). Fit to 6 stationary reads at
+// ruler-measured 182-289 mm (2026-10-10), residuals within 5 mm: the VL53L0X
+// over-reads distance by ~17%, so a single offset is only right at one range.
+#define FRONT_TOF_GAIN      1.166f
+#define FRONT_TOF_OFFSET_MM 85.1f
+#define FRONT_TOF_LAG_S     0.04f // ~12 mm at 300 mm/s
+
+// UKMARS-style wall steering. Wall detection remains enabled regardless of
+// this switch; TOF_STEERING_ENABLE only controls whether side-wall error is
+// injected into the rotation PID. Search also keeps IMU heading hold active,
+// so ToF steering should stay gentle and be treated as lateral trim. At 1.0 /
+// 10 deg/s it sat saturated for a whole cell after every smooth turn (39% of
+// straight samples, 2026-10-10); mazerunner's limit is 90. Raised to re-centre
+// within about half a cell, still gentle enough for the ToF's 40-60 ms lag.
+//
+// Jurababa yaw/omega convention: positive yaw = CCW (left), so a positive
+// side_error_norm (drifted right of center) commands a positive omega
+// (steer left). Sign matches the IMU's IMU_YAW_SIGN inversion done once
+// in the driver layer.
+#define TOF_STEERING_ENABLE                 1
+#define TOF_STEERING_KP_DEGPS_PER_NOMINAL   2.0f
+#define TOF_STEERING_KD_DEG_PER_NOMINAL     0.0f
+#define TOF_STEERING_ADJUST_LIMIT_DEGPS     30.0f
+#define TOF_STEERING_SIDE_MARGIN_MM         20.0f // steer only within this of centred
+#define TOF_FRONT_WALL_RELIABILITY_LIMIT_MM 160.0f
 
 // ================= IMU Configuration ================= //
 // BNO085 UART settings
@@ -26,31 +93,94 @@
 #define IMU_STOP_BITS 1
 #define IMU_PARITY    UART_PARITY_NONE
 
-// BNO085 RVC packet format
+// BNO085 RVC packet format (19 bytes total)
+// Byte layout: [0xAA][0xAA][Index][YawL][YawH][PitchL][PitchH][RollL][RollH]...
 #define IMU_PACKET_LEN   19 // Total packet bytes
 #define IMU_IDX_HDR0     0  // Header byte 0 (0xAA)
-#define IMU_IDX_HDR1     1  // Report ID (0x01)
-#define IMU_IDX_YAW_L    2  // Yaw low byte
-#define IMU_IDX_YAW_H    3  // Yaw high byte
-#define IMU_IDX_PITCH_L  4
-#define IMU_IDX_PITCH_H  5
-#define IMU_IDX_ROLL_L   6
-#define IMU_IDX_ROLL_H   7
-#define IMU_CHKSUM_FIRST 2   // First checksum byte index
+#define IMU_IDX_HDR1     1  // Header byte 1 (0xAA in RVC mode)
+#define IMU_IDX_INDEX    2  // Packet index/sequence byte (skip this for data)
+#define IMU_IDX_YAW_L    3  // Yaw low byte (was 2 - WRONG!)
+#define IMU_IDX_YAW_H    4  // Yaw high byte (was 3 - WRONG!)
+#define IMU_IDX_PITCH_L  5
+#define IMU_IDX_PITCH_H  6
+#define IMU_IDX_ROLL_L   7
+#define IMU_IDX_ROLL_H   8
+#define IMU_CHKSUM_FIRST 2   // First checksum byte index (includes index byte)
 #define IMU_CHKSUM_LAST  17  // Last checksum byte index
 #define IMU_IDX_CHECKSUM 18  // Checksum byte index
-#define IMU_HDR0         170 // Expected header (0xAA)
+#define IMU_HDR0         170 // Expected header byte 0 (0xAA)
+#define IMU_HDR1         170 // Expected header byte 1 (0xAA) - RVC uses 0xAA 0xAA
 
 // IMU processing
 #define IMU_RAW_TO_DEGREES_DIVISOR 100.0f
 
-// ================= Angular Velocity Filtering ================= //
-#define SENSORS_ANGULAR_VEL_FILTER_ALPHA 0.7f
+// BNO085 RVC packet rate. The chip emits packets at exactly 100 Hz; this is
+// the authoritative cadence for omega estimation (delta_yaw * IMU_PACKET_HZ),
+// NOT LOOP_FREQUENCY_HZ. Reading omega at the loop rate aliases the signal —
+// 4 out of 5 ticks see "no change since last packet" and report 0.
+#define IMU_PACKET_HZ 100.0f
+
+// IMU yaw sign convention.
+// Positive yaw must mean CCW (left turn) to match the rotation controller:
+// left = forward - rotation, right = forward + rotation, where positive
+// rotation_output spins the robot CCW. On this board the BNO085 is mounted
+// such that CCW reads as negative on the chip, so we invert here once at the
+// driver layer. Set to +1.0f if a future board mounts the IMU upright.
+#define IMU_YAW_SIGN (-1.0f)
+
+// ================= IMU Filtering ================= //
+// Outlier guard: drop packets whose raw yaw step exceeds this. 20° per 10 ms =
+// 2000°/s, which is past any physical turn rate Jurababa can produce — so any
+// jump larger than this is a UART/I2C glitch, not motion.
+#define IMU_MAX_YAW_DELTA_PER_SAMPLE 20.0f
+
+// Moving-average window over per-packet yaw deltas. Mirrors the encoder path's
+// IMU_DELTA_AVG_LENGTH = 1: passthrough, no averaging.
+//
+// Rationale: the encoder MA exists for *quantization* (per-tick encoder count
+// is coarse). The IMU's per-packet yaw delta is 0.01° resolution and arrives
+// pre-fused from the BNO085's internal Kalman filter — there's little raw
+// noise left for an MA to reject, and a 4-tap MA at 100 Hz cost us 15 ms of
+// group delay (vs UKMARS' 7 ms encoder MA at 500 Hz). With the rotation PD
+// now single-rate at 500 Hz consuming `omega * dt`, the held-flat ZOH on
+// rate already smooths the differential mixer; explicit MA on top of that
+// is double-filtering. Re-raise to 2 if turn traces show packet-boundary
+// jitter that costs more KP than the lag does. The ring buffer code below
+// handles any N ≥ 1 correctly — no code change needed beyond this constant.
+#define IMU_DELTA_AVG_LENGTH 1
 
 // ================= Line Sensor Configuration ================= //
-#define LINE_SENSOR_COUNT             8
-#define LINE_SENSOR_I2C_ADDR          0x38
-#define LINE_SENSOR_I2C_BAUD          100000
-#define LINE_INTERSECTION_DEBOUNCE_MS 50
+#define LINE_SENSOR_COUNT              8
+#define LINE_SENSOR_I2C_ADDR           0x12 // YahBoom 8-channel sensor
+#define LINE_SENSOR_DATA_REG           0x30 // Sensor data register
+#define LINE_SENSOR_I2C_BAUD           100000
+#define LINE_INTERSECTION_DEBOUNCE_MS  50
+#define LINE_INTERSECTION_WINDOW_MS    80
+#define LINE_INTERSECTION_LEFT_MASK    0x03
+#define LINE_INTERSECTION_FORWARD_MASK 0x18
+#define LINE_INTERSECTION_RIGHT_MASK   0xC0
+#define LINE_FOLLOW_ROUTE              "LFRFL"
+
+// Yahboom 8-channel I2C digital mode reports one bit per probe. Bench LINCON
+// testing with Jurababa's mounted sensor showed:
+//   bit 0 / X8 = leftmost probe  = position -3.5
+//   bit 7 / X1 = rightmost probe = position +3.5
+//
+// Current testing track: black line on white surface. In that setup the line
+// bit is active-high on our module, so LINE_SENSOR_ACTIVE_LOW remains 0.
+// Competition track: white line on black/darker surface. Repeat LINCON on the
+// competition material; if the dark background reports active and the white
+// line reports inactive, flip this to 1 before motor tests.
+#define LINE_SENSOR_ACTIVE_LOW 0
+
+// ================= Cheese Hunt IR Beacon ================= //
+// Matches the known-good Pico beacon test: the mouse listens for an active-low
+// 23-27 ms pulse, then sends a 1000-cycle ~40 kHz burst to deactivate it.
+#define BEACON_IR_BURST_CYCLES       1000
+#define BEACON_IR_BURST_HIGH_US      12
+#define BEACON_IR_BURST_LOW_US       12
+#define BEACON_IR_MIN_PULSE_US       23000
+#define BEACON_IR_MAX_PULSE_US       27000
+#define BEACON_IR_POST_DETECT_LOG_MS 10
 
 #endif // CONFIG_SENSORS_H

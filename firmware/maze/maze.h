@@ -4,26 +4,61 @@
 #include <string>
 #include <vector>
 
+enum WallState
+{
+    EXIT    = 0,
+    WALL    = 1,
+    UNKNOWN = 2,
+    VIRTUAL = 3,
+};
+
+enum MazeMask
+{
+    MASK_OPEN   = 0x01,
+    MASK_CLOSED = 0x03,
+};
+
+struct WallInfo
+{
+    WallState north = UNKNOWN;
+    WallState east  = UNKNOWN;
+    WallState south = UNKNOWN;
+    WallState west  = UNKNOWN;
+};
+
 /**
  * @brief Represents a single cell in the maze
  *
  * Tracks wall presence, exploration status, and pathfinding state.
- * NOTE: Phase 4 will convert this to Maze::Cell nested struct.
  */
 class Cell
 {
   public:
     Cell(int x, int y);
 
-    int  x() const;
-    int  y() const;
-    bool explored() const;
-    bool hasWall(char direction) const; // 'N', 'E', 'S', 'W'
-    int  wallCount() const;
+    int       x() const;
+    int       y() const;
+    bool      explored() const;
+    bool      hasWall(char direction) const; // 'N', 'E', 'S', 'W'
+    bool      isExit(char direction, MazeMask mask = MASK_OPEN) const;
+    bool      hasUnknownWalls() const;
+    WallState wallState(char direction) const;
+    WallInfo  walls() const;
+    int       wallCount() const;
 
     void markExplored();
     void setNeighbor(Cell* cell, char direction);
     void setWall(char direction);
+    void setExit(char direction);
+    void updateWallState(char direction, WallState state);
+    void update_wall_state(char direction, WallState state);
+    void set_wall_state(char direction, WallState state);
+    void reset();
+
+    // Direct write of the cell's wall and explored fields used by
+    // Maze::restore(). Bypasses neighbor propagation because the snapshot
+    // already captured both sides of every shared wall.
+    void loadSnapshot(const WallInfo& walls, bool explored);
 
     static bool equal(Cell* c1, Cell* c2);
 
@@ -33,16 +68,28 @@ class Cell
     void  clearPathfindingState();
 
   private:
-    void addWall(char direction);
+    void setWallStateLocal(char direction, WallState state);
+    bool shouldUpdate(char direction) const;
 
-    int   x_, y_;
-    Cell* north_;
-    Cell* east_;
-    Cell* south_;
-    Cell* west_;
-    bool  wall_north_, wall_east_, wall_south_, wall_west_;
-    bool  explored_;
+    int      x_, y_;
+    Cell*    north_;
+    Cell*    east_;
+    Cell*    south_;
+    Cell*    west_;
+    WallInfo walls_;
+    bool     explored_;
 };
+
+/**
+ * @brief Per-cell wall and explored state captured by Maze::snapshot.
+ */
+struct CellSnapshot
+{
+    WallInfo walls;
+    bool     explored = false;
+};
+
+using MazeSnapshot = std::vector<std::vector<CellSnapshot>>;
 
 /**
  * @brief Maze graph with wall tracking and neighbor queries
@@ -56,9 +103,19 @@ class Maze
     Cell*              cell(int x, int y);
     std::vector<Cell*> neighbors(Cell* cell, bool include_diagonal = false);
 
-    int  width() const;
-    int  height() const;
-    void printASCII();
+    int      width() const;
+    int      height() const;
+    void     reset();
+    void     printASCII();
+    void     setMask(MazeMask mask);
+    MazeMask mask() const;
+
+    // Capture every cell's walls and explored flag so a later restore() can
+    // discard wall data added between snapshot and restore — used when a
+    // competition run is aborted mid-flight (BOOTSEL) so unreliable walls
+    // logged with a corrupted pose don't poison data from earlier runs.
+    MazeSnapshot snapshot() const;
+    void         restore(const MazeSnapshot& snap);
 
   private:
     void createCells();
@@ -68,6 +125,7 @@ class Maze
     std::string rowString(int row);
 
     std::vector<std::vector<Cell*>> cells_;
+    MazeMask                        mask_ = MASK_OPEN;
 };
 
 #endif

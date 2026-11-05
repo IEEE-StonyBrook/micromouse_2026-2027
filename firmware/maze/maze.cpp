@@ -7,9 +7,8 @@
 // ============================================================
 
 Cell::Cell(int x, int y)
-    : x_(x), y_(y), north_(nullptr), east_(nullptr), south_(nullptr), west_(nullptr),
-      wall_north_(false), wall_east_(false), wall_south_(false), wall_west_(false),
-      explored_(false), parent(nullptr), processed(false)
+    : parent(nullptr), processed(false), x_(x), y_(y), north_(nullptr), east_(nullptr),
+      south_(nullptr), west_(nullptr), explored_(false)
 {
 }
 
@@ -28,35 +27,56 @@ bool Cell::explored() const
 
 bool Cell::hasWall(char direction) const
 {
+    return wallState(direction) == WALL;
+}
+
+bool Cell::isExit(char direction, MazeMask mask) const
+{
+    return (wallState(direction) & mask) == EXIT;
+}
+
+bool Cell::hasUnknownWalls() const
+{
+    return walls_.north == UNKNOWN || walls_.east == UNKNOWN || walls_.south == UNKNOWN ||
+           walls_.west == UNKNOWN;
+}
+
+WallState Cell::wallState(char direction) const
+{
     switch (direction)
     {
         case 'N':
         case 'n':
-            return wall_north_;
+            return walls_.north;
         case 'E':
         case 'e':
-            return wall_east_;
+            return walls_.east;
         case 'S':
         case 's':
-            return wall_south_;
+            return walls_.south;
         case 'W':
         case 'w':
-            return wall_west_;
+            return walls_.west;
         default:
-            return false;
+            return WALL;
     }
+}
+
+WallInfo Cell::walls() const
+{
+    return walls_;
 }
 
 int Cell::wallCount() const
 {
     int count = 0;
-    if (wall_north_)
+    if (walls_.north == WALL)
         count++;
-    if (wall_east_)
+    if (walls_.east == WALL)
         count++;
-    if (wall_south_)
+    if (walls_.south == WALL)
         count++;
-    if (wall_west_)
+    if (walls_.west == WALL)
         count++;
     return count;
 }
@@ -91,7 +111,7 @@ void Cell::setNeighbor(Cell* cell, char direction)
 
 void Cell::setWall(char direction)
 {
-    addWall(direction);
+    setWallStateLocal(direction, WALL);
 
     // Set shared wall on neighbor cell (walls are bidirectional)
     switch (direction)
@@ -99,47 +119,159 @@ void Cell::setWall(char direction)
         case 'N':
         case 'n':
             if (north_)
-                north_->addWall('S');
+                north_->setWallStateLocal('S', WALL);
             break;
         case 'E':
         case 'e':
             if (east_)
-                east_->addWall('W');
+                east_->setWallStateLocal('W', WALL);
             break;
         case 'S':
         case 's':
             if (south_)
-                south_->addWall('N');
+                south_->setWallStateLocal('N', WALL);
             break;
         case 'W':
         case 'w':
             if (west_)
-                west_->addWall('E');
+                west_->setWallStateLocal('E', WALL);
             break;
     }
 }
 
-void Cell::addWall(char direction)
+void Cell::setExit(char direction)
+{
+    setWallStateLocal(direction, EXIT);
+
+    switch (direction)
+    {
+        case 'N':
+        case 'n':
+            if (north_)
+                north_->setWallStateLocal('S', EXIT);
+            break;
+        case 'E':
+        case 'e':
+            if (east_)
+                east_->setWallStateLocal('W', EXIT);
+            break;
+        case 'S':
+        case 's':
+            if (south_)
+                south_->setWallStateLocal('N', EXIT);
+            break;
+        case 'W':
+        case 'w':
+            if (west_)
+                west_->setWallStateLocal('E', EXIT);
+            break;
+    }
+}
+
+void Cell::updateWallState(char direction, WallState state)
+{
+    if (!shouldUpdate(direction))
+        return;
+
+    Cell* neighbor           = nullptr;
+    char  opposite_direction = 0;
+    switch (direction)
+    {
+        case 'N':
+        case 'n':
+            neighbor           = north_;
+            opposite_direction = 'S';
+            break;
+        case 'E':
+        case 'e':
+            neighbor           = east_;
+            opposite_direction = 'W';
+            break;
+        case 'S':
+        case 's':
+            neighbor           = south_;
+            opposite_direction = 'N';
+            break;
+        case 'W':
+        case 'w':
+            neighbor           = west_;
+            opposite_direction = 'E';
+            break;
+        default:
+            break;
+    }
+
+    if (neighbor != nullptr)
+    {
+        const WallState neighbor_state = neighbor->wallState(opposite_direction);
+        if (neighbor_state != UNKNOWN)
+        {
+            setWallStateLocal(direction, neighbor_state);
+            return;
+        }
+    }
+
+    setWallStateLocal(direction, state);
+
+    if (neighbor != nullptr)
+        neighbor->setWallStateLocal(opposite_direction, state);
+}
+
+void Cell::update_wall_state(char direction, WallState state)
+{
+    updateWallState(direction, state);
+}
+
+void Cell::set_wall_state(char direction, WallState state)
+{
+    if (state == WALL)
+        setWall(direction);
+    else if (state == EXIT)
+        setExit(direction);
+    else
+        setWallStateLocal(direction, state);
+}
+
+void Cell::reset()
+{
+    walls_    = {};
+    explored_ = false;
+    clearPathfindingState();
+}
+
+void Cell::loadSnapshot(const WallInfo& walls, bool explored)
+{
+    walls_    = walls;
+    explored_ = explored;
+    clearPathfindingState();
+}
+
+void Cell::setWallStateLocal(char direction, WallState state)
 {
     switch (direction)
     {
         case 'N':
         case 'n':
-            wall_north_ = true;
+            walls_.north = state;
             break;
         case 'E':
         case 'e':
-            wall_east_ = true;
+            walls_.east = state;
             break;
         case 'S':
         case 's':
-            wall_south_ = true;
+            walls_.south = state;
             break;
         case 'W':
         case 'w':
-            wall_west_ = true;
+            walls_.west = state;
             break;
     }
+}
+
+bool Cell::shouldUpdate(char direction) const
+{
+    return wallState(direction) == UNKNOWN;
 }
 
 bool Cell::equal(Cell* c1, Cell* c2)
@@ -257,6 +389,65 @@ int Maze::width() const
 int Maze::height() const
 {
     return cells_[0].size();
+}
+
+void Maze::reset()
+{
+    for (size_t col = 0; col < cells_.size(); col++)
+    {
+        for (size_t row = 0; row < cells_[0].size(); row++)
+        {
+            cells_[col][row]->reset();
+        }
+    }
+    mask_ = MASK_OPEN;
+}
+
+MazeSnapshot Maze::snapshot() const
+{
+    const size_t cols = cells_.size();
+    const size_t rows = cols == 0 ? 0 : cells_[0].size();
+
+    MazeSnapshot snap(cols, std::vector<CellSnapshot>(rows));
+    for (size_t col = 0; col < cols; ++col)
+    {
+        for (size_t row = 0; row < rows; ++row)
+        {
+            const Cell* c           = cells_[col][row];
+            snap[col][row].walls    = c->walls();
+            snap[col][row].explored = c->explored();
+        }
+    }
+    return snap;
+}
+
+void Maze::restore(const MazeSnapshot& snap)
+{
+    const size_t cols      = cells_.size();
+    const size_t rows      = cols == 0 ? 0 : cells_[0].size();
+    const size_t snap_cols = snap.size();
+    const size_t snap_rows = snap_cols == 0 ? 0 : snap[0].size();
+
+    if (snap_cols != cols || snap_rows != rows)
+        return;
+
+    for (size_t col = 0; col < cols; ++col)
+    {
+        for (size_t row = 0; row < rows; ++row)
+        {
+            cells_[col][row]->loadSnapshot(snap[col][row].walls, snap[col][row].explored);
+        }
+    }
+}
+
+void Maze::setMask(MazeMask mask)
+{
+    mask_ = mask;
+}
+
+MazeMask Maze::mask() const
+{
+    return mask_;
 }
 
 void Maze::printASCII()

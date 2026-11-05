@@ -1,175 +1,199 @@
 #include "control/profile.h"
+
 #include <cmath>
 
-static constexpr float DEFAULT_POSITION_TOLERANCE = 2.0f;
-static constexpr float DEFAULT_VELOCITY_TOLERANCE = 30.0f;
+#include "config/motion.h"
 
 Profile::Profile()
-    : state_(State::Idle), target_distance_(0.0f), max_velocity_(0.0f), acceleration_(0.0f),
-      initial_position_(0.0f), current_velocity_(0.0f), current_acceleration_(0.0f),
-      accel_distance_(0.0f), decel_distance_(0.0f), cruise_distance_(0.0f), cruise_velocity_(0.0f),
-      position_tolerance_(DEFAULT_POSITION_TOLERANCE),
-      velocity_tolerance_(DEFAULT_VELOCITY_TOLERANCE)
+    : state_(State::Idle), direction_(1), target_distance_(0.0f), target_speed_(0.0f),
+      top_speed_(0.0f), final_speed_(0.0f), acceleration_(0.0f), current_velocity_(0.0f),
+      current_acceleration_(0.0f), current_position_(0.0f)
 {
 }
 
-void Profile::start(float target_distance, float max_velocity, float acceleration,
-                    float initial_position)
+void Profile::start(float target_distance, float top_speed, float final_speed, float acceleration)
 {
-    target_distance_  = std::fabs(target_distance);
-    max_velocity_     = std::fabs(max_velocity);
-    acceleration_     = std::fabs(acceleration);
-    initial_position_ = initial_position;
+    start(target_distance, 0.0f, top_speed, final_speed, acceleration);
+}
 
-    current_velocity_     = 0.0f;
+void Profile::start(float target_distance, float start_speed, float top_speed, float final_speed,
+                    float acceleration)
+{
+    direction_       = (target_distance >= 0.0f) ? 1 : -1;
+    target_distance_ = target_distance;
+    top_speed_       = std::fabs(top_speed);
+    final_speed_     = std::fabs(final_speed);
+    acceleration_    = std::fabs(acceleration);
+    target_speed_    = direction_ * top_speed_;
+
+    current_velocity_     = std::fabs(start_speed) * direction_;
     current_acceleration_ = 0.0f;
+    current_position_     = 0.0f;
 
-    calculateProfileParameters();
-
-    if (target_distance_ > position_tolerance_)
-    {
-        state_                = State::Accelerating;
-        current_acceleration_ = acceleration_;
-    }
-    else
-    {
-        state_ = State::Finished;
-    }
-}
-
-void Profile::calculateProfileParameters()
-{
-    float dist_to_max_vel = (max_velocity_ * max_velocity_) / (2.0f * acceleration_);
-
-    if (2.0f * dist_to_max_vel <= target_distance_)
-    {
-        accel_distance_  = dist_to_max_vel;
-        decel_distance_  = dist_to_max_vel;
-        cruise_distance_ = target_distance_ - (accel_distance_ + decel_distance_);
-        cruise_velocity_ = max_velocity_;
-    }
-    else
-    {
-        accel_distance_  = target_distance_ / 2.0f;
-        decel_distance_  = target_distance_ / 2.0f;
-        cruise_distance_ = 0.0f;
-        cruise_velocity_ = std::sqrt(2.0f * acceleration_ * accel_distance_);
-    }
-}
-
-void Profile::update(float current_position, float dt)
-{
-    if (state_ == State::Idle || state_ == State::Finished)
-        return;
-
-    float distance_traveled = std::fabs(current_position - initial_position_);
-    updateState(distance_traveled);
-
-    switch (state_)
-    {
-        case State::Accelerating:
-            current_velocity_ += acceleration_ * dt;
-            if (current_velocity_ >= cruise_velocity_)
-            {
-                current_velocity_ = cruise_velocity_;
-            }
-            current_acceleration_ = acceleration_;
-            break;
-
-        case State::Cruising:
-            current_velocity_     = cruise_velocity_;
-            current_acceleration_ = 0.0f;
-            break;
-
-        case State::Decelerating:
-            current_velocity_ -= acceleration_ * dt;
-            if (current_velocity_ <= 0.0f)
-            {
-                current_velocity_ = 0.0f;
-            }
-            current_acceleration_ = -acceleration_;
-            break;
-
-        case State::Finished:
-            current_velocity_     = 0.0f;
-            current_acceleration_ = 0.0f;
-            break;
-
-        case State::Idle:
-            break;
-    }
-}
-
-void Profile::updateState(float distance_traveled)
-{
-    float remaining_dist = target_distance_ - distance_traveled;
-
-    if (remaining_dist <= position_tolerance_ && current_velocity_ <= velocity_tolerance_)
+    if (std::fabs(target_distance_) <= 0.0f || acceleration_ <= 0.0f)
     {
         state_ = State::Finished;
         return;
     }
 
-    if (distance_traveled < accel_distance_)
-    {
-        state_ = State::Accelerating;
-    }
-    else if (distance_traveled < (accel_distance_ + cruise_distance_))
-    {
-        state_ = State::Cruising;
-    }
-    else
-    {
-        state_ = State::Decelerating;
-    }
-
-    float braking_distance = (current_velocity_ * current_velocity_) / (2.0f * acceleration_);
-
-    if (remaining_dist <= braking_distance && state_ != State::Finished)
-    {
-        state_ = State::Decelerating;
-    }
+    state_ = State::Accelerating;
 }
 
-float Profile::velocity() const
+float Profile::brakingDistance() const
 {
-    return current_velocity_;
-}
-
-float Profile::acceleration() const
-{
-    return current_acceleration_;
+    if (acceleration_ <= 0.0f)
+        return 0.0f;
+    float v_sq = current_velocity_ * current_velocity_;
+    float f_sq = final_speed_ * final_speed_;
+    float diff = v_sq - f_sq;
+    return (diff > 0.0f) ? diff / (2.0f * acceleration_) : 0.0f;
 }
 
 float Profile::remaining() const
 {
-    if (state_ == State::Idle || state_ == State::Finished)
-        return 0.0f;
-
-    return target_distance_ * (current_velocity_ / cruise_velocity_);
+    return std::fabs(target_distance_ - current_position_);
 }
 
-bool Profile::finished() const
+bool Profile::reached(float position_tolerance) const
 {
-    return (state_ == State::Finished);
+    return finished() || remaining() <= std::fabs(position_tolerance);
 }
 
-Profile::State Profile::state() const
+bool Profile::carryingVelocity(float velocity_tolerance) const
 {
-    return state_;
+    return std::fabs(current_velocity_) > std::fabs(velocity_tolerance);
+}
+
+bool Profile::settled(float velocity_tolerance) const
+{
+    return !active() && !carryingVelocity(velocity_tolerance);
+}
+
+void Profile::update()
+{
+    if (state_ == State::Idle)
+        return;
+
+    const float delta_v           = acceleration_ * LOOP_INTERVAL_S;
+    const float remaining_dist    = remaining();
+    const float previous_position = current_position_;
+
+    if (state_ != State::Finished && state_ == State::Accelerating &&
+        remaining_dist <= brakingDistance())
+    {
+        state_ = State::Braking;
+    }
+
+    if (state_ == State::Finished)
+    {
+        target_speed_ = direction_ * final_speed_;
+    }
+    else if (state_ == State::Braking)
+    {
+        const float finish_speed = (final_speed_ == 0.0f) ? 5.0f : final_speed_;
+        target_speed_            = direction_ * finish_speed;
+    }
+    else
+    {
+        target_speed_ = direction_ * top_speed_;
+    }
+
+    const float old_velocity = current_velocity_;
+
+    // Single-axis approach toward target_speed_; implicit cruise when v == target.
+    if (current_velocity_ < target_speed_)
+    {
+        current_velocity_ += delta_v;
+        if (current_velocity_ > target_speed_)
+            current_velocity_ = target_speed_;
+    }
+    else if (current_velocity_ > target_speed_)
+    {
+        current_velocity_ -= delta_v;
+        if (current_velocity_ < target_speed_)
+            current_velocity_ = target_speed_;
+    }
+
+    current_acceleration_ = (current_velocity_ - old_velocity) * LOOP_FREQUENCY_HZ;
+    current_position_ += current_velocity_ * LOOP_INTERVAL_S;
+
+    const bool crossed_target = (direction_ > 0 && previous_position <= target_distance_ &&
+                                 current_position_ >= target_distance_) ||
+                                (direction_ < 0 && previous_position >= target_distance_ &&
+                                 current_position_ <= target_distance_);
+
+    if (state_ != State::Finished && (remaining() < 0.125f || crossed_target))
+    {
+        // No position snap, as in mazerunner-core: the robot covered this
+        // tick's full step, so clamping to the target would under-report the
+        // distance and every later position check would land long.
+        current_velocity_     = direction_ * final_speed_;
+        current_acceleration_ = 0.0f;
+        target_speed_         = direction_ * final_speed_;
+        state_                = State::Finished;
+    }
 }
 
 void Profile::reset()
 {
     state_                = State::Idle;
+    direction_            = 1;
     target_distance_      = 0.0f;
-    max_velocity_         = 0.0f;
+    target_speed_         = 0.0f;
+    top_speed_            = 0.0f;
+    final_speed_          = 0.0f;
     acceleration_         = 0.0f;
-    initial_position_     = 0.0f;
     current_velocity_     = 0.0f;
     current_acceleration_ = 0.0f;
-    accel_distance_       = 0.0f;
-    decel_distance_       = 0.0f;
-    cruise_distance_      = 0.0f;
-    cruise_velocity_      = 0.0f;
+    current_position_     = 0.0f;
+}
+
+void Profile::setTargetSpeed(float speed)
+{
+    top_speed_ = std::fabs(speed);
+}
+
+void Profile::setFinalSpeed(float speed)
+{
+    final_speed_ = std::fabs(speed);
+}
+
+void Profile::stop(float acceleration)
+{
+    acceleration_ = std::fabs(acceleration);
+    final_speed_  = 0.0f;
+    top_speed_    = 0.0f;
+    target_speed_ = 0.0f;
+
+    if (!carryingVelocity(1e-3f) || acceleration_ <= 0.0f)
+    {
+        current_velocity_     = 0.0f;
+        current_acceleration_ = 0.0f;
+        target_distance_      = current_position_;
+        state_                = State::Finished;
+        return;
+    }
+
+    direction_       = (current_velocity_ >= 0.0f) ? 1 : -1;
+    target_distance_ = current_position_ + static_cast<float>(direction_) * brakingDistance();
+    state_           = State::Braking;
+}
+
+void Profile::extendTarget(float distance)
+{
+    target_distance_ += direction_ * std::fabs(distance);
+    if (state_ == State::Finished)
+        state_ = State::Accelerating;
+}
+
+void Profile::setPosition(float position)
+{
+    current_position_ = position;
+}
+
+void Profile::adjustPosition(float delta)
+{
+    current_position_ += delta;
+    if (state_ == State::Finished && remaining() > 0.125f)
+        state_ = State::Accelerating;
 }

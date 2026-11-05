@@ -28,11 +28,16 @@ class Battery
     /**
      * @brief Initializes the ADC hardware. Call once during setup.
      */
-    void init();
+    void begin();
 
     /**
      * @brief Takes a new ADC reading and updates the moving average.
-     * Call this periodically (e.g., every 100ms) from your main loop.
+     *
+     * Call this every control tick (500 Hz). Each call performs one ADC
+     * read; the 10-sample moving average gives a 20 ms time constant
+     * matched to the control loop. Producer must run on the same core
+     * that consumes voltage() — see CLAUDE.md and the per-mode table in
+     * the multicore correctness notes.
      */
     void update();
 
@@ -46,16 +51,12 @@ class Battery
      * @brief Returns the raw ADC value (0-4095) of the most recent reading.
      * @return Raw 12-bit ADC value.
      */
-    uint16_t rawADC() const;
-
-    /**
-     * @brief Checks if battery voltage is below a critical threshold.
-     * @param threshold_volts Voltage threshold (default 6.0V for 2S LiPo).
-     * @return true if battery is low, false otherwise.
-     */
-    bool isLow(float threshold_volts = 6.0f) const;
+    uint16_t raw_adc() const;
 
   private:
+    /// Shared by the smoothed and instantaneous paths so both scale identically.
+    float voltsFromAdc(float adc_counts) const;
+
     static constexpr int   AVERAGE_SAMPLES = 10;
     static constexpr float ADC_MAX         = 4095.0f;
     static constexpr float ADC_REF_VOLTAGE = 3.3f;
@@ -70,6 +71,7 @@ class Battery
     uint8_t  reading_index_;
     uint32_t reading_sum_;
     bool     buffer_filled_;
+    bool     sagging_; // edge-trigger latch for the sag warning
 };
 
 #endif

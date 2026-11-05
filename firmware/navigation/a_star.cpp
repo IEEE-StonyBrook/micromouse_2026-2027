@@ -1,7 +1,7 @@
 #include "navigation/a_star.h"
 #include "navigation/path_converter.h"
 
-AStar::AStar(Mouse* mouse) : mouse_(mouse)
+AStar::AStar(MazeMouse* mouse) : mouse_(mouse)
 {
 }
 
@@ -55,6 +55,8 @@ struct AStarNode
 
 std::vector<Cell*> AStar::findPathTo(Cell* end, bool diagonals, bool pass_goals)
 {
+    mouse_->resetPathfinding();
+
     Cell* start = mouse_->currentCell();
     int   w     = mouse_->mazeWidth();
     int   h     = mouse_->mazeHeight();
@@ -94,6 +96,8 @@ std::vector<Cell*> AStar::findPathTo(Cell* end, bool diagonals, bool pass_goals)
             float new_g = current.g_cost + heuristic(current.cell, neighbor);
             int   nx    = neighbor->x();
             int   ny    = neighbor->y();
+            if (neighbor->explored())
+                new_g += explored_cell_cost_;
 
             if (new_g < g_costs[nx][ny])
             {
@@ -105,6 +109,7 @@ std::vector<Cell*> AStar::findPathTo(Cell* end, bool diagonals, bool pass_goals)
     }
 
     LOG_ERROR("AStar: No path found!");
+    mouse_->resetPathfinding();
     return {};
 }
 

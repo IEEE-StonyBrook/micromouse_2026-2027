@@ -1,6 +1,7 @@
 #ifndef COMMON_LOG_H
 #define COMMON_LOG_H
 
+#include <cstdint>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -19,13 +20,34 @@ enum class LogPriority
 class Log
 {
   public:
+    struct BluetoothDiagnostics
+    {
+        uint16_t queued_messages;
+        uint16_t max_queued_messages;
+        uint32_t dropped_messages;
+        uint32_t truncated_messages;
+    };
+
     static void message(LogPriority priority, std::string msg);
-    static void setBluetoothInterface(Bluetooth* bt);
-    static void setBluetoothEnabled(bool enabled);
-    static bool isBluetoothEnabled();
+
+    /**
+     * @brief Operator-hostile detail (raw registers, bit fields) tagged "[DIAG]".
+     *
+     * A separate tier, not a severity, so it ignores the priority gates: the host
+     * terminal hides these lines from its window but still writes them to the log
+     * file, which keeps the human view readable without losing the detail.
+     */
+    static void                 diagnostic(std::string msg);
+    static void                 setBluetoothInterface(Bluetooth* bt);
+    static void                 setBluetoothEnabled(bool enabled);
+    static void                 setBluetoothPriority(LogPriority priority);
+    static void                 drainBluetooth();
+    static bool                 isBluetoothEnabled();
+    static BluetoothDiagnostics bluetoothDiagnostics();
 
   private:
     static LogPriority print_priority_level_;
+    static LogPriority bluetooth_priority_level_;
     static Bluetooth*  bluetooth_;
     static bool        bluetooth_enabled_;
 };
@@ -63,6 +85,13 @@ class Log
         std::ostringstream ss;                                                                     \
         ss << msg;                                                                                 \
         Log::message(LogPriority::FATAL, ss.str());                                                \
+    }
+
+#define LOG_DIAG(msg)                                                                              \
+    {                                                                                              \
+        std::ostringstream ss;                                                                     \
+        ss << msg;                                                                                 \
+        Log::diagnostic(ss.str());                                                                 \
     }
 
 #endif

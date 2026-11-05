@@ -1,139 +1,54 @@
 # Jurababa 2025-2026 Micromouse
 
-## Project Overview
-Raspberry Pi Pico-based micromouse robot for IEEE maze-solving competitions.
+Firmware, an `mms`-compatible simulator, and calibration tools for **Jurababa**,
+a Raspberry Pi Pico micromouse built for IEEE maze competitions. Treat it as a
+real embedded robotics system: noisy sensors, imperfect motors, battery sag,
+wheel slip, and a hard real-time budget.
 
-## Architecture
+## The chain
 
-### Operating Modes
-1. **Normal Mode** (dual-core): Maze solving with real-time control
-   - Core 0: Path planning, maze algorithms, Bluetooth commands
-   - Core 1: Motor control at 100Hz, sensor updates
+Every change keeps this chain truthful:
 
-2. **MotorLab Mode** (single-core): Motor characterization and PID tuning
-   - CLI interface for calibration trials
-   - Outputs Config.h-compatible feedforward constants
-
-### Mode Selection
-Press 'M' within 3 seconds of startup to enter MotorLab mode. Otherwise, Normal mode starts automatically.
-
-## Directory Structure
-
-```
-.clang-format                  # Code formatting rules
-CMakeLists.txt                 # Build configuration (project root)
-pico_sdk_import.cmake          # Pico SDK CMake helper
-firmware/                      # Embedded Pico firmware source
-sim/                           # mms-compatible simulator
-third_party/                   # External dependencies
-tools/                         # Python utilities
-
-firmware/                      # All firmware source code
-├── config/                    # Configuration headers (constants only)
-│   ├── config.h               # Master include (includes all below)
-│   ├── pins.h                 # GPIO pin assignments
-│   ├── tuning.h               # Feedforward KV/KS, PID gains
-│   ├── motion.h               # Speeds, accelerations, tolerances
-│   ├── sensors.h              # ToF thresholds, IMU constants
-│   └── geometry.h             # Wheel/robot dimensions
-│
-├── drivers/                   # Hardware abstraction layer
-│   ├── motor.h/cpp            # PWM motor control
-│   ├── encoder.h/cpp          # PIO quadrature encoder
-│   ├── imu.h/cpp              # BNO085 UART interface
-│   ├── tof.h/cpp              # VL53L0X I2C interface
-│   └── battery.h/cpp          # ADC voltage monitor
-│
-├── control/                   # Motion control layer
-│   ├── pid.h/cpp              # Generic PID controller
-│   ├── profile.h/cpp          # Trapezoidal motion profile
-│   ├── drivetrain.h/cpp       # Differential drive
-│   └── robot.h/cpp            # High-level motion (integrated sensors)
-│
-├── maze/                      # Maze representation
-│   ├── maze.h/cpp             # Maze graph with cells
-│   └── mouse.h/cpp            # Virtual position tracking
-│
-├── navigation/                # Path planning algorithms
-│   ├── flood_fill.h/cpp       # Flood fill solver
-│   ├── a_star.h/cpp           # A* pathfinding
-│   ├── path_converter.h/cpp   # Cell paths to LFR commands
-│   ├── path_utils.h/cpp       # Path execution utilities
-│   └── diagonalizer.h/cpp     # Diagonal path optimization
-│
-├── app/                       # Application layer
-│   ├── bluetooth.h/cpp        # Wireless serial interface
-│   ├── commands.h             # Inter-core command hub
-│   ├── multicore.h            # Sensor data sharing
-│   └── api.h/cpp              # High-level maze interface
-│
-├── motor_lab/                 # Motor characterization tool
-│   ├── motor_lab.h/cpp        # CLI interface
-│   ├── profile.h/cpp          # Time-based motion profile
-│   ├── reporter.h/cpp         # CSV data logging
-│   └── settings.h             # Calibration parameters
-│
-├── common/                    # Shared utilities
-│   ├── log.h/cpp              # Logging system
-│   └── utils.h                # WheelSide enum, helpers
-│
-└── main.cpp                   # Entry point
+```text
+sensors → estimated state → maze model → planned path → motor command → physical motion
 ```
 
-## Coding Standards (Google C++ Style Based)
+A micromouse fails when software lies about the physical world. When a change's
+effect on the chain is unclear, say so before editing.
 
-### Naming Conventions
+## Prime directive
 
-| Element | Convention | Example |
-|---------|------------|---------|
-| **Files** | `snake_case.h/.cpp` | `flood_fill.cpp`, `motor_lab.h` |
-| **Classes** | `PascalCase` | `Drivetrain`, `FloodFill` |
-| **Functions** | `camelCase` | `updateState()`, `wallLeft()` |
-| **Accessors** | No `get` prefix | `velocity()` not `getVelocity()` |
-| **Mutators** | `set_` prefix | `set_target()` |
-| **Constants** | `SCREAMING_SNAKE` | `MAX_VELOCITY`, `MAZE_SIZE` |
-| **Member vars** | `snake_case_` | `left_motor_`, `omega_degps_` |
-| **Local vars** | `snake_case` | `current_speed`, `dt` |
+Make the smallest correct change that improves the system.
 
-### Key Rules
+Before editing, read the files involved and state the current design and the
+assumptions you are relying on. Then patch the smallest region that fixes the
+problem, preserving the existing architecture and public interfaces. A refactor
+happens when the user asks for one.
 
-1. **No `get` prefix for accessors** (Google style):
-   ```cpp
-   float velocity();     // Good
-   float getVelocity();  // Bad
-   ```
+Search the repo before assuming how something works. Invent no APIs, files, or
+conventions — check first.
 
-2. **No `is` prefix for boolean queries when clear from context**:
-   ```cpp
-   bool wallFront();     // Good
-   bool finished();      // Good
-   bool isWallFront();   // Bad
-   ```
+Name risky design choices directly, in a sentence or two, then carry on with the
+work.
 
-3. **Trailing underscore for member variables**:
-   ```cpp
-   class Robot {
-       float omega_degps_;   // Good
-       float m_omega;        // Bad (m_ prefix)
-   };
-   ```
+Use precise units in every explanation.
 
-4. **Physics naming conventions**:
-   - `omega` for angular velocity (rad/s or deg/s)
-   - `yaw` for heading angle
-   - `dt` for time delta
+## Ask before changing
 
-5. **Action methods use imperative verbs**:
-   ```cpp
-   void reset();
-   void stop();
-   void moveDistance(float mm);
-   ```
+Get explicit approval for these. Each one silently breaks the chain everywhere
+else in the system:
 
-### Layer Dependencies
+- pin mappings (`firmware/config/pins.h`)
+- motor direction polarity
+- maze coordinate conventions
+- wall encoding conventions
 
-Each layer only depends on layers below:
-```
+## Layers
+
+Dependencies point one way. Higher layers depend on lower ones; a lower layer
+never reaches up.
+
+```text
 app/ → control/, maze/, navigation/
 control/ → drivers/, config/
 navigation/ → maze/
@@ -141,100 +56,172 @@ maze/ → config/
 drivers/ → config/
 ```
 
-### Code Formatting
+What each layer is allowed to know:
 
-**IMPORTANT:** After editing any `.cpp` or `.h` file, always run clang-format:
+| Layer | Knows about | Stays out of |
+|---|---|---|
+| `config/` | constants, compile-time configuration | logic, algorithms, state, functions |
+| `drivers/` | GPIO, PWM, ADC, I2C/UART, PIO, raw hardware units | cells, flood fill, strategy |
+| `control/` | velocity, acceleration, PID, profiles, pose, kinematics | maze solving |
+| `maze/` | cells, directions, walls, coordinates, mouse pose | motors, sensors |
+| `navigation/` | flood fill, A*, goals, cell paths, L/F/R conversion | physical sensors |
+| `app/` | wiring the above together, CLI, Bluetooth, multicore | — |
+
+Run `ls firmware/<layer>` for the current file list; it is authoritative and
+this document is not.
+
+## Operating modes
+
+Selected at startup: **press `M` within 3 seconds for DriverLab, otherwise
+Normal Mode starts automatically.** Keep that behaviour.
+
+**Normal Mode** is the competition mode, across both cores:
+
+- Core 0 — path planning, maze algorithms, Bluetooth, high-level decisions.
+- Core 1 — motor control, sensor updates, the control loop at `LOOP_FREQUENCY_HZ` (500 Hz).
+
+**DriverLab Mode** is a single-core calibration and characterisation tool:
+open-loop voltage sweeps, step response, PID tuning, and export of
+`config.h`/`tuning.h`-compatible constants.
+
+DriverLab is standalone. It owns its own time-based profiles
+(`DriverLabProfile`), its own `PID` instances, and its trial state machines
+(OL, STEP, MOVE, TURN, TURN-OL, TURN-STEP), driven by one `tick()` per 500 Hz
+tick from `main.cpp`. It uses `Motor`, `Encoder`, `IMU`, `ToF` and `Battery`
+directly — **the HAL drivers are the only seam** between DriverLab and the
+Robot/Motion stack. Keep `Motion` and `Drivetrain` out of DriverLab.
+
+Calibration order: `OL` (open-loop voltage sweep, for the motor constants) →
+`STEP` (step response, for the motor time constant) → `EXPORT` (emit the
+constants). Running them out of order gives numbers the later steps contradict.
+
+Trials are cooperative state machines: a trial records its parameters, sets
+motor voltages or arms a profile, and returns. The next tick advances it one
+step. That is what holds the loop period at exactly `1 / LOOP_FREQUENCY_HZ`.
+
+## Units
+
+Carry units in the name whenever the bare quantity is ambiguous.
+
+| Quantity | Unit | Suffix |
+|---|---|---|
+| distance | mm | `distance_mm` |
+| velocity | mm/s | `velocity_mmps` |
+| acceleration | mm/s² | `accel_mmps2` |
+| angle | deg or rad — state which | `yaw_deg` |
+| angular speed | deg/s or rad/s — state which | `omega_degps` |
+| time | s or ms — state which | `dt_s`, `period_ms` |
+| PWM | normalised duty or raw — state which | — |
+
+Velocities are **mm/s** throughout: feedforward constants are duty per mm/s,
+and DriverLab trials and Motion both speak mm, mm/s, mm/s².
+
+## Naming
+
+Google C++ Style, with these specifics:
+
+| Element | Convention | Example |
+|---|---|---|
+| files | `snake_case.h/.cpp` | `flood_fill.cpp` |
+| classes | `PascalCase` | `Drivetrain` |
+| functions | `camelCase` | `updateState()` |
+| accessors | no prefix | `velocity()`, `yawDeg()` |
+| mutators | `set_` prefix | `set_target()` |
+| constants | `SCREAMING_SNAKE` | `MAZE_SIZE` |
+| members | `snake_case_` | `omega_degps_` |
+| locals | `snake_case` | `dt_s` |
+
+Name boolean queries for the thing itself: `wallFront()`, `finished()`,
+`calibrated()`. Keep `is` only where it genuinely reads better (`isValid()`).
+
+Action methods take imperative verbs: `reset()`, `stop()`, `moveDistance()`,
+`turnAngle()`, `updateState()`.
+
+Use the standard physics names — `omega` for angular velocity, `yaw` for
+heading, `dt` for time delta, `v` for linear velocity in local math — and the
+explicit suffixed form for anything persistent.
+
+## Comments
+
+Comment the **why**: non-obvious control logic, hardware quirks, timing
+assumptions, unit conversions, maze convention assumptions, safety constraints.
+
+```cpp
+// Clamp the integral term to prevent windup while the motor command saturates.
+```
+
+Code that speaks for itself needs no comment.
+
+## Formatting
+
+After editing any `.cpp` or `.h`, run clang-format:
+
 ```bash
 clang-format -i <file_path>
 ```
 
-To format all C++ files in the repository:
-```bash
-find firmware sim -type f \( -name "*.cpp" -o -name "*.h" \) | xargs clang-format -i
-```
+`.clang-format` at the repo root defines the style. If you skip formatting, say
+so explicitly.
 
-The `.clang-format` file at the repository root defines the project's style rules.
+## Building
 
-## Commit Message Guidelines
+**The user builds and flashes.** Suggest commands; run them only when asked.
 
-Use imperative mood, present tense: "Add feature" not "Added feature"
+Firmware:
 
-### Format
-```
-<Verb> <what changed>
-
-[Optional body explaining WHY]
-
-Co-Authored-By: Name <email>
-```
-
-### Common Verbs
-| Verb | Use For |
-|------|---------|
-| `Add` | New feature or file |
-| `Fix` | Bug fix |
-| `Update` | Enhance existing feature |
-| `Refactor` | Code restructure without behavior change |
-| `Remove` | Delete code/feature |
-| `Change` | Modify behavior |
-
-### Examples
-```
-Add bidirectional wall detection to mms simulator
-
-Fix FloodFill exploration loop caused by unidirectional walls
-```
-
-## Key Files
-
-### Configuration
-- `firmware/config/config.h`: Master include for all constants
-- `firmware/config/tuning.h`: PID gains, feedforward constants
-
-### Robot Control
-- `firmware/control/robot.cpp`: High-level motion control with integrated sensors
-- `firmware/control/drivetrain.cpp`: Motor/encoder interface, velocity estimation
-- `firmware/main.cpp`: Entry point with mode selection
-
-### MotorLab
-- `firmware/motor_lab/motor_lab.h`: CLI interface for motor testing
-- `tools/motorlab_dashboard.py`: Python GUI for calibration visualization
-
-## Units
-All velocities use **mm/s** throughout the codebase:
-- Config.h feedforward constants: duty per mm/s
-- MotorLab trials: mm, mm/s, mm/s^2
-- Robot motion: mm, mm/s
-
-## Build
-
-### Firmware (Pico)
 ```bash
 mkdir -p build && cd build
 cmake .. -DPICO_SDK_PATH=/path/to/pico-sdk -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 make -j4
 ```
 
-**Note:** The `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` flag generates `compile_commands.json` for IDE IntelliSense. A symlink at the project root points to this file.
+Simulator: `cd sim && make`, producing `sim/bin/simulator`.
 
-### Simulator (mms)
-```bash
-cd sim
-make
+## Reporting your work
+
+Close every code change with:
+
+```text
+Changed:
+- file/path.cpp
+
+Verification:
+- Formatting run: yes/no
+- Build run: yes/no
+- Tests run: yes/no
+- Remaining risks:
 ```
 
-The simulator binary `sim/bin/simulator` is compatible with the [mms](https://github.com/mackorone/mms) micromouse simulator.
+State what you ran and what you did not. A claim of "built and tested" means
+the command appears in the transcript.
 
-## Common Tasks
+## Debugging
 
-### Motor Calibration
-1. Enter MotorLab mode (press 'M' at startup)
-2. Run `OL` for open-loop voltage sweep to find Km
-3. Run `STEP` for step response to find Tm
-4. Run `EXPORT` to generate Config.h constants
+Restate the symptom, name the subsystem, search for the files, and read the code
+before proposing a fix. Then list likely causes most-probable first, identify
+the smallest experiment or inspection that separates them, and only then patch.
 
-### Dashboard
-```bash
-cd tools
-python3 motorlab_dashboard.py
+Per-subsystem pre-flight checks — motors, encoders, sensors, control loop and
+`dt`, multicore state ownership, maze conventions, navigation assumptions — are
+in **[`docs/subsystem-checklists.md`](docs/subsystem-checklists.md)**. Read the
+section for the subsystem you are about to change.
+
+## Commits
+
+Imperative mood, present tense: `Fix encoder velocity sign convention`.
+
+```text
+<Verb> <what changed>
+
+[optional body explaining WHY]
 ```
+
+Verbs: `Add`, `Fix`, `Update`, `Refactor`, `Remove`, `Change`, `Document`,
+`Tune`.
+
+## Tooling
+
+`.mcp.json` configures **context7** (library/framework docs — Pico SDK, PyQt6)
+and **sequential-thinking** (step-by-step reasoning for hard debugging).
+
+The calibration dashboard is `cd tools && python3 driverlab_dashboard.py`.

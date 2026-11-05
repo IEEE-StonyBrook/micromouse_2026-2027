@@ -1,77 +1,209 @@
 /**
- * main.cpp - Raspberry Pi Pico Micromouse Entry Point
+ * main.cpp — Raspberry Pi Pico Micromouse entry point.
  *
- * Architecture:
- *   Normal Mode: Dual-core maze solving
- *     - Core 0: High-level maze solving and path planning
- *     - Core 1: Real-time robot control and sensor management
- *   MotorLab Mode: Single-core motor characterization
- *     - Motor calibration CLI for tuning feedforward/PID constants
+ * Top-level operating modes:
  *
- * Mode Selection:
- *   Press 'M' within 3 seconds of startup to enter MotorLab mode.
- *   Otherwise, Normal mode starts automatically.
+ *   1. Competition
+ *        Default boot path. ToF-only gesture-driven COMP loop, USB serial
+ *        diagnostics only, no Bluetooth.
+ *
+ *   2. Cheese Hunt
+ *        ToF-only beacon search. GP12/GP13 are IR emitter/receiver, so
+ *        Bluetooth is disabled.
+ *
+ *   3. Normal CLI
+ *        UKMARS mazerunner-core-style command loop. ToF mode runs Motion from
+ *        a 500 Hz timer callback; LineSensor mode runs Motion + LineFollower.
+ *
+ *   4. DriverLab
+ *        Single-core motor characterization CLI. Core 0 owns motors,
+ *        encoders, IMU, and either ToFs or the line sensor.
+ *
+ * Boot choices are configured in config/boot.h:
+ *   BOOT_MODE_SELECTION   -> Competition, CheeseHunt, Normal CLI, DriverLab, or Prompt
+ *   BOOT_SENSOR_SELECTION -> ToF, LineSensor, or Prompt
  */
 
 #include <array>
-#include <stdarg.h>
 #include <stdio.h>
 #include <string>
 #include <vector>
 
-#include "app/api.h"
-#include "app/bluetooth.h"
-#include "app/commands.h"
-#include "app/multicore.h"
-#include "common/log.h"
-#include "config/config.h"
-#include "control/drivetrain.h"
-#include "control/robot.h"
-#include "drivers/battery.h"
-#include "drivers/encoder.h"
-#include "drivers/imu.h"
-#include "drivers/motor.h"
-#include "drivers/tof.h"
-#include "maze/maze.h"
-#include "maze/mouse.h"
-#include "motor_lab/motor_lab.h"
-#include "control/line_follower.h"
-#include "drivers/line_sensor.h"
-#include "navigation/a_star.h"
-#include "navigation/flood_fill.h"
-#include "navigation/path_utils.h"
-#include "pico/multicore.h"
+#include "hardware/clocks.h"
+#include "hardware/sync.h"
+#include "hardware/timer.h"
 #include "pico/stdio/driver.h"
 #include "pico/stdlib.h"
 
-// ============================================================================
-// Operating Mode Selection
-// ============================================================================
+#include "app/bluetooth.h"
+#include "app/cli.h"
+#include "app/firmware_mouse.h"
+#include "app/leds.h"
+#include "common/bluetooth_stdio.h"
+#include "common/breadcrumb.h"
+#include "common/log.h"
+#include "config/config.h"
+#include "control/drivetrain.h"
+#include "control/line_follower.h"
+#include "control/motion.h"
+#include "driver_lab/driver_lab.h"
+#include "drivers/battery.h"
+#include "drivers/beacon_ir.h"
+#include "drivers/encoder.h"
+#include "drivers/imu.h"
+#include "drivers/line_sensor.h"
+#include "drivers/motor.h"
+#include "drivers/tof.h"
+#include "maze/maze.h"
+#include "maze/maze_mouse.h"
 
-enum class OperatingMode
+// ----------------------------------------------------------------------------
+// Bluetooth UART as a stdio driver (used in DriverLab mode for printf mirroring)
+//
+// Software TX ring buffer sits between printf and uart0's 32-byte hardware
+// FIFO. printf can produce instant bursts (multi-line help banners, JSON
+// blobs, multi-row CSV flushes) much larger than the FIFO; without the ring,
+// every byte past 32 in a single printf call was silently dropped. The ring
+// absorbs the burst; bt_drain() pumps ring -> FIFO non-blockingly, called
+// both opportunistically at the end of every printf and once per 500 Hz
+// DriverLab tick to keep the FIFO topped off between printfs.
+//
+// Single-core context (DriverLab is Core 0 only, no UART IRQ wired in this
+// mode) means the ring has exactly one writer and one reader in the same
+// execution context, so no locking is needed. `volatile` is a hedge against
+// future IRQ-driven drain.
+// ----------------------------------------------------------------------------
+static constexpr uint32_t BT_RING_SIZE               = 2048; // power of 2 -> AND-mask wrap
+static constexpr uint32_t BT_LINE_BUFFER_SIZE        = 256;
+static constexpr uint32_t BT_DEFAULT_CSV_INTERVAL_MS = 50;
+static volatile uint32_t  bt_ring_head               = 0;
+static volatile uint32_t  bt_ring_tail               = 0;
+static volatile uint32_t  bt_ring_max_depth          = 0;
+static volatile uint32_t  bt_ring_dropped_bytes      = 0;
+static volatile uint32_t  bt_suppressed_csv_lines    = 0;
+static volatile uint32_t  bt_csv_interval_ms         = BT_DEFAULT_CSV_INTERVAL_MS;
+static char               bt_ring[BT_RING_SIZE];
+static char               bt_line_buffer[BT_LINE_BUFFER_SIZE];
+static uint32_t           bt_line_length        = 0;
+static bool               bt_line_passthrough   = false;
+static bool               bt_line_csv_candidate = false;
+static bool               bt_line_has_comma     = false;
+static uint32_t           bt_last_csv_emit_ms   = 0;
+
+static uint32_t bt_ring_depth()
 {
-    NORMAL,       // Dual-core maze solving
-    MOTORLAB,     // Single-core motor characterization
-    LINEFOLLOWING // Single-core line following with event queue
-};
+    return (bt_ring_head - bt_ring_tail) & (BT_RING_SIZE - 1);
+}
 
-// Global mode (set during startup, read by runNormalMode/runMotorLabMode)
-static OperatingMode g_operating_mode = OperatingMode::NORMAL;
+static void bt_note_depth()
+{
+    const uint32_t depth = bt_ring_depth();
+    if (depth > bt_ring_max_depth)
+        bt_ring_max_depth = depth;
+}
 
-// Global Battery Monitor (shared between cores in Normal mode)
-static Battery* g_battery = nullptr;
-
-// ============================================================================
-// Dual Output printf (USB + Bluetooth UART) for MotorLab mode
-// ============================================================================
-
-// Custom driver to route stdout to Bluetooth UART
-static void uart_out_chars(const char* buf, int length)
+static void bt_ring_push_raw(const char* buf, int length)
 {
     for (int i = 0; i < length; i++)
     {
-        uart_putc_raw(uart0, buf[i]);
+        uint32_t next = (bt_ring_head + 1) & (BT_RING_SIZE - 1);
+        if (next == bt_ring_tail)
+        {
+            bt_ring_dropped_bytes += static_cast<uint32_t>(length - i);
+            return; // ring full -> drop. Better than blocking the 500 Hz loop.
+        }
+        bt_ring[bt_ring_head] = buf[i];
+        bt_ring_head          = next;
+        bt_note_depth();
     }
+}
+
+static void bt_drain()
+{
+    while (bt_ring_tail != bt_ring_head && uart_is_writable(uart0))
+    {
+        uart_putc_raw(uart0, bt_ring[bt_ring_tail]);
+        bt_ring_tail = (bt_ring_tail + 1) & (BT_RING_SIZE - 1);
+    }
+}
+
+static bool bt_line_starts_csv_data(char ch)
+{
+    return (ch >= '0' && ch <= '9') || ch == '-' || ch == '+';
+}
+
+static bool bt_should_emit_csv_line()
+{
+    const uint32_t interval_ms = bt_csv_interval_ms;
+    if (interval_ms == 0)
+        return true;
+
+    const uint32_t now_ms = to_ms_since_boot(get_absolute_time());
+    if (bt_last_csv_emit_ms == 0 || now_ms - bt_last_csv_emit_ms >= interval_ms)
+    {
+        bt_last_csv_emit_ms = now_ms;
+        return true;
+    }
+
+    bt_suppressed_csv_lines++;
+    return false;
+}
+
+static void bt_flush_line_buffer()
+{
+    if (bt_line_length == 0)
+        return;
+
+    const bool csv_data_line = bt_line_csv_candidate && bt_line_has_comma;
+    if (!csv_data_line || bt_should_emit_csv_line())
+        bt_ring_push_raw(bt_line_buffer, static_cast<int>(bt_line_length));
+
+    bt_line_length        = 0;
+    bt_line_passthrough   = false;
+    bt_line_csv_candidate = false;
+    bt_line_has_comma     = false;
+}
+
+static void bt_process_out_char(char ch)
+{
+    if (bt_line_passthrough)
+    {
+        bt_ring_push_raw(&ch, 1);
+        if (ch == '\n' || ch == '\r')
+            bt_line_passthrough = false;
+        return;
+    }
+
+    if (bt_line_length == 0)
+    {
+        bt_line_csv_candidate = bt_line_starts_csv_data(ch);
+        bt_line_has_comma     = false;
+        if (!bt_line_csv_candidate)
+        {
+            bt_line_passthrough = true;
+            bt_ring_push_raw(&ch, 1);
+            if (ch == '\n' || ch == '\r')
+                bt_line_passthrough = false;
+            return;
+        }
+    }
+
+    if (bt_line_length < BT_LINE_BUFFER_SIZE)
+    {
+        bt_line_buffer[bt_line_length++] = ch;
+        if (ch == ',')
+            bt_line_has_comma = true;
+    }
+
+    if (ch == '\n' || ch == '\r' || bt_line_length >= BT_LINE_BUFFER_SIZE)
+        bt_flush_line_buffer();
+}
+
+static void uart_out_chars(const char* buf, int length)
+{
+    for (int i = 0; i < length; i++)
+        bt_process_out_char(buf[i]);
+    bt_drain(); // small printfs that fit in the FIFO go straight through
 }
 
 static stdio_driver_t bt_driver = {
@@ -81,523 +213,497 @@ static stdio_driver_t bt_driver = {
     .next      = nullptr,
 };
 
-// ============================================================================
-// Startup Mode Selection
-// ============================================================================
-
-/**
- * Wait for mode selection input during startup.
- * Returns MOTORLAB if 'M' is pressed within timeout, otherwise NORMAL.
- */
-OperatingMode selectOperatingMode(uint32_t timeout_ms)
+namespace BluetoothStdio
 {
-    printf("\n");
+void setCsvIntervalMs(uint32_t interval_ms)
+{
+    bt_csv_interval_ms  = interval_ms;
+    bt_last_csv_emit_ms = 0;
+}
+
+uint32_t csvIntervalMs()
+{
+    return bt_csv_interval_ms;
+}
+
+Diagnostics diagnostics()
+{
+    Diagnostics diag;
+    diag.ring_size            = BT_RING_SIZE;
+    diag.depth                = bt_ring_depth();
+    diag.max_depth            = bt_ring_max_depth;
+    diag.dropped_bytes        = bt_ring_dropped_bytes;
+    diag.suppressed_csv_lines = bt_suppressed_csv_lines;
+    diag.csv_interval_ms      = bt_csv_interval_ms;
+    return diag;
+}
+
+void resetDiagnostics()
+{
+    bt_ring_max_depth       = bt_ring_depth();
+    bt_ring_dropped_bytes   = 0;
+    bt_suppressed_csv_lines = 0;
+    bt_last_csv_emit_ms     = 0;
+}
+} // namespace BluetoothStdio
+
+// ----------------------------------------------------------------------------
+// Boot-time selection
+// ----------------------------------------------------------------------------
+enum class BootRunMode
+{
+    Competition,
+    CheeseHunt,
+    NormalCli,
+    DriverLab
+};
+
+static BootRunMode selectBootRunModePrompt(uint32_t timeout_ms)
+{
+    printf("\n==========================================\n");
+    printf("  Jurababa -- boot\n");
     printf("==========================================\n");
-    printf("  Jurababa Micromouse - Mode Selection   \n");
-    printf("==========================================\n");
-    printf("  Press 'M' within %lu seconds for MotorLab\n", timeout_ms / 1000);
-    printf("  Press 'L' for Line Following\n");
-    printf("  Otherwise, Normal mode starts...\n");
+    printf("  Press 'M' for DriverLab, 'N' for Normal CLI, 'C' for Cheese Hunt.\n");
+    printf("  Otherwise Competition starts in %lu s (default).\n", timeout_ms / 1000);
     printf("==========================================\n\n");
 
-    uint32_t start_time        = to_ms_since_boot(get_absolute_time());
-    uint32_t elapsed           = 0;
-    int      countdown_printed = -1;
+    uint32_t start_ms        = to_ms_since_boot(get_absolute_time());
+    int      countdown_print = -1;
 
-    while (elapsed < timeout_ms)
+    while (true)
     {
-        // Check for input (USB serial)
-        int c = getchar_timeout_us(100000); // Check every 100ms
+        uint32_t elapsed = to_ms_since_boot(get_absolute_time()) - start_ms;
+        if (elapsed >= timeout_ms)
+        {
+            printf("\n*** Competition Mode selected (default) ***\n\n");
+            return BootRunMode::Competition;
+        }
+
+        int c = getchar_timeout_us(100000);
         if (c != PICO_ERROR_TIMEOUT)
         {
             char ch = static_cast<char>(c);
             if (ch == 'M' || ch == 'm')
             {
-                printf("\n*** MotorLab mode selected ***\n\n");
-                return OperatingMode::MOTORLAB;
+                printf("\n*** DriverLab selected ***\n\n");
+                return BootRunMode::DriverLab;
+            }
+            if (ch == 'N' || ch == 'n')
+            {
+                printf("\n*** Normal CLI Mode selected ***\n\n");
+                return BootRunMode::NormalCli;
+            }
+            if (ch == 'C' || ch == 'c')
+            {
+                printf("\n*** Cheese Hunt selected ***\n\n");
+                return BootRunMode::CheeseHunt;
+            }
+        }
+
+        int seconds_left = static_cast<int>((timeout_ms - elapsed) / 1000);
+        if (seconds_left != countdown_print && seconds_left >= 0)
+        {
+            printf("  %d...\n", seconds_left);
+            countdown_print = seconds_left;
+        }
+    }
+}
+
+static BootRunMode configuredBootRunMode()
+{
+    switch (BOOT_MODE_SELECTION)
+    {
+        case BootModeSelection::Competition:
+            printf("\n*** Competition Mode selected (config) ***\n\n");
+            return BootRunMode::Competition;
+        case BootModeSelection::CheeseHunt:
+            printf("\n*** Cheese Hunt selected (config) ***\n\n");
+            return BootRunMode::CheeseHunt;
+        case BootModeSelection::DriverLab:
+            printf("\n*** DriverLab selected (config) ***\n\n");
+            return BootRunMode::DriverLab;
+        case BootModeSelection::CLI:
+            printf("\n*** Normal CLI Mode selected (config) ***\n\n");
+            return BootRunMode::NormalCli;
+        case BootModeSelection::Prompt:
+        default:
+            return selectBootRunModePrompt(BOOT_MODE_PROMPT_TIMEOUT_MS);
+    }
+}
+
+static SensorMode selectSensorModePrompt(uint32_t timeout_ms)
+{
+    printf("\n==========================================\n");
+    printf("  I2C0 sensor selection\n");
+    printf("==========================================\n");
+    printf("  Press 'T' for ToF (default), 'L' for LineSensor.\n\n");
+
+    uint32_t start_ms = to_ms_since_boot(get_absolute_time());
+    while (true)
+    {
+        uint32_t elapsed = to_ms_since_boot(get_absolute_time()) - start_ms;
+        if (elapsed >= timeout_ms)
+        {
+            printf("\n*** ToF selected (default) ***\n\n");
+            return SensorMode::TOF;
+        }
+
+        int c = getchar_timeout_us(100000);
+        if (c != PICO_ERROR_TIMEOUT)
+        {
+            char ch = static_cast<char>(c);
+            if (ch == 'T' || ch == 't')
+            {
+                printf("\n*** ToF selected ***\n\n");
+                return SensorMode::TOF;
             }
             if (ch == 'L' || ch == 'l')
             {
-                printf("\n*** Line Following mode selected ***\n\n");
-                return OperatingMode::LINEFOLLOWING;
+                printf("\n*** LineSensor selected ***\n\n");
+                return SensorMode::LINE_SENSOR;
             }
         }
-
-        elapsed = to_ms_since_boot(get_absolute_time()) - start_time;
-
-        // Print countdown every second
-        int seconds_left = static_cast<int>((timeout_ms - elapsed) / 1000);
-        if (seconds_left != countdown_printed && seconds_left >= 0)
-        {
-            printf("  %d...\n", seconds_left);
-            countdown_printed = seconds_left;
-        }
     }
-
-    printf("\n*** MotorLab mode starting ***\n\n");
-    return OperatingMode::MOTORLAB;
 }
 
-// ============================================================================
-// NORMAL MODE - Maze-solving operation with dual-core architecture
-// ============================================================================
-
-/**
- * Processes motion commands from Core 0.
- * Handles STOP immediately, queues other commands when robot is ready.
- */
-void processCommands(Robot* robot)
+static SensorMode configuredSensorMode()
 {
-    CommandPacket cmd;
-    bool          saw_stop = false;
-
-    while (CommandHub::receiveNonBlocking(cmd))
+    switch (BOOT_SENSOR_SELECTION)
     {
-        if (cmd.type == CommandType::STOP)
-        {
-            saw_stop = true;
-            continue;
-        }
-
-        if (!robot->isMotionDone())
-            continue;
-
-        switch (cmd.type)
-        {
-            case CommandType::MOVE_FWD_HALF:
-                robot->moveDistance(HALF_CELL_DISTANCE_MM, 400.0f, 1000.0f);
-                break;
-
-            case CommandType::MOVE_FWD:
-                robot->moveDistance(cmd.param * CELL_DISTANCE_MM, 400.0f, 1000.0f);
-                break;
-
-            case CommandType::CENTER_FROM_EDGE:
-                robot->moveDistance(TO_CENTER_DISTANCE_MM, 400.0f, 1000.0f);
-                break;
-
-            case CommandType::TURN_LEFT:
-                robot->turnInPlace(-90.0f * cmd.param, 360.0f, 720.0f);
-                break;
-
-            case CommandType::TURN_RIGHT:
-                robot->turnInPlace(90.0f * cmd.param, 360.0f, 720.0f);
-                break;
-
-            case CommandType::TURN_ARBITRARY:
-                robot->turnInPlace(static_cast<float>(cmd.param), 360.0f, 720.0f);
-                break;
-
-            case CommandType::ARC_TURN_LEFT_90:
-                robot->smoothTurn(-90.0f, 45.0f);
-                break;
-
-            case CommandType::ARC_TURN_RIGHT_90:
-                robot->smoothTurn(90.0f, 45.0f);
-                break;
-
-            case CommandType::ARC_TURN_LEFT_45:
-                robot->smoothTurn(-45.0f, 45.0f);
-                break;
-
-            case CommandType::ARC_TURN_RIGHT_45:
-                robot->smoothTurn(45.0f, 45.0f);
-                break;
-
-            case CommandType::SNAPSHOT:
-            case CommandType::NONE:
-            default:
-                break;
-        }
-    }
-
-    if (saw_stop)
-        robot->stop();
-}
-
-/**
- * Core 1 entry point: Runs real-time control loop at 100Hz.
- */
-void core1_RobotController()
-{
-    Encoder left_encoder(pio0, 20, true);
-    Encoder right_encoder(pio0, 8, false);
-    ToF     left_tof(11, 'L');
-    ToF     front_tof(12, 'F');
-    ToF     right_tof(13, 'R');
-    IMU     imu(5);
-    Motor   left_motor(PIN_MOTOR_L_DIR, PIN_MOTOR_L_PWM, true);
-    Motor   right_motor(PIN_MOTOR_R_DIR, PIN_MOTOR_R_PWM, false);
-
-    Drivetrain drivetrain(&left_motor, &right_motor, &left_encoder, &right_encoder, g_battery);
-    Robot      robot(&drivetrain, &imu, &left_tof, &front_tof, &right_tof);
-
-    LOG_DEBUG("Core1: Hardware initialized");
-    robot.reset();
-
-    multicore_fifo_push_blocking(1);
-
-    const int       CONTROL_PERIOD_MS = 10;
-    absolute_time_t next_tick         = make_timeout_time_ms(CONTROL_PERIOD_MS);
-    absolute_time_t last_tick         = get_absolute_time();
-
-    while (true)
-    {
-        absolute_time_t now = get_absolute_time();
-        float           dt  = absolute_time_diff_us(last_tick, now) * 1e-6f;
-        last_tick           = now;
-
-        robot.update(dt);
-        processCommands(&robot);
-
-        SensorData sensor_data{};
-        sensor_data.left_encoder  = left_encoder.ticks();
-        sensor_data.right_encoder = right_encoder.ticks();
-        sensor_data.tof_left_mm   = static_cast<int16_t>(left_tof.distance());
-        sensor_data.tof_front_mm  = static_cast<int16_t>(front_tof.distance());
-        sensor_data.tof_right_mm  = static_cast<int16_t>(right_tof.distance());
-        sensor_data.imu_yaw       = imu.yaw();
-        sensor_data.timestamp_ms  = to_ms_since_boot(now);
-        SensorHub::publish(sensor_data);
-
-        sleep_until(next_tick);
-        next_tick = delayed_by_ms(next_tick, CONTROL_PERIOD_MS);
+        case BootSensorSelection::LineSensor:
+            printf("\n*** LineSensor selected (config) ***\n\n");
+            return SensorMode::LINE_SENSOR;
+        case BootSensorSelection::ToF:
+            printf("\n*** ToF selected (config) ***\n\n");
+            return SensorMode::TOF;
+        case BootSensorSelection::Prompt:
+        default:
+            return selectSensorModePrompt(BOOT_SENSOR_PROMPT_TIMEOUT_MS);
     }
 }
 
-/**
- * Run Normal mode: dual-core maze solving.
- */
-void runNormalMode(Battery& battery)
+// ----------------------------------------------------------------------------
+// DriverLab mode (single-core motor characterization)
+// ----------------------------------------------------------------------------
+static void runDriverLabMode(Battery* battery, SensorMode sensor_mode)
 {
-    Bluetooth bluetooth(uart0, 9600, 16, 17);
-    bluetooth.init();
-
-    bluetooth.write("=== Jurababa Normal Mode ===\r\n");
-
-    Log::setBluetoothInterface(&bluetooth);
-    Log::setBluetoothEnabled(true);
-    LOG_INFO("Bluetooth logging enabled");
-
-    LOG_DEBUG("Core0: Initializing multicore communication");
-    SensorHub::init();
-    multicore_launch_core1(core1_RobotController);
-
-    multicore_fifo_pop_blocking();
-    LOG_DEBUG("Core0: Core1 ready, starting maze solver");
-
-    std::array<int, 2>              start_cell = {0, 0};
-    std::vector<std::array<int, 2>> goal_cells = {{7, 7}, {7, 8}, {8, 7}, {8, 8}};
-    Maze                            maze(MAZE_SIZE, MAZE_SIZE);
-    Mouse                           mouse(start_cell, std::string("n"), goal_cells, &maze);
-    API                             api(&mouse);
-
-    LOG_INFO("Entering sensor monitoring loop...");
-
-    uint32_t       last_battery_check_ms     = 0;
-    const uint32_t BATTERY_CHECK_INTERVAL_MS = 5000;
-
-    uint32_t       last_bt_print_ms     = 0;
-    const uint32_t BT_PRINT_INTERVAL_MS = 1000;
-    uint32_t       bt_message_count     = 0;
-
-    while (true)
-    {
-        SensorData sensors;
-        SensorHub::snapshot(sensors);
-
-        uint32_t now_ms = to_ms_since_boot(get_absolute_time());
-        if (now_ms - last_battery_check_ms >= BATTERY_CHECK_INTERVAL_MS)
-        {
-            battery.update();
-            last_battery_check_ms = now_ms;
-
-            LOG_DEBUG("Battery: " << battery.voltage() << "V (raw ADC: " << battery.rawADC()
-                                  << ")");
-
-            if (battery.isLow(6.0f))
-            {
-                LOG_WARNING("Low battery! " << battery.voltage() << "V");
-            }
-        }
-
-        if (now_ms - last_bt_print_ms >= BT_PRINT_INTERVAL_MS)
-        {
-            last_bt_print_ms = now_ms;
-            bt_message_count++;
-
-            LOG_INFO("[" << bt_message_count << "] "
-                         << "Bat:" << battery.voltage() << "V "
-                         << "L:" << sensors.tof_left_mm << " "
-                         << "F:" << sensors.tof_front_mm << " "
-                         << "R:" << sensors.tof_right_mm);
-        }
-
-        if (bluetooth.hasCommand())
-        {
-            Bluetooth::Command cmd = bluetooth.command();
-            switch (cmd)
-            {
-                case Bluetooth::Command::START:
-                    LOG_INFO("BT: Start command received");
-                    break;
-                case Bluetooth::Command::HALT:
-                    LOG_INFO("BT: Halt command received");
-                    CommandHub::send(CommandType::STOP);
-                    break;
-                case Bluetooth::Command::RESET:
-                    LOG_INFO("BT: Reset command received");
-                    break;
-                case Bluetooth::Command::BATTERY:
-                    battery.update();
-                    bluetooth.write("Battery: " + std::to_string(battery.voltage()) + "V\r\n");
-                    break;
-                default:
-                    LOG_DEBUG("BT: Unknown command");
-                    break;
-            }
-        }
-
-        sleep_ms(CORE_SLEEP_MS);
-    }
-}
-
-// ============================================================================
-// MOTORLAB MODE - Motor characterization and tuning interface
-// ============================================================================
-
-/**
- * Run MotorLab mode: single-core motor characterization CLI.
- */
-void runMotorLabMode(Battery& battery)
-{
-    // Set up UART for Bluetooth in MotorLab mode
-    uart_init(uart0, 9600);
-    gpio_set_function(16, GPIO_FUNC_UART);
-    gpio_set_function(17, GPIO_FUNC_UART);
+    // 115200 baud matches the HC-05 Bluetooth module. The HC-05 must be
+    // reconfigured once via AT mode to use this rate (default ships at
+    // 9600): hold KEY high while powering on, open a terminal at 38400
+    // (HC-05 AT mode is always 38400), and send `AT+UART=115200,0,0`. At
+    // 9600, the BT link only carries ~960 B/s versus the reporter's
+    // ~3-9 KB/s peak, so the lossy uart_out_chars dropped trailing bytes
+    // (often the row-terminating '\n') and CSV rows arrived smushed
+    // together. See CLAUDE.md "Loop dt".
+    uart_init(uart0, 115200);
+    gpio_set_function(PIN_BT_TX, GPIO_FUNC_UART);
+    gpio_set_function(PIN_BT_RX, GPIO_FUNC_UART);
     uart_set_hw_flow(uart0, false, false);
     uart_set_format(uart0, 8, 1, UART_PARITY_NONE);
     uart_set_fifo_enabled(uart0, true);
-
-    // Enable custom driver for Bluetooth output
     stdio_set_driver_enabled(&bt_driver, true);
 
-    printf("\n\n");
-    printf("===========================================\n");
-    printf("  MOTORLAB MODE - Motor Characterization  \n");
-    printf("===========================================\n");
-    printf("Serial I/O: USB (115200) and UART0 (9600)\n");
-    printf("Units: mm/s (Config.h compatible)\n\n");
+    printf("\n=== DriverLab ===\n");
+    printf("Battery: %.2f V\n", battery->voltage());
 
-    printf("Battery voltage: %.2f V\n", battery.voltage());
-
-    Encoder left_encoder(pio0, 20, true);
-    Encoder right_encoder(pio0, 8, false);
+    Encoder left_encoder(pio0, PIN_ENCODER_L_A, false);
+    Encoder right_encoder(pio0, PIN_ENCODER_R_A, true);
     Motor   left_motor(PIN_MOTOR_L_DIR, PIN_MOTOR_L_PWM, true);
-    Motor   right_motor(PIN_MOTOR_R_DIR, PIN_MOTOR_R_PWM, false);
-
-    MotorLab motorlab(&left_motor, &right_motor, &left_encoder, &right_encoder, &battery);
-    motorlab.init();
-
-    printf("\nHardware initialized. Ready for testing.\n");
-    printf("Type '?' for command help.\n\n");
-
-    const uint32_t  LOOP_PERIOD_MS = static_cast<uint32_t>(LOOP_INTERVAL_S * 1000.0f);
-    absolute_time_t next_tick      = make_timeout_time_ms(LOOP_PERIOD_MS);
-
-    uint32_t       last_battery_update_ms     = 0;
-    const uint32_t BATTERY_UPDATE_INTERVAL_MS = 1000;
-
-    while (true)
-    {
-        uint32_t now_ms = to_ms_since_boot(get_absolute_time());
-
-        motorlab.updateEncoders(LOOP_INTERVAL_S);
-        motorlab.processSerial();
-
-        if (now_ms - last_battery_update_ms >= BATTERY_UPDATE_INTERVAL_MS)
-        {
-            battery.update();
-            last_battery_update_ms = now_ms;
-        }
-
-        sleep_until(next_tick);
-        next_tick = delayed_by_ms(next_tick, LOOP_PERIOD_MS);
-    }
-}
-
-// ============================================================================
-// LINEFOLLOWING MODE - Line following with intersection event queue
-// ============================================================================
-
-/**
- * Run Line Following mode: single-core line following with event queue.
- *
- * The intersection_event_queue string defines actions at each intersection:
- *   L# = turn left 90°, R# = turn right 90°, F# = go forward
- * When the queue is exhausted, the robot continues forward.
- */
-void runLineFollowingMode(Battery& battery)
-{
-    printf("\n");
-    printf("==========================================\n");
-    printf("  LINE FOLLOWING MODE                    \n");
-    printf("==========================================\n\n");
-
-    // Hardware init (no ToF sensors)
-    Encoder left_encoder(pio0, PIN_ENCODER_L, true);
-    Encoder right_encoder(pio0, PIN_ENCODER_R, false);
-    Motor   left_motor(PIN_MOTOR_L_DIR, PIN_MOTOR_L_PWM, true);
-    Motor   right_motor(PIN_MOTOR_R_DIR, PIN_MOTOR_R_PWM, false);
+    Motor   right_motor(PIN_MOTOR_R_DIR, PIN_MOTOR_R_PWM, true);
     IMU     imu(PIN_IMU_RX);
 
-    LineSensor line_sensor(i2c0, PIN_LINE_SDA, PIN_LINE_SCL);
-    line_sensor.init();
+    // DriverLab is standalone — no Drivetrain, no Motion. Drivers only.
+    // LineSensor and ToFs share I2C0 — exactly one branch runs.
+    ToF*        left_tof_p    = nullptr;
+    ToF*        front_tof_p   = nullptr;
+    ToF*        right_tof_p   = nullptr;
+    LineSensor* line_sensor_p = nullptr;
 
-    Drivetrain   drivetrain(&left_motor, &right_motor, &left_encoder, &right_encoder, &battery);
-    LineFollower line_follower(&drivetrain, &line_sensor, &imu, &battery);
-
-    printf("Hardware initialized.\n");
-    printf("Battery voltage: %.2f V\n", battery.voltage());
-
-    // Intersection event queue: L=left, F=forward, R=right, separated by #
-    std::string intersection_event_queue = "L#F#R#";
-
-    printf("Event queue: %s\n\n", intersection_event_queue.c_str());
-
-    // Parse the queue into individual tokens
-    std::vector<char> event_queue;
-    for (size_t i = 0; i < intersection_event_queue.size(); i++)
+    if (sensor_mode == SensorMode::LINE_SENSOR)
     {
-        char ch = intersection_event_queue[i];
-        if (ch == 'L' || ch == 'l' || ch == 'F' || ch == 'f' || ch == 'R' || ch == 'r')
-        {
-            event_queue.push_back(static_cast<char>(toupper(ch)));
-        }
-    }
-
-    size_t queue_index = 0;
-
-    printf("Parsed %zu events. Starting line follow...\n", event_queue.size());
-
-    line_follower.startFollowing();
-
-    // Control loop
-    const int       CONTROL_PERIOD_MS = 10;
-    absolute_time_t next_tick         = make_timeout_time_ms(CONTROL_PERIOD_MS);
-    absolute_time_t last_tick         = get_absolute_time();
-
-    while (true)
-    {
-        absolute_time_t now = get_absolute_time();
-        float           dt  = absolute_time_diff_us(last_tick, now) * 1e-6f;
-        last_tick           = now;
-
-        drivetrain.update(dt);
-        line_follower.update(dt);
-
-        // Check for intersection events
-        if (line_follower.isIntersectionDetected() && line_follower.isMotionDone())
-        {
-            if (queue_index < event_queue.size())
-            {
-                char action = event_queue[queue_index];
-                queue_index++;
-
-                printf("Intersection! Action: %c (%zu/%zu)\n", action, queue_index,
-                       event_queue.size());
-
-                switch (action)
-                {
-                    case 'L':
-                        line_follower.turnLeft90();
-                        break;
-                    case 'R':
-                        line_follower.turnRight90();
-                        break;
-                    case 'F':
-                    default:
-                        // Continue forward — nothing to do
-                        break;
-                }
-            }
-            else
-            {
-                // Queue exhausted — keep going forward
-                printf("Queue empty, continuing forward\n");
-            }
-        }
-
-        sleep_until(next_tick);
-        next_tick = delayed_by_ms(next_tick, CONTROL_PERIOD_MS);
-    }
-}
-
-// ============================================================================
-// Startup LED Indicator
-// ============================================================================
-
-/**
- * Blink the onboard LED to indicate successful startup.
- */
-void blinkStartupLED(int count, uint32_t on_ms, uint32_t off_ms)
-{
-    gpio_init(PICO_DEFAULT_LED_PIN);
-    gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
-
-    for (int i = 0; i < count; i++)
-    {
-        gpio_put(PICO_DEFAULT_LED_PIN, 1);
-        sleep_ms(on_ms);
-        gpio_put(PICO_DEFAULT_LED_PIN, 0);
-        if (i < count - 1)
-        {
-            sleep_ms(off_ms);
-        }
-    }
-}
-
-// ============================================================================
-// Main Entry Point
-// ============================================================================
-
-int main()
-{
-    // Initialize USB serial
-    stdio_init_all();
-
-    // Blink LED 3 times to indicate startup
-    blinkStartupLED(3, 150, 150);
-
-    sleep_ms(2000); // Wait for USB connection
-
-    // Battery monitor setup (shared by both modes)
-    Battery battery(26, 10000.0f, 5100.0f);
-    battery.init();
-    for (int i = 0; i < 10; i++)
-    {
-        battery.update();
-        sleep_ms(10);
-    }
-
-    // Set global pointer for Core 1 access (Normal mode)
-    g_battery = &battery;
-
-    // Select operating mode (6 second window to press 'M')
-    g_operating_mode = selectOperatingMode(6000);
-
-    // Run selected mode
-    if (g_operating_mode == OperatingMode::MOTORLAB)
-    {
-        runMotorLabMode(battery);
-    }
-    else if (g_operating_mode == OperatingMode::LINEFOLLOWING)
-    {
-        runLineFollowingMode(battery);
+        static LineSensor line_sensor(i2c0, PIN_LINE_SDA, PIN_LINE_SCL);
+        line_sensor.begin();
+        line_sensor_p = &line_sensor;
+        printf("LineSensor on I2C0\n");
     }
     else
     {
-        runNormalMode(battery);
+        static ToF left_tof(PIN_TOF_LEFT_XSHUT, 'L');
+        static ToF front_tof(PIN_TOF_FRONT_XSHUT, 'F');
+        static ToF right_tof(PIN_TOF_RIGHT_XSHUT, 'R');
+        left_tof_p  = &left_tof;
+        front_tof_p = &front_tof;
+        right_tof_p = &right_tof;
+        printf("ToFs on I2C0\n");
+    }
+
+    DriverLab driverlab(&left_motor, &right_motor, &left_encoder, &right_encoder, &imu, battery,
+                        left_tof_p, front_tof_p, right_tof_p, line_sensor_p);
+    driverlab.init();
+
+    printf("\nReady. Type '?' for help.\n\n");
+
+    const uint32_t  LOOP_PERIOD_US = static_cast<uint32_t>(LOOP_INTERVAL_S * 1.0e6f);
+    absolute_time_t next_tick      = make_timeout_time_us(LOOP_PERIOD_US);
+
+    while (true)
+    {
+        battery->update();         // 500 Hz; 10-sample MA = 20 ms time constant
+        imu.update();              // no-op for omega; reserved for future fusion
+        driverlab.tick();          // advances active trial by exactly one 500 Hz step
+        driverlab.processSerial(); // poll keyboard for new commands
+        bt_drain();                // pump TX ring -> uart0 FIFO between printfs
+        sleep_until(next_tick);
+        next_tick = delayed_by_us(next_tick, LOOP_PERIOD_US);
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Mouse app mode (Competition, Cheese Hunt, or Normal CLI)
+// ----------------------------------------------------------------------------
+static void runMouseAppMode(Battery* battery, SensorMode sensor_mode, bool competition_mode,
+                            bool cheese_hunt_mode = false)
+{
+    if (competition_mode || cheese_hunt_mode)
+        sensor_mode = SensorMode::TOF;
+
+    Bluetooth* bluetooth_ptr = nullptr;
+    if (!competition_mode && !cheese_hunt_mode)
+    {
+        static Bluetooth bluetooth(uart0, 115200, PIN_BT_TX, PIN_BT_RX);
+        bluetooth.init();
+        bluetooth.write("=== Jurababa CLI :) ===\r\n");
+        bluetooth.drain();
+        bluetooth_ptr = &bluetooth;
+        Log::setBluetoothInterface(bluetooth_ptr);
+        Log::setBluetoothPriority(LogPriority::INFO);
+        Log::setBluetoothEnabled(true);
+    }
+    else if (competition_mode)
+    {
+        Log::setBluetoothInterface(nullptr);
+        Log::setBluetoothEnabled(false);
+        printf("\n=== Jurababa Competition ===\n");
+        printf("ToF stack forced. Bluetooth disabled; USB serial diagnostics remain available.\n");
+    }
+    if (cheese_hunt_mode)
+    {
+        Log::setBluetoothInterface(nullptr);
+        Log::setBluetoothEnabled(false);
+        printf("\n=== Jurababa Cheese Hunt ===\n");
+        printf("ToF stack forced. GP12/GP13 reserved for IR; Bluetooth disabled.\n");
+    }
+
+    // After the banner block so the verdict reaches stdout always, and Bluetooth
+    // whenever this mode enabled it — one call site, both transports.
+    Breadcrumb::report();
+
+    // Maze + virtual mouse + wall bridge live on Core 0 in both sub-modes.
+    std::array<int, 2> start_cell = {0, 0};
+    // std::vector<std::array<int, 2>> goal_cells = {{7, 7}, {7, 8}, {8, 7}, {8, 8}};
+    std::vector<std::array<int, 2>> goal_cells = {{3, 3}, {3, 4}, {4, 3}, {4, 4}};
+
+    static Maze          maze(MAZE_SIZE, MAZE_SIZE);
+    static MazeMouse     maze_mouse(start_cell, std::string("n"), goal_cells, &maze);
+    static FirmwareMouse mouse(&maze_mouse);
+    mouse.setUp(start_cell, goal_cells);
+
+    // LineFollower stack — only built in LineSensor mode. Motion still owns
+    // the tuned forward/rotation controllers; LineFollower injects line
+    // steering during straight motion.
+    LineFollower* line_follower_ptr = nullptr;
+    Motion*       motion_ptr        = nullptr;
+    ToF*          left_tof_ptr      = nullptr;
+    ToF*          front_tof_ptr     = nullptr;
+    ToF*          right_tof_ptr     = nullptr;
+    BeaconIr*     beacon_ir_ptr     = nullptr;
+
+    if (sensor_mode == SensorMode::LINE_SENSOR)
+    {
+        static LineSensor line_sensor(i2c0, PIN_LINE_SDA, PIN_LINE_SCL);
+        line_sensor.begin();
+
+        static Encoder left_encoder(pio0, PIN_ENCODER_L_A, false);
+        static Encoder right_encoder(pio0, PIN_ENCODER_R_A, true);
+        static Motor   left_motor(PIN_MOTOR_L_DIR, PIN_MOTOR_L_PWM, true);
+        static Motor   right_motor(PIN_MOTOR_R_DIR, PIN_MOTOR_R_PWM, true);
+        static IMU     imu(PIN_IMU_RX);
+
+        static Drivetrain   drivetrain(&left_motor, &right_motor, &left_encoder, &right_encoder,
+                                       battery);
+        static Motion       motion(&drivetrain, &imu);
+        static LineFollower line_follower(&line_sensor, &motion);
+        line_follower_ptr = &line_follower;
+        motion_ptr        = &motion;
+
+        printf("LineFollower + Motion stack ready.\n");
+    }
+    else
+    {
+        // ToF mode: single-core UKMARS shape. All hardware lives on Core 0;
+        // Motion is advanced by a 500 Hz hardware-timer alarm registered
+        // below. The CLI's main loop (cli.loop()) handles serial I/O and
+        // polls ToFs at 50 Hz, exactly like mazerunner-core's Arduino
+        // loop() / Timer2 split.
+        static Encoder    left_encoder(pio0, PIN_ENCODER_L_A, false);
+        static Encoder    right_encoder(pio0, PIN_ENCODER_R_A, true);
+        static Motor      left_motor(PIN_MOTOR_L_DIR, PIN_MOTOR_L_PWM, true);
+        static Motor      right_motor(PIN_MOTOR_R_DIR, PIN_MOTOR_R_PWM, true);
+        static IMU        imu(PIN_IMU_RX);
+        static ToF        left_tof(PIN_TOF_LEFT_XSHUT, 'L');
+        static ToF        front_tof(PIN_TOF_FRONT_XSHUT, 'F');
+        static ToF        right_tof(PIN_TOF_RIGHT_XSHUT, 'R');
+        static Drivetrain drivetrain(&left_motor, &right_motor, &left_encoder, &right_encoder,
+                                     battery);
+        static Motion     motion(&drivetrain, &imu);
+
+        mouse.set_motion(&motion);
+        mouse.setTofSensors(&left_tof, &front_tof, &right_tof);
+        motion_ptr    = &motion;
+        left_tof_ptr  = &left_tof;
+        front_tof_ptr = &front_tof;
+        right_tof_ptr = &right_tof;
+        if (cheese_hunt_mode)
+        {
+            static BeaconIr beacon_ir;
+            beacon_ir.begin();
+            beacon_ir_ptr = &beacon_ir;
+        }
+
+        // Hand motion + ToFs to a 500 Hz timer alarm. Mirrors UKMARS
+        // systick.h: encoders.update → motion.update → motors.update_controllers
+        // (we do all of that inside Motion::update). 50 Hz ToF poll runs
+        // outside the alarm to keep its budget sub-millisecond.
+        struct CoreLoopCtx
+        {
+            Motion* motion;
+            ToF*    left_tof;
+            ToF*    front_tof;
+            ToF*    right_tof;
+        };
+        static CoreLoopCtx ctx{&motion, &left_tof, &front_tof, &right_tof};
+
+        static repeating_timer_t systick_timer;
+        add_repeating_timer_us(
+            -2000 /* 500 Hz, negative => fire on absolute schedule */,
+            +[](repeating_timer_t* t) -> bool
+            {
+                auto* c = static_cast<CoreLoopCtx*>(t->user_data);
+                c->motion->update();
+                return true;
+            },
+            &ctx, &systick_timer);
+
+        printf("Motion @ 500 Hz on Core 0 (single-core UKMARS shape).\n");
+    }
+
+    Cli::Deps deps;
+    deps.bluetooth     = bluetooth_ptr;
+    deps.battery       = battery;
+    deps.motion        = motion_ptr;
+    deps.left_tof      = left_tof_ptr;
+    deps.front_tof     = front_tof_ptr;
+    deps.right_tof     = right_tof_ptr;
+    deps.beacon_ir     = beacon_ir_ptr;
+    deps.line_follower = line_follower_ptr;
+    deps.driver_lab    = nullptr; // DriverLab requires direct motor access; not in Cli mode.
+    deps.maze          = &maze;
+    deps.maze_mouse    = &maze_mouse;
+    deps.mouse         = &mouse;
+    deps.sensor_mode   = sensor_mode;
+    deps.start_cell    = start_cell;
+    deps.goal_cells    = goal_cells;
+
+    Cli cli(deps);
+    if (cheese_hunt_mode)
+    {
+        cli.runCheeseHuntMode();
+        while (true)
+            sleep_ms(1000);
+    }
+    else if (competition_mode)
+    {
+        cli.runCompetitionMode();
+        stage_led::setIdle();
+        while (true)
+            sleep_ms(1000);
+    }
+    else
+    {
+        cli.greet();
+        cli.loop(); // never returns
+    }
+}
+
+static void runCliMode(Battery* battery, SensorMode sensor_mode)
+{
+    runMouseAppMode(battery, sensor_mode, /*competition_mode=*/false);
+}
+
+static void runCompetitionMode(Battery* battery)
+{
+    runMouseAppMode(battery, SensorMode::TOF, /*competition_mode=*/true);
+}
+
+static void runCheeseHuntMode(Battery* battery)
+{
+    runMouseAppMode(battery, SensorMode::TOF, /*competition_mode=*/false,
+                    /*cheese_hunt_mode=*/true);
+}
+
+// ----------------------------------------------------------------------------
+// Entry
+// ----------------------------------------------------------------------------
+int main()
+{
+    // First, before anything logs or samples: this snapshots the previous session's
+    // record, and any log line would otherwise overwrite the history we want to read.
+    Breadcrumb::begin();
+
+    stdio_init_all();
+    stage_led::flashBoot();
+    sleep_ms(2000); // wait for USB-CDC enumeration
+
+    Battery battery(PIN_BATTERY_ADC, 10000.0f, 5100.0f);
+    battery.begin();
+    // Quick pre-fill so the boot diagnostic printf in runDriverLabMode/runMouseAppMode
+    // has a non-zero reading before the 500 Hz tick loop spins up. The per-tick
+    // updater downstream takes over once the loop starts.
+    for (int i = 0; i < 3; i++)
+    {
+        battery.update();
+        sleep_ms(2);
+    }
+
+    // Always hand a live Battery* downstream so hot-plug works: if VBAT is
+    // absent at boot but plugged in later, BAT and voltage compensation pick
+    // it up automatically. Motor::set_motor_volts() already handles the
+    // <1 V case with an edge-triggered fallback warning (motor.cpp), so no
+    // boot-time latch is needed here.
+    Battery* battery_ptr = &battery;
+    if (battery.voltage() < 1.0f)
+    {
+        printf("Battery low/absent at boot (%.2f V). Hot-plug VBAT and BAT will pick it up.\n",
+               battery.voltage());
+    }
+
+    const BootRunMode boot_mode = configuredBootRunMode();
+
+    switch (boot_mode)
+    {
+        case BootRunMode::Competition:
+            runCompetitionMode(battery_ptr);
+            break;
+        case BootRunMode::CheeseHunt:
+            runCheeseHuntMode(battery_ptr);
+            break;
+        case BootRunMode::DriverLab:
+            runDriverLabMode(battery_ptr, configuredSensorMode());
+            break;
+        case BootRunMode::NormalCli:
+        default:
+            runCliMode(battery_ptr, configuredSensorMode());
+            break;
     }
 
     return 0;

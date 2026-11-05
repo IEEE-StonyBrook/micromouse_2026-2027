@@ -1,35 +1,32 @@
 /**
  * @file config.h
- * @brief Master configuration include - imports all config headers
- *
- * Include this single file to get all configuration constants.
- * Individual config files can also be included separately.
+ * @brief Master config — include this one file to get everything
  */
 #ifndef CONFIG_CONFIG_H
 #define CONFIG_CONFIG_H
 
-// Include all configuration modules
-#include "config/geometry.h" // Robot dimensions
-#include "config/motion.h"   // Speeds and accelerations
-#include "config/pins.h"     // GPIO pin assignments
-#include "config/sensors.h"  // Sensor thresholds
-#include "config/tuning.h"   // Feedforward and PID gains
+#include "config/boot.h"        // Boot mode/sensor selection and status LED
+#include "config/geometry.h"    // Physical dimensions, encoder, maze
+#include "config/motion.h"      // Speed/accel limits, tolerances
+#include "config/pins.h"        // GPIO pin assignments
+#include "config/sensors.h"     // Sensor hardware config
+#include "config/smooth_turn.h" // UKMARS-style smooth turn parameters
+#include "config/tuning.h"      // Calibration: feedforward + PID gains
 
-// ================= Hardware Constants ================= //
-// Motor PWM configuration
-#define PWM_WRAP        999u   // PWM counter wrap (resolution)
-#define MIN_DUTY_0_TO_1 0.225f // Minimum duty to overcome friction
-#define MAX_VOLTAGE     6.0f   // Maximum safe motor voltage
+// ===================== Motor Hardware ===================== //
+#define PWM_WRAP    999u // PWM counter wrap (10-bit resolution)
+#define MAX_VOLTAGE 6.0f // Maximum safe motor voltage
 
-// Battery
-#define DEFAULT_BATTERY_VOLTAGE 8.35f // Nominal 2S LiPo voltage
+// ===================== Battery ===================== //
+#define DEFAULT_BATTERY_VOLTAGE 8.35f // Nominal 2S LiPo
 
-// ================= Drivetrain Constants ================= //
-#define DRIVETRAIN_MIN_DT            0.001f  // Minimum valid dt (s)
-#define DRIVETRAIN_FF_DEADZONE_MMPS  10.0f   // Feedforward deadzone (mm/s)
-#define DRIVETRAIN_MAX_VELOCITY_MMPS 1500.0f // Velocity sanity check
+// Instantaneous rail voltage below which the pack is failing to deliver current.
+// 2S LiPo at ~3.2 V/cell. Estimate — tune once real sag figures are measured.
+#define BATTERY_SAG_WARN_V 6.4f
+// Recovery margin, so a reading sitting on the threshold does not chatter.
+#define BATTERY_SAG_CLEAR_V 0.2f
 
-// ================= Multicore Constants ================= //
-#define CORE_SLEEP_MS 250 // Inter-core sync sleep time (ms)
+// ===================== Multicore ===================== //
+#define CORE_SLEEP_MS 250 // Inter-core sync sleep (ms)
 
 #endif // CONFIG_CONFIG_H
