@@ -1,3 +1,5 @@
+> **Note:** `NEW_ROBOT` was merged into [`master`](https://github.com/IEEE-StonyBrook/micromouse_2026-2027/tree/master), which has the current code. This branch is kept only so older links to it still work.
+
 # Authors:
 ### Made with ❤️ by the Micromouse team!
 
