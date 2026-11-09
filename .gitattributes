@@ -1,0 +1,31 @@
+# New and LF files are stored with LF (202 of 226 tracked files already are).
+* text=auto
+
+# Legacy CRLF/mixed files: git stores and diffs these bytes exactly as they
+# are, so nothing is renormalized today. Edit them without changing their line
+# endings (see CLAUDE.md, Line endings). To convert them all to LF in one
+# commit, delete this block and run `git add --renormalize .` (24 files).
+firmware/common/utils.h -text
+firmware/config/pins.h -text
+firmware/control/drivetrain.cpp -text
+firmware/driver_lab/reporter.cpp -text
+firmware/driver_lab/reporter.h -text
+firmware/driver_lab/settings.h -text
+firmware/drivers/battery.cpp -text
+firmware/drivers/battery.h -text
+firmware/drivers/encoder.cpp -text
+firmware/drivers/encoder.h -text
+firmware/drivers/tof.cpp -text
+firmware/drivers/tof.h -text
+firmware/navigation/diagonalizer.cpp -text
+firmware/navigation/diagonalizer.h -text
+firmware/navigation/path_converter.h -text
+third_party/vl53l0x_api_rp2040/CMakeLists.txt -text
+third_party/vl53l0x_api_rp2040/platform/inc/vl53l0x_platform.h -text
+third_party/vl53l0x_api_rp2040/platform/inc/vl53l0x_platform_log.h -text
+third_party/vl53l0x_api_rp2040/platform/inc/vl53l0x_rp2040.h -text
+third_party/vl53l0x_api_rp2040/platform/inc/vl53l0x_types.h -text
+third_party/vl53l0x_api_rp2040/platform/src/vl53l0x_platform.c -text
+third_party/vl53l0x_api_rp2040/platform/src/vl53l0x_rp2040.c -text
+tools/driverlab_dashboard.py -text
+tools/requirements.txt -text
