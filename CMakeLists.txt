@@ -100,6 +100,13 @@ pico_generate_pio_header(Jurababa ${CMAKE_CURRENT_LIST_DIR}/firmware/drivers/ws2
 # Define PICO_BUILD for conditional compilation
 target_compile_definitions(Jurababa PRIVATE PICO_BUILD)
 
+# Bench build: boot into the CLI and search to a small goal block near the
+# start. OFF (the default) is the competition build.
+option(BENCH "Bench build: CLI boot and bench goal cells" OFF)
+if(BENCH)
+    target_compile_definitions(Jurababa PRIVATE JURABABA_BENCH)
+endif()
+
 pico_set_program_name(Jurababa "Jurababa")
 pico_set_program_version(Jurababa "1.0")
 

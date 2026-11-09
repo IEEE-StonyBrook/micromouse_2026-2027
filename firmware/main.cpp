@@ -500,8 +500,13 @@ static void runMouseAppMode(Battery* battery, SensorMode sensor_mode, bool compe
 
     // Maze + virtual mouse + wall bridge live on Core 0 in both sub-modes.
     std::array<int, 2> start_cell = {0, 0};
-    // std::vector<std::array<int, 2>> goal_cells = {{7, 7}, {7, 8}, {8, 7}, {8, 8}};
+    // Competition goal is the 16x16 centre block; BENCH builds (cmake -DBENCH=ON)
+    // search to a small block near the start so a run fits on the bench maze.
+#if defined(JURABABA_BENCH)
     std::vector<std::array<int, 2>> goal_cells = {{3, 3}, {3, 4}, {4, 3}, {4, 4}};
+#else
+    std::vector<std::array<int, 2>> goal_cells = {{7, 7}, {7, 8}, {8, 7}, {8, 8}};
+#endif
 
     static Maze          maze(MAZE_SIZE, MAZE_SIZE);
     static MazeMouse     maze_mouse(start_cell, std::string("n"), goal_cells, &maze);
