@@ -163,19 +163,67 @@ clang-format -i <file_path>
 `.clang-format` at the repo root defines the style. If you skip formatting, say
 so explicitly.
 
-## Building
+## Reference implementation
 
-**The user builds and flashes.** Suggest commands; run them only when asked.
+Jurababa was built from **mazerunner-core**, checked out at
+`third_party/mazerunner-core` (a git submodule; run
+`git submodule update --init` if empty). It is outside the build. When
+behaviour exists there, port it faithfully — same sequence, same geometry —
+rather than deriving a new model. Its default robot is Orion
+(`#define ROBOT ROBOT_ORION` in `mazerunner-core/config.h`), so
+`mazerunner-core/config-robot-orion.h` is the default source for motion
+constants.
 
-Firmware:
+Jurababa's own measurements win over Orion's numbers. Keep any constant whose
+comment cites a Jurababa measurement (DriverLab fit, slip sweep, ToF-tuned
+run). Today that is: the motor model and PD design in `config/tuning.h`
+(`MOTOR_KM/TM`, `ROT_KM/TM`, `FORWARD_KS*`, `ROT_TD = 1.5 Tm`),
+`ROBOT_BASE_ACCEL_MMPS2`, `ROBOT_BASE_ANGULAR_ACCEL_DEGPS2`, the smooth-turn
+entry offsets, turn angles and front trigger in `config/motion.h`,
+`FRONT_REFERENCE_MM` in `config/smooth_turn.h`, and the line-follower gains.
+
+## Build & flash
 
 ```bash
-mkdir -p build && cd build
-cmake .. -DPICO_SDK_PATH=/path/to/pico-sdk -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-make -j4
+tools/flash.sh              # competition build, then flash
+tools/flash.sh --bench      # bench build, then flash
+tools/flash.sh --no-flash   # build only
 ```
 
-Simulator: `cd sim && make`, producing `sim/bin/simulator`.
+It runs `cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+-DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DBENCH=OFF|ON`, then `ninja -C build`,
+then `picotool load -fx build/Jurababa.uf2` (picotool from
+`~/.pico-sdk/picotool/2.3.0`). The SDK (2.3.0) and toolchain come from
+`~/.pico-sdk` via the `pico-vscode.cmake` include, so no `PICO_SDK_PATH` is
+needed. A `build/` whose cache names another source directory is wiped and
+reconfigured automatically. Set `BUILD_DIR` to build elsewhere.
+
+Build with `--no-flash` to verify every firmware change; flash only when the
+user asks. If picotool finds no Pico, the user must hold BOOTSEL while
+plugging in USB.
+
+Simulator: `cd sim && make`, producing `sim/bin/Micromouse.out`.
+
+## Bench vs competition
+
+One CMake switch, `BENCH` (default `OFF`), selects the build. `OFF` is the
+competition build: boot into the gesture-driven COMP loop, goal = the centre
+block {7,7},{7,8},{8,7},{8,8}. `ON` (`tools/flash.sh --bench`) boots straight
+into the CLI and searches to {3,3},{3,4},{4,3},{4,4}. Both live under
+`JURABABA_BENCH` in `config/boot.h` and `main.cpp`. Change bench settings
+there, behind the switch, so the competition values stay committed.
+
+## Line endings
+
+New files are LF. The 24 legacy CRLF/mixed files are listed as `-text` in
+`.gitattributes`; keep each file's endings as they are. Edit with the Edit
+tool, never a script that rewrites the whole file. Check with
+`git diff --stat`: a few-line edit shows a few-line diff.
+
+## Replies
+
+Lead with the answer or the number. At most ~5 bullets, plain words; define
+any jargon in a clause the first time.
 
 ## Reporting your work
 
