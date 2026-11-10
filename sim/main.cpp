@@ -24,7 +24,7 @@ int main()
 
     // Initialize 16x16 maze with center goal
     std::array<int, 2>              start = {0, 0};
-    std::vector<std::array<int, 2>> goals = {{2, 2}};
+    std::vector<std::array<int, 2>> goals = {{7, 7}, {7, 8}, {8, 7}, {8, 8}};
 
     Maze      maze(MAZE_SIZE, MAZE_SIZE);
     MazeMouse maze_mouse(start, "n", goals, &maze);
