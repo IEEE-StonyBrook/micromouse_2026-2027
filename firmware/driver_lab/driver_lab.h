@@ -8,8 +8,6 @@
 #include "driver_lab/reporter.h"
 #include "driver_lab/settings.h"
 
-#include "pico/stdlib.h"
-
 #include <cstddef>
 #include <cstdint>
 #include <stdint.h>
