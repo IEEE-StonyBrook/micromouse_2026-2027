@@ -71,6 +71,15 @@ ISR_FUNCTIONS = [
     ("firmware/common/tof_wall_utils.h", "steeringAdjustmentDegps"),
     ("firmware/common/utils.h", "wrapAngle180"),
     ("firmware/common/utils.h", "clampAbs"),
+    ("firmware/hal/stm32/tick.cpp", "tim7_isr"),
+    ("firmware/hal/stm32/console.cpp", "dma1_stream3_isr"),
+    ("firmware/hal/stm32/console.cpp", "usart3_isr"),
+    ("firmware/hal/stm32/console.cpp", "kickTx"),
+    ("firmware/main_stm32.cpp", "onTick"),
+    ("firmware/hal/stm32/quad_counter.cpp", "QuadCounter::update"),
+    ("firmware/drivers/lsm6dsr.cpp", "Lsm6dsr::readFifo"),
+    ("firmware/drivers/lsm6dsr.cpp", "decodeFifoWord"),
+    ("firmware/hal/stm32/spi.cpp", "SpiBus::transfer"),
 ]
 
 FORBIDDEN = [

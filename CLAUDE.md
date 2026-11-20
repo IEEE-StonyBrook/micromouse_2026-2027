@@ -78,14 +78,22 @@ enforces this, and `make -C tests` compiles the platform-neutral code,
 through `hal::time`, never the SDK.
 
 `make -C tests` also builds and runs `tests/host_tests`, the doctest unit tests
-(`tests/*_test.cpp`) for Profile, PID, Drivetrain, Motion, the maze parser and
-the console HAL. It runs them twice: at the Pico's 500 Hz, then rebuilt at
+(`tests/*_test.cpp`) for Profile, PID, Drivetrain, Motion, the maze parser,
+the console HAL, the LSM6DSR driver (against a fake SPI register map) and the
+STM32 bring-up logic. It runs them twice: at the Pico's 500 Hz, then rebuilt at
 the STM32's 1 kHz (`-DHOST_LOOP_FREQUENCY_HZ=1000.0f`), where
 `rate_trajectory_test.cpp` checks that a profile move and a closed-loop
-straight match the 500 Hz run.
+straight match the 500 Hz run. Each STM32 driver keeps its arithmetic and
+state machines in libopencm3-free headers in `hal/stm32/` (`clock_plan.h`,
+`clock_startup.h`, `counter_extender.h`, `console_rings.h`) that the host
+tests include; only the thin register glue is untested off target.
 `tests/fakes/` stands in for the Motor, Encoder and IMU drivers on the host and
 adds a first-order two-wheel plant, so control changes can be tested without a
-mouse. Add a test case to a `*_test.cpp` file; the Makefile picks new files up.
+mouse. `tests/sim/` grows that into a physics sim: a DC-motor, two-wheel
+plant with knobs for wheel slip, encoder resolution, gyro noise and bias and a
+floor seam, tested in `physim_test.cpp`. `make -C tests physim` builds a CLI
+(`tests/physim --scenario straight10|ip90|ss90 ...`) that prints a CSV trace.
+Add a test case to a `*_test.cpp` file; the Makefile picks new files up.
 
 Run `ls firmware/<layer>` for the current file list; it is authoritative and
 this document is not.
@@ -219,9 +227,12 @@ cmake .. -DPICO_SDK_PATH=/path/to/pico-sdk -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 make -j4
 ```
 
-STM32F405 bring-up blinky (separate build directory; needs an Arm GNU
+STM32F405 bring-up firmware for the Adafruit Feather STM32F405 Express
+(pins and timers in `config/board_feather.h`): 168 MHz clock, 1 kHz TIM7
+tick, USART3 console at 1 Mbaud with `stats` and `flood` commands, TIM3/TIM4
+encoders and an LSM6DSR on SPI2. Separate build directory; needs an Arm GNU
 Toolchain with newlib, found through `ARM_TOOLCHAIN_PATH`,
-`PICO_TOOLCHAIN_PATH` or `PATH`):
+`PICO_TOOLCHAIN_PATH` or `PATH`:
 
 ```bash
 cmake -S . -B build-stm32 -G Ninja -DJURABABA_PLATFORM=stm32

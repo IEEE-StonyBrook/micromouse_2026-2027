@@ -14,11 +14,19 @@ include(${CMAKE_CURRENT_LIST_DIR}/libopencm3.cmake)
 set(STM32_LINKER_SCRIPT ${CMAKE_SOURCE_DIR}/firmware/hal/stm32/stm32f405.ld)
 
 set(STM32_HAL_SOURCES
+    firmware/hal/console.cpp
+    firmware/hal/stm32/clock.cpp
+    firmware/hal/stm32/console.cpp
     firmware/hal/stm32/memory.cpp
+    firmware/hal/stm32/quad_counter.cpp
+    firmware/hal/stm32/spi.cpp
+    firmware/hal/stm32/tick.cpp
+    firmware/hal/stm32/time.cpp
 )
 
 add_executable(Jurababa_stm32
     ${STM32_HAL_SOURCES}
+    firmware/drivers/lsm6dsr.cpp
     firmware/main_stm32.cpp
 )
 set_target_properties(Jurababa_stm32 PROPERTIES SUFFIX .elf LINK_DEPENDS ${STM32_LINKER_SCRIPT})

@@ -5,7 +5,7 @@
 
 /**
  * @brief Platform-neutral clock. Implemented in hal/pico/time.cpp (the SDK
- *        timer) and hal/host/time.cpp (std::chrono).
+ *        timer), hal/stm32/time.cpp (TIM5) and hal/host/time.cpp (std::chrono).
  */
 namespace hal::time
 {
