@@ -10,4 +10,8 @@
 // from this rate (config/motion.h), so changing it does not retune the mouse.
 #define LOOP_FREQUENCY_HZ 500.0f
 
+// Crash watchdog (config/motion.h) off by default: the Pico mouse is race-
+// proven without it and has no current sensing. CRASH ON in the CLI arms it.
+#define CRASH_WATCHDOG_DEFAULT_ENABLED 0
+
 #endif // CONFIG_BOARD_PICO_H

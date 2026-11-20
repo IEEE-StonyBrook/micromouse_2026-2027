@@ -53,6 +53,7 @@ set(DRIVER_SOURCES
 )
 
 set(CONTROL_SOURCES
+    firmware/control/crash_detector.cpp
     firmware/control/pid.cpp
     firmware/control/profile.cpp
     firmware/control/drivetrain.cpp
