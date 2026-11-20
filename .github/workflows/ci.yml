@@ -101,7 +101,7 @@ jobs:
       - name: Run the maze corpus
         run: >-
           python3 sim/runner/runner.py
-          --baseline sim/mazes/baseline.json
+          --baseline sim/mazes/baseline.json --min-optimal 0.9
           --json maze-results.json --csv maze-results.csv
 
       - uses: actions/upload-artifact@v4
