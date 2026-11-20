@@ -3,18 +3,24 @@
 #include <cstdio>
 #include <cstring>
 
-#include "common/log.h"
 #include "common/reset_report.h"
 
 #ifdef PICO_BUILD
+#include "common/log.h"
 #include "config/config.h"
+#endif
+
+// The Pico and the STM32 keep the record in RAM that survives a warm reset;
+// the host and the simulator have none, so there every call is a no-op.
+#if defined(PICO_BUILD) || defined(STM32_BUILD)
+#define BREADCRUMB_LIVE 1
 #include "hal/system.h"
 #include "hal/time.h"
 #endif
 
 namespace
 {
-#ifdef PICO_BUILD
+#ifdef BREADCRUMB_LIVE
 constexpr uint32_t kMagic = 0x4A555242; // 'JURB'
 
 struct Live
@@ -41,7 +47,7 @@ const Breadcrumb::Snapshot& Breadcrumb::previous()
 
 void Breadcrumb::begin()
 {
-#ifdef PICO_BUILD
+#ifdef BREADCRUMB_LIVE
     previous_.valid = (live_crumb.magic == kMagic);
     if (previous_.valid)
     {
@@ -62,7 +68,7 @@ void Breadcrumb::begin()
 
 void Breadcrumb::noteVoltage(float volts)
 {
-#ifdef PICO_BUILD
+#ifdef BREADCRUMB_LIVE
     live_crumb.voltage_last = volts;
     if (live_crumb.voltage_min <= 0.0f || volts < live_crumb.voltage_min)
         live_crumb.voltage_min = volts;
@@ -73,7 +79,7 @@ void Breadcrumb::noteVoltage(float volts)
 
 void Breadcrumb::noteActivity(const char* text)
 {
-#ifdef PICO_BUILD
+#ifdef BREADCRUMB_LIVE
     if (text == nullptr)
         return;
 
@@ -117,5 +123,24 @@ void Breadcrumb::report()
                   prev.valid ? "valid" : "decayed", static_cast<unsigned long>(prev.uptime_ms),
                   prev.voltage_min, prev.voltage_last);
     LOG_DIAG(line);
+#elif defined(STM32_BUILD)
+    // No Log on the STM32 yet: the console prints the verdict.
+    static const char* const LEVELS[] = {"INFO", "WARNING", "ERROR"};
+    const hal::system::ResetCause cause = hal::system::resetCause();
+    const Snapshot&               prev  = previous_;
+    // No battery readings yet, so voltage_min stays 0 and no sag is judged.
+    // The ticket that adds the battery monitor sets this board's threshold.
+    constexpr float   NO_SAG_THRESHOLD_V = 0.0f;
+    const ResetReport r                  = resetReport(cause, prev, NO_SAG_THRESHOLD_V);
+    for (uint8_t i = 0; i < r.count; ++i)
+        std::printf("[%s] %s\n", LEVELS[static_cast<int>(r.lines[i].severity)], r.lines[i].text);
+    std::printf("[DIAG] rcc_csr=0x%08lx por=%d bor=%d pin=%d sft=%d iwdg=%d wwdg=%d lpwr=%d "
+                "crumb=%s uptime_ms=%lu v_min=%.3f v_last=%.3f\n",
+                static_cast<unsigned long>(cause.raw), cause.power_on ? 1 : 0,
+                cause.brownout ? 1 : 0, cause.run_pin ? 1 : 0, cause.software ? 1 : 0,
+                cause.watchdog_timeout ? 1 : 0, cause.window_watchdog ? 1 : 0,
+                cause.low_power ? 1 : 0, prev.valid ? "valid" : "decayed",
+                static_cast<unsigned long>(prev.uptime_ms), static_cast<double>(prev.voltage_min),
+                static_cast<double>(prev.voltage_last));
 #endif
 }

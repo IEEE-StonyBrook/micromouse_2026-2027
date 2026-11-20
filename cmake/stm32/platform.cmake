@@ -31,7 +31,9 @@ set(STM32_HAL_SOURCES
 add_executable(Jurababa_stm32
     ${STM32_HAL_SOURCES}
     firmware/common/board_identity.cpp
+    firmware/common/breadcrumb.cpp
     firmware/common/flash_store.cpp
+    firmware/common/reset_report.cpp
     firmware/control/run_log.cpp
     firmware/drivers/lsm6dsr.cpp
     firmware/main_stm32.cpp
