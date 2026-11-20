@@ -55,6 +55,7 @@ navigation/ → maze/
 maze/ → config/
 drivers/ → config/, hal/
 hal/pico/ → Pico SDK
+hal/stm32/ → libopencm3
 ```
 
 What each layer is allowed to know:
@@ -66,11 +67,12 @@ What each layer is allowed to know:
 | `control/` | velocity, acceleration, PID, profiles, pose, kinematics | maze solving |
 | `maze/` | cells, directions, walls, coordinates, mouse pose | motors, sensors |
 | `navigation/` | flood fill, A*, goals, cell paths, L/F/R conversion | physical sensors |
-| `hal/` | platform-neutral interfaces (time, critical section, reset cause, peripheral handles, console); backends in `hal/pico/` and `hal/host/` | robot logic |
+| `hal/` | platform-neutral interfaces (time, critical section, reset cause, peripheral handles, console); backends in `hal/pico/`, `hal/stm32/` and `hal/host/` | robot logic |
 | `app/` | wiring the above together, CLI, Bluetooth, the control timer | — |
 
 Only `hal/pico/`, the driver `.cpp` files, `app/`, `driver_lab/*.cpp` and
-`main_pico.cpp` may include the Pico SDK. `python3 tools/check_sdk_free.py`
+`main_pico.cpp` may include the Pico SDK, and only `hal/stm32/` and
+`main_stm32.cpp` may include libopencm3. `python3 tools/check_sdk_free.py`
 enforces this, and `make -C tests` compiles the platform-neutral code against
 `hal/host`.
 
@@ -206,6 +208,20 @@ mkdir -p build && cd build
 cmake .. -DPICO_SDK_PATH=/path/to/pico-sdk -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 make -j4
 ```
+
+STM32F405 bring-up blinky (separate build directory; needs an Arm GNU
+Toolchain with newlib, found through `ARM_TOOLCHAIN_PATH`,
+`PICO_TOOLCHAIN_PATH` or `PATH`):
+
+```bash
+cmake -S . -B build-stm32 -G Ninja -DJURABABA_PLATFORM=stm32
+ninja -C build-stm32
+```
+
+The build runs `tools/check_stm32_layout.py`, which fails if anything lands in
+flash sectors 1-2 (the flash store) or code starts before sector 3. Flash
+`Jurababa_stm32.hex` or the `.elf`, never a raw `.bin`: a `.bin` zero-fills
+the flash store.
 
 Simulator: `cd sim && make`, producing `sim/bin/simulator`.
 

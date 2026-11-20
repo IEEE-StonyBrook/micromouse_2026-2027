@@ -777,6 +777,11 @@ void CommandLineInterface::run_long_cmd(const Args& args)
         handle_style_command(args);
         return;
     }
+    if (std::strcmp(args.argv[0], "PLANNER") == 0)
+    {
+        handle_planner_command(args);
+        return;
+    }
     if (std::strcmp(args.argv[0], "PATH") == 0)
     {
         handle_path_command(args);
@@ -1162,6 +1167,21 @@ void CommandLineInterface::handle_style_command(const Args& args)
     }
 
     printFormat("STYLE expects STATIONARY or SMOOTH.\n");
+}
+
+void CommandLineInterface::handle_planner_command(const Args& args)
+{
+    if (args.argc >= 2 && std::strcmp(args.argv[1], "LENGTH") == 0)
+        PathUtils::set_route_planner(RoutePlanner::PathLength);
+    else if (args.argc >= 2 && std::strcmp(args.argv[1], "TIME") == 0)
+        PathUtils::set_route_planner(RoutePlanner::RunTime);
+    else if (args.argc >= 2)
+    {
+        printFormat("PLANNER expects LENGTH or TIME.\n");
+        return;
+    }
+    printFormat("PLANNER: %s\n",
+                PathUtils::routePlanner() == RoutePlanner::RunTime ? "TIME" : "LENGTH");
 }
 
 void CommandLineInterface::append_path_forward_cells(std::vector<PathSegment>& segments, int cells)
@@ -2894,6 +2914,7 @@ void CommandLineInterface::help_debug()
 {
     printFormat("Jurababa debug extensions:\n");
     printFormat("STYLE [STATIONARY|SMOOTH] : select path execution style\n");
+    printFormat("PLANNER [LENGTH|TIME] : speed-run route by fewest cells or least est. time\n");
     printFormat(
         "PATH seq [spd acc omg alp] [SMOOTH] [RAW] : manual path, RAW disables heading hold\n");
     printFormat("SMOOTH [SET <name> <val>|DEFAULTS|RUN <L|R>] : tune/measure arc turns\n");

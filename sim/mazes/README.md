@@ -1,8 +1,9 @@
 # Maze corpus
 
 The headless runner (`sim/runner/runner.py`) runs the sim bot over every maze
-here. Its CI job fails if any maze fails, and warns when a run is worse than
-`baseline.json`.
+here. Its CI job fails if any maze fails or if fewer than 90% of speed runs
+match the maze's true optimum (the shortest route with every wall known, in
+cells entered), and warns when a run is worse than `baseline.json`.
 
 ## classic/
 
@@ -40,4 +41,18 @@ After a planner change that is meant to change the numbers:
 ```bash
 make -C sim
 python3 sim/runner/runner.py --write-baseline sim/mazes/baseline.json
+```
+
+## Comparing route planners
+
+The speed run picks its route by fewest cells (`--planner length`, the
+default) or by least estimated run time (`--planner time`): merged straights
+as rest-to-rest trapezoidal moves at the fast-run speed and acceleration, and
+90 degree spins at the spin-turn limits, all from `config/motion.h`. The
+comparison mode runs the corpus under both and fails unless both pass every
+maze and the time planner's route is never estimated slower:
+
+```bash
+make -C sim
+python3 sim/runner/runner.py --compare-planners
 ```

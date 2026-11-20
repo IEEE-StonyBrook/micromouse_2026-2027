@@ -12,7 +12,11 @@ TRAJ_500 := build-tests/traj_500.txt
 
 # One binary holds every test case; main.cpp supplies doctest's main().
 TEST_SRCS     := $(wildcard *_test.cpp)
-FIRMWARE_SRCS := ../firmware/maze/maze_setting.cpp ../firmware/hal/console.cpp
+FIRMWARE_SRCS := ../firmware/maze/maze_setting.cpp ../firmware/hal/console.cpp \
+                 ../firmware/maze/maze.cpp ../firmware/maze/maze_mouse.cpp \
+                 ../firmware/maze/route_proof.cpp \
+                 ../firmware/navigation/path_converter.cpp \
+                 ../firmware/navigation/route_planner.cpp ../firmware/navigation/run_time.cpp
 FAKE_SRCS     := $(wildcard fakes/*.cpp)
 
 .PHONY: test
