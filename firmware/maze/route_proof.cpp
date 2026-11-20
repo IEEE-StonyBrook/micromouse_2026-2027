@@ -36,8 +36,7 @@ bool passable(const Cell* from, const Cell* to, Unknown unknown)
     return side == EXIT || side == UNKNOWN;
 }
 
-// Breadth-first cells-entered distance from every source; walls are shared,
-// so the same grid serves either direction of travel.
+// Breadth-first cells-entered distance from every source.
 Grid distances(MazeMouse& maze, const std::vector<std::array<int, 2>>& sources, Unknown unknown)
 {
     const int width  = maze.mazeWidth();
@@ -105,24 +104,56 @@ std::vector<std::array<int, 2>> unprovenRouteCells(MazeMouse& maze, const std::a
     const int  best       = nearestGoal(from_start, goals);
     if (best == RouteBounds::NO_ROUTE)
         return {};
-    const Grid to_goal = distances(maze, goals, Unknown::Open);
 
-    // A cell lies on some best route when its distance from the start plus
-    // its distance to the nearest goal equals the best route length.
-    std::vector<std::array<int, 2>> cells;
-    for (int x = 0; x < maze.mazeWidth(); ++x)
+    // Of the tied best routes, follow the one with the fewest unexplored
+    // cells: it is the cheapest to confirm, and confirming it proves the
+    // route. Walk the shortest-route layers outward from the start, keeping
+    // each cell's fewest unexplored cells so far and the parent that gave it.
+    const int                       width  = maze.mazeWidth();
+    const int                       height = maze.mazeHeight();
+    std::vector<std::vector<Cell*>> layers(best + 1);
+    for (int x = 0; x < width; ++x)
+        for (int y = 0; y < height; ++y)
+            if (from_start[x][y] != RouteBounds::NO_ROUTE && from_start[x][y] <= best)
+                layers[from_start[x][y]].push_back(maze.cellAt(x, y));
+
+    constexpr int                   kUnreached = 1 << 30;
+    Grid                            unexplored(width, std::vector<int>(height, kUnreached));
+    std::vector<std::vector<Cell*>> parent(width, std::vector<Cell*>(height, nullptr));
+    unexplored[start[0]][start[1]] = maze.cellAt(start[0], start[1])->explored() ? 0 : 1;
+    for (int d = 1; d <= best; ++d)
     {
-        for (int y = 0; y < maze.mazeHeight(); ++y)
+        for (Cell* cell : layers[d])
         {
-            const int ds = from_start[x][y];
-            const int dg = to_goal[x][y];
-            if (ds == RouteBounds::NO_ROUTE || dg == RouteBounds::NO_ROUTE || ds + dg != best)
-                continue;
-            Cell* cell = maze.cellAt(x, y);
-            if (cell != nullptr && !cell->explored())
-                cells.push_back({x, y});
+            for (Cell* prev : maze.cellNeighbors(cell, /*include_diagonal=*/false))
+            {
+                if (from_start[prev->x()][prev->y()] != d - 1 ||
+                    !passable(prev, cell, Unknown::Open))
+                    continue;
+                const int count = unexplored[prev->x()][prev->y()] + (cell->explored() ? 0 : 1);
+                if (count < unexplored[cell->x()][cell->y()])
+                {
+                    unexplored[cell->x()][cell->y()] = count;
+                    parent[cell->x()][cell->y()]     = prev;
+                }
+            }
         }
     }
+
+    Cell* end = nullptr;
+    for (const auto& goal : goals)
+    {
+        Cell* cell = maze.cellAt(goal[0], goal[1]);
+        if (cell == nullptr || from_start[goal[0]][goal[1]] != best)
+            continue;
+        if (end == nullptr || unexplored[goal[0]][goal[1]] < unexplored[end->x()][end->y()])
+            end = cell;
+    }
+
+    std::vector<std::array<int, 2>> cells;
+    for (Cell* cell = end; cell != nullptr; cell = parent[cell->x()][cell->y()])
+        if (!cell->explored())
+            cells.push_back({cell->x(), cell->y()});
     return cells;
 }
 

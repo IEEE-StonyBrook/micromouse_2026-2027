@@ -81,8 +81,7 @@ static void unexploredCellWithKnownExitsIsNotProof()
 }
 
 // Only the start explored: unknown walls closed give no route at all, while
-// unknown walls open give the 4-cell corner-to-corner route through any
-// staircase, so every other cell of the 3x3 could lie on it.
+// unknown walls open give a 4-cell corner-to-corner staircase.
 static void freshMazeIsUnproven()
 {
     Maze      maze(3, 3);
@@ -94,14 +93,31 @@ static void freshMazeIsUnproven()
     CHECK(bounds.optimistic_cells == 4);
     CHECK(!bounds.proven());
 
-    // The start's east wall is known, so (1,0) is off every 4-cell route,
-    // as is (2,0) beyond it.
+    // One staircase's four unexplored cells. The start's east wall is known,
+    // so the route leaves north and never touches the bottom row.
     std::vector<Coord> todo = unprovenRouteCells(mm, {0, 0}, {{2, 2}});
-    CHECK(todo.size() == 6);
+    CHECK(todo.size() == 4);
     CHECK(!contains(todo, 0, 0));
     CHECK(!contains(todo, 1, 0));
     CHECK(!contains(todo, 2, 0));
     CHECK(contains(todo, 0, 1));
+    CHECK(contains(todo, 2, 2));
+}
+
+// Of the tied best routes, the one with the fewest unexplored cells is the
+// one worth checking: here east along the bottom, then north, leaving only
+// the goal itself.
+static void fewestUnexploredRouteIsChosen()
+{
+    Maze      maze(3, 3);
+    MazeMouse mm({0, 0}, "n", {{2, 2}}, &maze);
+    visit(maze, 0, 0, "0011");
+    visit(maze, 1, 0, "1010");
+    visit(maze, 2, 0, "0110");
+    visit(maze, 2, 1, "0100");
+
+    const std::vector<Coord> todo = unprovenRouteCells(mm, {0, 0}, {{2, 2}});
+    CHECK(todo.size() == 1);
     CHECK(contains(todo, 2, 2));
 }
 
@@ -141,6 +157,7 @@ int main()
 {
     unexploredCellWithKnownExitsIsNotProof();
     freshMazeIsUnproven();
+    fewestUnexploredRouteIsChosen();
     nearestGoalCellCounts();
     capsStopTheProof();
     if (failures == 0)

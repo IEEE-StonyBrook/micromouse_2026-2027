@@ -38,8 +38,9 @@ struct RouteProofCaps
 RouteBounds routeBounds(MazeMouse& maze, const std::array<int, 2>& start,
                         const std::vector<std::array<int, 2>>& goals);
 
-/// Unexplored cells on some optimistic best route: the cells still worth
-/// visiting. Empty once the route is proven or no route exists.
+/// Unexplored cells on the optimistic best route that has the fewest of them:
+/// the cells still worth visiting. Empty once the route is proven or no route
+/// exists.
 std::vector<std::array<int, 2>> unprovenRouteCells(MazeMouse& maze, const std::array<int, 2>& start,
                                                    const std::vector<std::array<int, 2>>& goals);
 
