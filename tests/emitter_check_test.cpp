@@ -5,6 +5,7 @@
 #include "common/emitter_check.h"
 #include "doctest/doctest.h"
 #include "fakes/fake_ir_bank.h"
+#include "hal/host/console_test.h"
 
 TEST_CASE("crosstalk capture fires each emitter alone and subtracts the dark reading")
 {
@@ -94,4 +95,39 @@ TEST_CASE("a receiver that barely sees its own emitter fails as weak")
 TEST_CASE("a board with no emitters never passes")
 {
     CHECK_FALSE(judgeCrosstalk(CrosstalkMatrix{}).pass);
+}
+
+TEST_CASE("the self-test prints the matrix and names each weak receiver and leaking pair")
+{
+    fake::IrBank bank(4);
+    for (int c = 0; c < 4; ++c)
+        bank.coupling[c][c] = 1000;
+    bank.coupling[2][2] = 40;  // weak receiver 2
+    bank.coupling[0][1] = 300; // emitter 0 leaks into receiver 1
+    hal::console::host::reset();
+
+    const CrosstalkVerdict v   = runEmitterCheck(bank);
+    const std::string      out = hal::console::host::takeOutput();
+
+    CHECK_FALSE(v.pass);
+    CHECK(out.find("  E0  1000   300     0     0") != std::string::npos);
+    CHECK(out.find("  E2     0     0    40     0") != std::string::npos);
+    CHECK(out.find("weak: R2 (40 < 100 counts)") != std::string::npos);
+    CHECK(out.find("leak: E0 -> R1 (300 counts, 30 % of R1's own; limit 25 %)") !=
+          std::string::npos);
+    CHECK(out.find("emitters: FAIL") != std::string::npos);
+}
+
+TEST_CASE("the self-test reports PASS on a clean board and says when there are no emitters")
+{
+    fake::IrBank bank(4);
+    for (int c = 0; c < 4; ++c)
+        bank.coupling[c][c] = 1000;
+    hal::console::host::reset();
+    CHECK(runEmitterCheck(bank).pass);
+    CHECK(hal::console::host::takeOutput().find("emitters: PASS") != std::string::npos);
+
+    fake::IrBank none(0);
+    CHECK_FALSE(runEmitterCheck(none).pass);
+    CHECK(hal::console::host::takeOutput() == "emitters: none on this board\n");
 }

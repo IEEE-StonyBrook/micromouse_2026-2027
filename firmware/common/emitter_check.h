@@ -87,4 +87,9 @@ struct CrosstalkVerdict
 /// Applies the weak and leak thresholds above.
 CrosstalkVerdict judgeCrosstalk(const CrosstalkMatrix& m);
 
+/// Captures and judges the matrix, then prints it through hal::console: one
+/// row per lit emitter (E0..), one column per receiver (R0..), then each weak
+/// receiver and leaking pair and a final "emitters: PASS" or "emitters: FAIL".
+CrosstalkVerdict runEmitterCheck(IrBank& bank);
+
 #endif // COMMON_EMITTER_CHECK_H

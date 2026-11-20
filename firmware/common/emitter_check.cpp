@@ -1,5 +1,7 @@
 #include "common/emitter_check.h"
 
+#include "hal/console.h"
+
 CrosstalkMatrix captureCrosstalk(IrBank& bank)
 {
     CrosstalkMatrix m;
@@ -44,5 +46,49 @@ CrosstalkVerdict judgeCrosstalk(const CrosstalkMatrix& m)
         }
     }
     v.pass = m.channels > 0 && v.weak_mask == 0 && v.leak_count == 0;
+    return v;
+}
+
+CrosstalkVerdict runEmitterCheck(IrBank& bank)
+{
+    namespace console = hal::console;
+    const CrosstalkMatrix  m = captureCrosstalk(bank);
+    const CrosstalkVerdict v = judgeCrosstalk(m);
+    if (m.channels == 0)
+    {
+        console::printFormat("emitters: none on this board\n");
+        return v;
+    }
+
+    console::printFormat("emitters: lit-minus-dark counts, row = emitter lit, column = receiver\n    ");
+    for (std::size_t r = 0; r < m.channels; ++r)
+        console::printFormat("    R%u", static_cast<unsigned>(r));
+    console::printFormat("\n");
+    for (std::size_t e = 0; e < m.channels; ++e)
+    {
+        console::printFormat("  E%u", static_cast<unsigned>(e));
+        for (std::size_t r = 0; r < m.channels; ++r)
+            console::printFormat("%6ld", static_cast<long>(m.counts[e][r]));
+        console::printFormat("\n");
+    }
+
+    for (std::size_t r = 0; r < m.channels; ++r)
+    {
+        if (v.weak_mask & (1u << r))
+            console::printFormat("  weak: R%u (%ld < %ld counts)\n", static_cast<unsigned>(r),
+                                 static_cast<long>(m.counts[r][r]),
+                                 static_cast<long>(CROSSTALK_MIN_DIAGONAL_COUNTS));
+    }
+    for (std::size_t i = 0; i < v.leak_count; ++i)
+    {
+        const unsigned e    = v.leaks[i].emitter;
+        const unsigned r    = v.leaks[i].receiver;
+        const int32_t  leak = m.counts[e][r];
+        const int32_t  own  = m.counts[r][r];
+        console::printFormat("  leak: E%u -> R%u (%ld counts, %ld %% of R%u's own; limit %ld %%)\n", e,
+                             r, static_cast<long>(leak), static_cast<long>(leak * 100 / own), r,
+                             static_cast<long>(CROSSTALK_MAX_LEAK_PERCENT));
+    }
+    console::printFormat("emitters: %s\n", v.pass ? "PASS" : "FAIL");
     return v;
 }
