@@ -5,13 +5,14 @@
 #ifndef CONFIG_CONFIG_H
 #define CONFIG_CONFIG_H
 
-#include "config/boot.h"        // Boot mode/sensor selection and status LED
-#include "config/geometry.h"    // Physical dimensions, encoder, maze
-#include "config/motion.h"      // Speed/accel limits, tolerances
-#include "config/pins.h"        // GPIO pin assignments
-#include "config/sensors.h"     // Sensor hardware config
-#include "config/smooth_turn.h" // UKMARS-style smooth turn parameters
-#include "config/tuning.h"      // Calibration: feedforward + PID gains
+#include "config/boot.h"         // Boot mode/sensor selection and status LED
+#include "config/geometry.h"     // Physical dimensions, encoder, maze
+#include "config/motion.h"       // Speed/accel limits, tolerances
+#include "config/motor_driver.h" // DRV8874 timing, current sense, idle sleep
+#include "config/pins.h"         // GPIO pin assignments
+#include "config/sensors.h"      // Sensor hardware config
+#include "config/smooth_turn.h"  // UKMARS-style smooth turn parameters
+#include "config/tuning.h"       // Calibration: feedforward + PID gains
 
 // ===================== Motor Hardware ===================== //
 #define PWM_WRAP    999u // PWM counter wrap (10-bit resolution)

@@ -93,6 +93,12 @@ ISR_FUNCTIONS = [
     ("firmware/drivers/lsm6dsr.cpp", "Lsm6dsr::readFifo"),
     ("firmware/drivers/lsm6dsr.cpp", "decodeFifoWord"),
     ("firmware/hal/stm32/spi.cpp", "SpiBus::transfer"),
+    ("firmware/drivers/motor_bridge.cpp", "MotorBridge::update"),
+    ("firmware/drivers/motor_bridge.cpp", "MotorBridge::driveOutputs"),
+    ("firmware/drivers/motor_bridge.cpp", "MotorBridge::sleepNow"),
+    ("firmware/drivers/motor_bridge.cpp", "MotorBridge::sleep"),
+    ("firmware/drivers/motor_bridge.cpp", "MotorBridge::set_duty"),
+    ("firmware/drivers/motor_bridge.cpp", "MotorBridge::readAmps"),
 ]
 
 FORBIDDEN = [
