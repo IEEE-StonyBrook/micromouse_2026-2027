@@ -30,6 +30,21 @@ _Avoid_: bump
 ### Runs
 
 **Competition mode**:
-The firmware mode used at a contest: a staged sequence of exploration,
-return and fast runs, started by gestures, with abort and resume.
+The firmware mode used at a contest: a staged sequence of search runs,
+return runs and speed runs, started by gestures, with abort and resume.
 _Avoid_: contest mode, race mode
+
+**Search run**:
+A run from the start cell that explores the maze to find the goal and map
+its walls.
+_Avoid_: exploration run, mapping run
+
+**Return run**:
+A run from the goal back to the start cell, exploring any cells that could
+shorten the best route.
+_Avoid_: return trip, go home
+
+**Speed run**:
+A timed run from the start cell to the goal along the best known route,
+without exploring.
+_Avoid_: fast run, fast attempt
