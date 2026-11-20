@@ -17,6 +17,8 @@ ends on first reaching a goal cell, the return run on reaching the start cell
 again, and the speed run on reaching a goal cell after that.
 """
 
+import math
+
 HEADINGS = ["n", "ne", "e", "se", "s", "sw", "w", "nw"]
 _VECTOR = {
     "n": (0, 1), "ne": (1, 1), "e": (1, 0), "se": (1, -1),
@@ -36,7 +38,7 @@ PHASES = ["search", "return", "speed", "done"]
 
 class _PhaseStats:
     def __init__(self):
-        self.half_steps = 0
+        self.distance_cells = 0.0
         self.turns = 0
         self.cells = set()
 
@@ -103,12 +105,12 @@ class MmsSession:
         return {
             "search_reached": reached > 0,
             "cells_searched": len(s.cells),
-            "search_moves": _cells(s.half_steps),
+            "search_moves": _cells(s.distance_cells),
             "search_turns": s.turns,
             "return_reached": reached > 1,
-            "return_moves": _cells(r.half_steps),
+            "return_moves": _cells(r.distance_cells),
             "speed_reached": reached > 2,
-            "speed_path_cells": _cells(f.half_steps),
+            "speed_path_cells": _cells(f.distance_cells),
             "speed_turns": f.turns,
         }
 
@@ -144,10 +146,12 @@ class MmsSession:
                 self._fail("crash on %r at %s facing %s: %s"
                            % (line, self.cell or self._pos, self.heading, blocked))
                 return "crash"
+        # A half step is 0.5 cells straight, or 0.5 * sqrt(2) cells on a diagonal.
+        step_cells = 0.5 * math.hypot(dx, dy)
         stats = self._stats[self.phase]
         for point in path:
             self._pos = point
-            stats.half_steps += 1
+            stats.distance_cells += step_cells
             cell = self.cell
             if cell is not None:
                 stats.cells.add(cell)
@@ -178,6 +182,7 @@ class MmsSession:
         return None
 
 
-def _cells(half_steps):
-    """Half steps as cells, an int when whole."""
-    return half_steps // 2 if half_steps % 2 == 0 else half_steps / 2
+def _cells(distance):
+    """A distance in cells, rounded to 3 places and an int when whole."""
+    distance = round(distance, 3)
+    return int(distance) if distance.is_integer() else distance

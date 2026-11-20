@@ -105,6 +105,18 @@ class PhaseTest(unittest.TestCase):
         self.assertEqual(r["speed_path_cells"], 6)
         self.assertEqual(r["speed_turns"], 6)
 
+    def test_diagonal_speed_run_is_measured_in_cells(self):
+        s = MmsSession(parse_text(OPEN_2X2))
+        drive(s, ["moveForward", "turnRight", "moveForward"])  # search to (1, 1)
+        drive(s, ["turnRight", "moveForward", "turnRight", "moveForward"])  # back to start
+        self.assertEqual(s.phase, "speed")
+        drive(s, ["turnRight", "moveForwardHalf", "turnRight45", "moveForwardHalf",
+                  "turnRight45", "moveForwardHalf"])
+        self.assertEqual(s.phase, "done")
+        # Two straight half cells plus one diagonal half cell, 0.5 * sqrt(2).
+        self.assertEqual(s.report()["speed_path_cells"], 1.707)
+        self.assertEqual(s.report()["speed_turns"], 3)
+
     def test_unfinished_run_is_reported_as_not_reached(self):
         s = MmsSession(parse_text(TINY_TEXT))
         s.handle("moveForward")
