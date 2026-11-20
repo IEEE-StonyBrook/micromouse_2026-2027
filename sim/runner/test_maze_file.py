@@ -4,7 +4,7 @@ import os
 import tempfile
 import unittest
 
-from maze_file import Maze, load_maze, parse_num, parse_text
+from maze_file import Maze, load_maze, parse_num, parse_text, shortest_route_cells
 
 # A 3x3 maze, north at the top. (0, 0) is the bottom-left start cell, whose
 # east wall forces the mouse north first; the goal G is the top-right cell,
@@ -71,6 +71,22 @@ class TextFormatTest(unittest.TestCase):
     def test_rejects_ragged_grid(self):
         with self.assertRaises(ValueError):
             parse_text("o---o\n|   |\no---\n")
+
+
+class ShortestRouteTest(unittest.TestCase):
+    def test_tiny_maze_route_is_six_cells(self):
+        # N N E S E N is the only route.
+        self.assertEqual(shortest_route_cells(parse_text(TINY_TEXT)), 6)
+
+    def test_nearest_goal_cell_counts(self):
+        maze = parse_text(TINY_TEXT)
+        maze.goals = [(2, 2), (0, 2)]
+        self.assertEqual(shortest_route_cells(maze), 2)
+
+    def test_walled_off_goal_has_no_route(self):
+        maze = parse_text(TINY_TEXT)
+        maze.set_wall(0, 1, "n")
+        self.assertIsNone(shortest_route_cells(maze))
 
 
 class NumFormatTest(unittest.TestCase):
