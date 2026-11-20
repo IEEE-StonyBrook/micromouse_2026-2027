@@ -421,7 +421,7 @@ static void runDriverLabMode(Battery* battery, SensorMode sensor_mode)
 
     if (sensor_mode == SensorMode::LINE_SENSOR)
     {
-        static LineSensor line_sensor(i2c0, PIN_LINE_SDA, PIN_LINE_SCL);
+        static LineSensor line_sensor(hal::I2cBus::kI2c0, PIN_LINE_SDA, PIN_LINE_SCL);
         line_sensor.begin();
         line_sensor_p = &line_sensor;
         printf("LineSensor on I2C0\n");
@@ -521,7 +521,7 @@ static void runMouseAppMode(Battery* battery, SensorMode sensor_mode, bool compe
 
     if (sensor_mode == SensorMode::LINE_SENSOR)
     {
-        static LineSensor line_sensor(i2c0, PIN_LINE_SDA, PIN_LINE_SCL);
+        static LineSensor line_sensor(hal::I2cBus::kI2c0, PIN_LINE_SDA, PIN_LINE_SCL);
         line_sensor.begin();
 
         static Encoder left_encoder(hal::PioBlock::kPio0, PIN_ENCODER_L_A, false);
