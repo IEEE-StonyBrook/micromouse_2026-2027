@@ -8,7 +8,7 @@ import sys
 import tempfile
 import unittest
 
-from maze_file import parse_text
+from maze_file import load_maze, parse_text
 from runner import (compare, compare_planners, maze_setting, run_maze, speed_route_estimate,
                     summarize)
 from test_maze_file import TINY_TEXT
@@ -146,6 +146,14 @@ class SimBotTest(unittest.TestCase):
         self.assertGreaterEqual(result["cells_searched"], 7)
         self.assertEqual(result["optimum_cells"], 6)
         self.assertTrue(result["speed_optimal"])
+        self.assertEqual(result["error_lines"], 0, result.get("log_tail"))
+
+    def test_route_proof_logs_no_errors(self):
+        # Proving the route on the way home probes for known-exit routes that
+        # often don't exist yet; that is expected and must not log errors.
+        maze = load_maze(os.path.join(HERE, "..", "mazes", "classic", "torture.txt"))
+        result = run_maze([BOT], maze, timeout_s=60)
+        self.assertTrue(result["ok"], result["error"])
         self.assertEqual(result["error_lines"], 0, result.get("log_tail"))
 
     def test_both_planners_solve_tiny_maze(self):
