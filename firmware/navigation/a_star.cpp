@@ -108,7 +108,8 @@ std::vector<Cell*> AStar::findPathTo(Cell* end, bool diagonals, bool pass_goals)
         }
     }
 
-    LOG_ERROR("AStar: No path found!");
+    if (!quiet_)
+        LOG_ERROR("AStar: No path found!");
     mouse_->resetPathfinding();
     return {};
 }

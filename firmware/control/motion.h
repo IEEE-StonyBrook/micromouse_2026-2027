@@ -5,6 +5,7 @@
 
 #include "common/tof_wall_utils.h"
 #include "config/motion.h"
+#include "control/crash_detector.h"
 #include "control/pid.h"
 #include "control/profile.h"
 
@@ -198,6 +199,22 @@ class Motion
     // scheduler pinned to LOOP_FREQUENCY_HZ.
     void update();
 
+    // === Crash watchdog ===
+    // update() feeds the detector every tick. On a trip it cuts the motors
+    // itself (Drivetrain::stop(), then the cut hook) and holds them cut,
+    // with the move frozen, until clear_crash(). The main loop reports it.
+    // Reads the motor currents in amps; false if no reading this tick.
+    using CurrentReader = bool (*)(void* context, float* left_amps, float* right_amps);
+    CrashDetector& crashDetector() { return crash_; }
+    // Wire these at start-up, before the control tick runs.
+    void set_motor_current_reader(CurrentReader reader, void* context);
+    // Called from the control tick on the trip, after the PWM is cut: where a
+    // board puts its drivers to sleep (STM32 DRV8874 nSLEEP). Null = none.
+    void set_crash_cut_hook(void (*hook)()) { crash_cut_hook_ = hook; }
+    // Main loop only: drops the frozen move, so clearing never resumes it,
+    // then releases the latch on the next tick.
+    void clear_crash();
+
     // === Turn trace (diagnostics) ===
     // Recorded on the control core every TRACE_DECIMATION ticks while armed;
     // read back on Core 0 only after the motion has finished.
@@ -330,6 +347,7 @@ class Motion
     void  resetControlHistory();
     void  clearWallSteeringStats();
     void  recordWallSteeringStats(float adjustment_degps, tof_wall::SteeringSource source);
+    void  checkCrash();
 
     // Hardware
     Drivetrain* drivetrain_;
@@ -405,6 +423,11 @@ class Motion
     // Non-zero while the rotation PD reads encoder yaw: UINT16_MAX during a
     // smooth-turn arc, then a holdover countdown in ticks once it ends.
     uint16_t encoder_rotation_ticks_ = 0;
+
+    CrashDetector crash_;
+    CurrentReader current_reader_  = nullptr;
+    void*         current_context_ = nullptr;
+    void (*crash_cut_hook_)()      = nullptr;
 };
 
 #endif

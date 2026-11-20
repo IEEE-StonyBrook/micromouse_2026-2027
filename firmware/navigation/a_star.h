@@ -45,6 +45,9 @@ class AStar
     float lastPathCost() const { return total_cost_; }
     // Extra cost per explored cell, to prefer unexplored routes. 0 = shortest.
     void set_explored_cell_cost(float cost) { explored_cell_cost_ = cost; }
+    // A caller that only probes whether a route exists (and has a fallback)
+    // can silence the no-path error.
+    void set_quiet(bool quiet) { quiet_ = quiet; }
 
   private:
     std::vector<Cell*> findBestPath(std::vector<std::array<int, 2>> goals, bool diagonals,
@@ -59,6 +62,7 @@ class AStar
     float      total_cost_ = 0.0f;
 
     float explored_cell_cost_ = 0.0f;
+    bool  quiet_              = false;
 };
 
 #endif

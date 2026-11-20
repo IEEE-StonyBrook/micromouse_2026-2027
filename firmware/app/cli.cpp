@@ -532,6 +532,7 @@ bool CommandLineInterface::process_serial_data()
     handleBluetoothCommand();
     drainConsole();
     Motor::reportBatteryFallback();
+    reportCrash();
 
     if (deps_.battery != nullptr && deps_.sensor_mode != SensorMode::TOF)
         deps_.battery->update();
@@ -820,6 +821,11 @@ void CommandLineInterface::run_long_cmd(const Args& args)
         handle_maze_command(args);
         return;
     }
+    if (std::strcmp(args.argv[0], "CRASH") == 0)
+    {
+        handle_crash_command(args);
+        return;
+    }
     if (std::strcmp(args.argv[0], "HALT") == 0)
     {
         stop();
@@ -941,7 +947,11 @@ void CommandLineInterface::runCompetitionMode()
 
     auto pause_after_abort = [&]() -> bool
     {
-        stage_led::setPaused();
+        // A crash keeps its cause code on the LED instead of plain red.
+        if (deps_.motion != nullptr && deps_.motion->crashDetector().tripped())
+            stage_led::showCrash(static_cast<int>(deps_.motion->crashDetector().cause()));
+        else
+            stage_led::setPaused();
         printFormat("COMP paused. BOOTSEL again to resume; HALT or X to exit.\n");
 
         while (abortRequested())
@@ -980,6 +990,9 @@ void CommandLineInterface::runCompetitionMode()
     // Each iteration: arm, wait for a gesture, dispatch, return to arm.
     while (true)
     {
+        // Re-arming after a crash is the operator's reset: release the latch.
+        if (deps_.motion != nullptr && deps_.motion->crashDetector().tripped())
+            deps_.motion->clear_crash();
         halted_               = false;
         comp_pending_trigger_ = StartTrigger::NONE;
         comp_armed_           = true;
@@ -2096,6 +2109,7 @@ void CommandLineInterface::pollHaltOnly()
     // Runs every tick of a blocking run, so the control interrupt's flags get
     // reported while process_serial_data() is not being polled.
     Motor::reportBatteryFallback();
+    reportCrash();
 
     int c = hal::console::getcNonBlocking();
     if (c >= 0)
@@ -2810,10 +2824,59 @@ void CommandLineInterface::stop()
     printFormat("STOP\n");
 }
 
+void CommandLineInterface::reportCrash()
+{
+    if (deps_.motion == nullptr)
+        return;
+    const CrashDetector& crash = deps_.motion->crashDetector();
+    const uint32_t       trips = crash.tripCount();
+    if (trips == crash_trips_reported_)
+        return;
+    crash_trips_reported_  = trips;
+    const CrashCause cause = crash.cause();
+    printFormat("CRASH: %s (code %d), motors cut. CRASH CLEAR or RESET to re-arm.\n",
+                crashCauseName(cause), static_cast<int>(cause));
+    stage_led::showCrash(static_cast<int>(cause));
+    // Abort any blocking run: its move is frozen and will never finish.
+    halted_ = true;
+}
+
+void CommandLineInterface::handle_crash_command(const Args& args)
+{
+    if (deps_.motion == nullptr)
+    {
+        printFormat("CRASH requires Motion.\n");
+        return;
+    }
+    CrashDetector& crash = deps_.motion->crashDetector();
+    if (args.argc >= 2 && std::strcmp(args.argv[1], "ON") == 0)
+        crash.set_enabled(true);
+    else if (args.argc >= 2 && std::strcmp(args.argv[1], "OFF") == 0)
+        crash.set_enabled(false);
+    else if (args.argc >= 2 && std::strcmp(args.argv[1], "CLEAR") == 0)
+    {
+        deps_.motion->clear_crash();
+        hal::time::sleepMs(10); // the latch releases on the next control tick
+    }
+    else if (args.argc >= 3 && std::strcmp(args.argv[1], "INHIBIT") == 0)
+        crash.set_inhibit(std::strcmp(args.argv[2], "ON") == 0);
+    else if (args.argc >= 2 && std::strcmp(args.argv[1], "STATUS") != 0)
+    {
+        printFormat("CRASH [ON|OFF|CLEAR|INHIBIT ON|INHIBIT OFF|STATUS]\n");
+        return;
+    }
+    printFormat("CRASH watchdog %s, inhibit %s, %s, trips %lu\n", crash.enabled() ? "ON" : "OFF",
+                crash.inhibited() ? "ON" : "OFF",
+                crash.tripped() ? crashCauseName(crash.cause()) : "clear",
+                static_cast<unsigned long>(crash.tripCount()));
+}
+
 void CommandLineInterface::reset()
 {
     if (deps_.sensor_mode == SensorMode::TOF && deps_.motion != nullptr)
         deps_.motion->emergency_stop();
+    if (deps_.motion != nullptr && deps_.motion->crashDetector().tripped())
+        deps_.motion->clear_crash();
     if (deps_.line_follower != nullptr)
         deps_.line_follower->reset();
 
@@ -2943,5 +3006,6 @@ void CommandLineInterface::help_debug()
     printFormat("       (abort rolls back wall data; HALT/X while paused exits COMP)\n");
     printFormat("CHEESE : one-front-wave Cheese Hunt beacon search\n");
     printFormat("RESET : reset search state without rebooting\n");
+    printFormat("CRASH [ON|OFF|CLEAR|INHIBIT ON|OFF|STATUS] : crash watchdog (Pico default OFF)\n");
     printFormat("HALT : stop motion\n");
 }

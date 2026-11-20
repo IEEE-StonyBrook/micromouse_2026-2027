@@ -10,4 +10,7 @@
 // rate (config/motion.h).
 #define LOOP_FREQUENCY_HZ 1000.0f
 
+// Crash watchdog (config/motion.h) on by default; CRASH OFF in the CLI disarms it.
+#define CRASH_WATCHDOG_DEFAULT_ENABLED 1
+
 #endif // CONFIG_BOARD_STM32_H

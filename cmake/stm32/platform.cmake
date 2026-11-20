@@ -17,15 +17,19 @@ set(STM32_HAL_SOURCES
     firmware/hal/console.cpp
     firmware/hal/stm32/clock.cpp
     firmware/hal/stm32/console.cpp
+    firmware/hal/stm32/flash.cpp
     firmware/hal/stm32/memory.cpp
     firmware/hal/stm32/quad_counter.cpp
     firmware/hal/stm32/spi.cpp
     firmware/hal/stm32/tick.cpp
     firmware/hal/stm32/time.cpp
+    firmware/hal/stm32/uid.cpp
 )
 
 add_executable(Jurababa_stm32
     ${STM32_HAL_SOURCES}
+    firmware/common/board_identity.cpp
+    firmware/common/flash_store.cpp
     firmware/drivers/lsm6dsr.cpp
     firmware/main_stm32.cpp
 )

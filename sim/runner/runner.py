@@ -115,11 +115,14 @@ def run_maze(bot, maze, timeout_s=DEFAULT_TIMEOUT_S):
 
     result = session.report()
     result["est_run_time_s"] = speed_route_estimate(log_text)
+    result["error_lines"] = log_text.count("[ERROR]")
     result["commands"] = session.commands
     result["optimum_cells"] = shortest_route_cells(maze)
     result["speed_optimal"] = (result["speed_reached"]
                                and result["speed_route_cells"] == result["optimum_cells"])
     error = None
+    if result["error_lines"]:
+        result["log_tail"] = log_tail
     if timed_out.is_set():
         error = "timeout after %ss in the %s phase" % (timeout_s, session.phase)
     elif session.failure:
@@ -193,6 +196,7 @@ def summarize(results):
         "optimal_rate": optimal / n if n else 0.0,
         "mean_cells_searched": sum(r["cells_searched"] for r in passed) / n if n else 0.0,
         "mean_cells_explored": sum(r["cells_explored"] for r in passed) / n if n else 0.0,
+        "error_lines": sum(r.get("error_lines", 0) for r in results),
     }
 
 
@@ -323,6 +327,7 @@ def main(argv=None):
           % (summary["optimal"], summary["scored"], 100 * summary["optimal_rate"],
              summary["mean_cells_searched"], summary["mean_cells_explored"]))
     print("%d/%d mazes passed" % (len(results) - len(failures), len(results)))
+    print("bot logged %d [ERROR] lines" % summary["error_lines"])
     if args.min_optimal is not None and summary["optimal_rate"] < args.min_optimal:
         print("::error::speed run optimal on %.1f%% of mazes, below %.1f%%"
               % (100 * summary["optimal_rate"], 100 * args.min_optimal))

@@ -1487,6 +1487,7 @@ bool Mouse::search_to(const std::vector<std::array<int, 2>>& goals)
         {
             maze_mouse_->setMazeMask(MASK_CLOSED);
             AStar              known_a_star(maze_mouse_);
+            known_a_star.set_quiet(true); // no known route is normal; cell_path stands
             std::vector<Cell*> known_path = known_a_star.cellPath(targets, /*diagonals=*/false,
                                                                   /*pass_goals=*/true);
             maze_mouse_->setMazeMask(MASK_OPEN);
