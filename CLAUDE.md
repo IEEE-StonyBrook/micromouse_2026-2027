@@ -220,8 +220,11 @@ make -j4
 
 STM32F405 bring-up firmware for the Adafruit Feather STM32F405 Express
 (pins and timers in `config/board_feather.h`): 168 MHz clock, 1 kHz TIM7
-tick, USART3 console at 1 Mbaud with `stats` and `flood` commands, TIM3/TIM4
-encoders and an LSM6DSR on SPI2. Separate build directory; needs an Arm GNU
+tick, USART3 console at 1 Mbaud with `stats`, `flood`, `logfill` (fill the run
+log with a test pattern) and `log` (dump it) commands, TIM3/TIM4 encoders and
+an LSM6DSR on SPI2. The run log (`control/run_log.h`: int16-packed samples
+every 8 ms, about 13 s) sits in CCM, which DMA cannot reach, so a dump
+formats each row into an SRAM buffer before the console queues it. Separate build directory; needs an Arm GNU
 Toolchain with newlib, found through `ARM_TOOLCHAIN_PATH`,
 `PICO_TOOLCHAIN_PATH` or `PATH`:
 
