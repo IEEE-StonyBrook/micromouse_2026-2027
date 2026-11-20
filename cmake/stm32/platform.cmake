@@ -19,12 +19,14 @@ set(STM32_HAL_SOURCES
     firmware/hal/stm32/console.cpp
     firmware/hal/stm32/memory.cpp
     firmware/hal/stm32/quad_counter.cpp
+    firmware/hal/stm32/spi.cpp
     firmware/hal/stm32/tick.cpp
     firmware/hal/stm32/time.cpp
 )
 
 add_executable(Jurababa_stm32
     ${STM32_HAL_SOURCES}
+    firmware/drivers/lsm6dsr.cpp
     firmware/main_stm32.cpp
 )
 set_target_properties(Jurababa_stm32 PROPERTIES SUFFIX .elf LINK_DEPENDS ${STM32_LINKER_SCRIPT})

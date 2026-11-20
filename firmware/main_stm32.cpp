@@ -4,7 +4,7 @@
 //
 // A bring-up shell runs on the USART3 console (Feather TX/RX, 1 Mbaud, 8N1):
 // it echoes what it receives and answers these lines:
-//   stats  tick timing, encoder counts, console drop counters, memory use
+//   stats  tick timing, encoders, IMU, console drop counters, memory use
 //   flood  queues 64 KB at once, to show the TX ring dropping and counting
 // Memory use and tick timing are also left in `memory_usage` and `tick_stats`
 // for a debugger to read.
@@ -16,12 +16,14 @@
 #include <libopencm3/stm32/gpio.h>
 
 #include "config/board_feather.h"
+#include "drivers/lsm6dsr.h"
 #include "hal/console.h"
 #include "hal/stm32/clock.h"
 #include "hal/stm32/console.h"
 #include "hal/stm32/gpio.h"
 #include "hal/stm32/memory.h"
 #include "hal/stm32/quad_counter.h"
+#include "hal/stm32/spi.h"
 #include "hal/stm32/tick.h"
 #include "hal/time.h"
 
@@ -32,12 +34,17 @@ constexpr uint32_t CORE_MHZ      = hal::stm32::BUSES.hclk_hz / 1000000;
 
 hal::stm32::QuadCounter encoder_left;
 hal::stm32::QuadCounter encoder_right;
+hal::stm32::SpiBus      imu_spi;
+Lsm6dsr                 imu(imu_spi, board::IMU_YAW_SIGN);
+volatile bool           imu_ready = false;
 
 // The always-on 1 kHz tick: widen the encoder counts before anything reads them.
 void onTick()
 {
     encoder_left.update();
     encoder_right.update();
+    if (imu_ready)
+        imu.readFifo();
 }
 
 char     line[64];
@@ -59,6 +66,11 @@ void printStats()
                 ticks.max_period_cycles);
     std::printf("encoders left %" PRId32 " right %" PRId32 " counts\n", encoder_left.count(),
                 encoder_right.count());
+    std::printf("imu %s yaw %.2f dps accel z %.3f g, %" PRIu32 " gyro %" PRIu32
+                " accel samples, %" PRIu32 " fifo overruns\n",
+                imu_ready ? "ok" : "off", static_cast<double>(imu.yawRateDps()),
+                static_cast<double>(imu.accelZG()), imu.gyroSamples(), imu.accelSamples(),
+                imu.fifoOverruns());
     std::printf("console ring dropped %" PRIu32 " gate dropped %" PRIu32 " rx idle %" PRIu32
                 " overruns %" PRIu32 "\n",
                 console::stm32::txRingDroppedBytes(), console::txGateDroppedBytes(),
@@ -128,6 +140,15 @@ int main()
     hal::console::stm32::init();
     std::printf("\nJurababa STM32 bring-up, %" PRIu32 " MHz from the %s\n", CORE_MHZ,
                 clock == hal::stm32::ClockSource::kHse ? "crystal" : "HSI (crystal fault)");
+
+    imu_spi.init(board::IMU_SPI);
+    hal::time::sleepMs(20); // LSM6DSR boot time is 10 ms from power-up
+    const uint8_t            who            = imu.whoAmI();
+    const Lsm6dsr::Status    status         = imu.init();
+    static const char* const STATUS_NAMES[] = {"ok", "wrong WHO_AM_I", "reset timeout"};
+    std::printf("LSM6DSR WHO_AM_I 0x%02X (expect 0x%02X): %s\n", who, lsm6dsr::WHO_AM_I_VALUE,
+                STATUS_NAMES[static_cast<int>(status)]);
+    imu_ready = status == Lsm6dsr::Status::kOk;
 
     const uint32_t led_port       = hal::stm32::gpioPort(board::LED);
     const uint16_t led_bit        = hal::stm32::gpioBit(board::LED);
