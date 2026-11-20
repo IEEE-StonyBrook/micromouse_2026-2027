@@ -10,10 +10,10 @@
 // ===================== Control Loop ===================== //
 // Forward and rotation controllers run at LOOP_FREQUENCY_HZ, set per platform
 // in the board config (500 Hz on the Pico, 1 kHz on the STM32), matching
-// mazerunner-core / motorlab's single-rate shape. Jurababa's rotation feedback
-// still comes from the 100 Hz BNO085 RVC stream; IMU::robot_rot_change()
-// distributes the latest packet-rate yaw delta into an equivalent per-tick
-// change so the controller keeps that shape without switching away from the IMU.
+// mazerunner-core / motorlab's single-rate shape. The rotation PD reads
+// encoder yaw every tick (ROT_FEEDBACK_ENCODER below); the BNO085's yaw feeds
+// heading hold. With ROT_FEEDBACK_ENCODER 0 the PD reads the IMU instead, and
+// IMU::robot_rot_change() spreads each 100 Hz packet's yaw delta over the ticks.
 #define LOOP_INTERVAL_S (1.0f / LOOP_FREQUENCY_HZ)
 
 // Whole loop ticks in a duration (seconds), rounded to nearest. Anything that
@@ -29,8 +29,8 @@
 //
 // CAUTION (per Peter Harrison's encoders.h header): changing this window
 // adds delay to the feedback loop and forces re-tuning of the forward
-// PD controller. Rotation PD uses the IMU, except during smooth-turn arcs
-// (see SMOOTH_TURN_ENCODER_HOLDOVER_MS), where it reads this averaged yaw.
+// PD controller. The rotation PD reads this averaged yaw too
+// (ROT_FEEDBACK_ENCODER), so the same caution applies to its gains.
 #define ENCODER_AVERAGER_WINDOW_S 0.016f
 #define ENCODER_AVERAGER_LENGTH   LOOP_TICKS(ENCODER_AVERAGER_WINDOW_S)
 
@@ -71,9 +71,9 @@
 #define ROBOT_SEARCH_ACCEL_MMPS2 2000.0f // mazerunner-core (Orion) SEARCH_ACCELERATION
 
 // ================= Rotation Limits ===================== //
-// Jurababa-validated IMU spin-turn defaults. These are deliberately gentler
-// than Orion-class UKMARS values because our rotation feedback comes from the
-// BNO085 RVC stream rather than 500 Hz encoder yaw.
+// Jurababa-validated spin-turn defaults, deliberately gentler than
+// Orion-class UKMARS values. They date from when the rotation PD read the
+// BNO085; the notes below record the floor slip that keeps them there.
 #define ROBOT_MAX_TURN_SPEED_DEGPS       270.0f  // 360 slipped 1-8.6 deg short per 180 in search
 #define ROBOT_BASE_ANGULAR_ACCEL_DEGPS2  1200.0f // 1800 slipped on the maze floor (2026-10-10)
 #define ROBOT_MAX_SMOOTH_TURN_SPEED_MMPS 250.0f  // Linear speed during smooth turns
@@ -100,6 +100,7 @@
 // Smooth-turn arcs feed encoder yaw to the rotation PD: the BNO085 lags ~40 ms,
 // enough to reverse the inside wheel and overshoot the arc. Encoder yaw stays
 // on this long after the arc ends so the IMU lag has drained before it takes over.
+// Only matters with ROT_FEEDBACK_ENCODER 0; at 1 the PD reads encoder yaw throughout.
 #define SMOOTH_TURN_ENCODER_HOLDOVER_MS 100
 // 1: encoder yaw is the rotation PD's inner loop on every motion (mazerunner-
 // core); the IMU corrects absolute heading through heading hold and ToF
