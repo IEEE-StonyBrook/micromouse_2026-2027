@@ -21,6 +21,7 @@ set(STM32_HAL_SOURCES
     firmware/hal/stm32/memory.cpp
     firmware/hal/stm32/quad_counter.cpp
     firmware/hal/stm32/spi.cpp
+    firmware/hal/stm32/system.cpp
     firmware/hal/stm32/tick.cpp
     firmware/hal/stm32/time.cpp
     firmware/hal/stm32/uid.cpp
