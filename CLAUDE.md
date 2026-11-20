@@ -99,6 +99,16 @@ Trials are cooperative state machines: a trial records its parameters, sets
 motor voltages or arms a profile, and returns. The next tick advances it one
 step. That is what holds the loop period at exactly `1 / LOOP_FREQUENCY_HZ`.
 
+## Interrupt context
+
+No Log or heap in ISR context. Code reachable from the control tick
+(`Motion::update()` and everything it calls) or another interrupt handler never
+calls `LOG_*`, `printf`, or anything that builds a `std::string`, `new`s, or
+grows a container. Raise an atomic flag or counter there and report it from the
+main loop, as `Motor::reportBatteryFallback()` does. `python3
+tools/check_isr_logging.py` enforces this; add a function to its list when the
+control path starts calling it.
+
 ## Units
 
 Carry units in the name whenever the bare quantity is ambiguous.
