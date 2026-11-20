@@ -18,7 +18,8 @@ void Bridge::set_connected(bool connected)
     {
         // Nobody will read what is still queued for the old connection.
         stats_.uplink_discarded += uplink_.size();
-        gap_discarded_ += uplink_.size();
+        // Drops not yet marked in the stream would otherwise go unreported.
+        gap_discarded_ += uplink_.size() + gap_dropped_;
         uplink_.clear();
         gap_dropped_ = 0;
         return;

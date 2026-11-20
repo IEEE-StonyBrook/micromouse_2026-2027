@@ -148,6 +148,16 @@ TEST_CASE("host writes reach the UART in order; overflow drops and counts")
     CHECK(b.stats().downlink_dropped == 3);
 }
 
+TEST_CASE("drops not yet marked when the host leaves are reported on the next connection")
+{
+    bridge::Bridge b;
+    b.set_connected(true);
+    pushUart(b, std::string(bridge::UPLINK_CAPACITY + 6, 'x'), 0); // 6 dropped
+    b.set_connected(false); // 4096 queued bytes discarded with the link
+    b.set_connected(true);
+    CHECK(drainAll(b, 0) == "[bridge] discarded 4102 bytes while disconnected\r\n");
+}
+
 // PlatformIO's doctest runner counts cases from the per-assertion report, so
 // successes must be printed too.
 int main(int argc, char** argv)
