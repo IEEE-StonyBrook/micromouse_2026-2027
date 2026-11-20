@@ -109,8 +109,14 @@ class RunEndpointTest(unittest.TestCase):
     def test_a_bad_knob_is_a_400_with_the_reason(self):
         with self.assertRaises(urllib.error.HTTPError) as ctx:
             self.get("/run?scenario=ip90&battery=99")
-        self.assertEqual(ctx.exception.code, 400)
-        self.assertIn("battery", json.loads(ctx.exception.read())["error"])
+        with ctx.exception as err:
+            self.assertEqual(err.code, 400)
+            self.assertIn("battery", json.loads(err.read())["error"])
+
+    def test_serves_the_page(self):
+        status, body = self.get("/index.html")
+        self.assertEqual(status, 200)
+        self.assertIn(b"<html", body)
 
 
 if __name__ == "__main__":
