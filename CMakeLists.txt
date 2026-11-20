@@ -82,6 +82,7 @@ set(DRIVER_LAB_SOURCES
 # Platform-neutral interfaces live in firmware/hal/; these are the Pico backends.
 set(HAL_SOURCES
     firmware/hal/pico/critical_section.cpp
+    firmware/hal/pico/system.cpp
     firmware/hal/pico/time.cpp
 )
 
