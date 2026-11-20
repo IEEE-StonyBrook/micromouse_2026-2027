@@ -507,8 +507,8 @@ void Motion::update()
 {
     // Mazerunner systick.update() shape:
     //   encoders.update(); motion.update(); motors.update_controllers(...)
-    // We add imu_->update() because IMU owns rotation tracking
-    // (substitutes mazerunner's encoder-derived robot_rot_change).
+    // We add imu_->update() to keep the IMU yaw current for heading hold (and
+    // for the rotation PD when ROT_FEEDBACK_ENCODER is 0).
     // Main-loop commands apply first, whole and in order, so the rest of the
     // tick never sees one half-written.
     {
@@ -613,10 +613,10 @@ void Motion::runPositionControl()
     float rot_velocity   = rotation_.velocity();
 
     // Single-rate PD — both forward and rotation update every control tick,
-    // exactly like UKMARS mazerunner-core. Rotation feedback comes from the
-    // IMU as a held-flat per-tick delta; this removes the 10 ms staircase
-    // that the old 100 Hz gate produced in rotation_output_ and stops the
-    // step-input-driven oscillation on spin turns.
+    // exactly like UKMARS mazerunner-core. Rotation feedback is the averaged
+    // encoder yaw (ROT_FEEDBACK_ENCODER). With that 0 it is the IMU's yaw as a
+    // held-flat per-tick delta, which removes the 10 ms staircase the old
+    // 100 Hz gate produced in rotation_output_.
     // mazerunner-core runs both PDs every tick. During a spin the forward
     // setpoint is 0, so this holds position; skipping it let motor imbalance
     // walk the robot ~30 mm forward per 360 deg.

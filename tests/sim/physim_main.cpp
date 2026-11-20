@@ -7,6 +7,7 @@
 //   --seed N            random seed (default 1)
 //   --speed MMPS        straight cruise speed     --accel MMPS2   straight accel
 //   --battery V         battery voltage
+//   --friction V        motor/gearbox Coulomb friction as volts, both wheels (default kS)
 //   --mu X              traction coefficient, both wheels (--mu-left/--mu-right)
 //   --slip-rate HZ      random slip events per wheel per second
 //   --slip-duration S   --slip-traction X   (grip left during an event)
@@ -61,6 +62,8 @@ int main(int argc, char** argv)
             opt.accel_mmps2 = v;
         else if (!std::strcmp(flag, "--battery"))
             p.battery_v = v;
+        else if (!std::strcmp(flag, "--friction"))
+            p.friction_v_left = p.friction_v_right = v;
         else if (!std::strcmp(flag, "--mu"))
             p.mu_left = p.mu_right = v;
         else if (!std::strcmp(flag, "--mu-left"))
