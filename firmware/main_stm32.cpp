@@ -4,7 +4,7 @@
 //
 // A bring-up shell runs on the USART3 console (Feather TX/RX, 1 Mbaud, 8N1):
 // it echoes what it receives and answers these lines:
-//   stats  tick timing, console drop counters, memory high-water marks
+//   stats  tick timing, encoder counts, console drop counters, memory use
 //   flood  queues 64 KB at once, to show the TX ring dropping and counting
 // Memory use and tick timing are also left in `memory_usage` and `tick_stats`
 // for a debugger to read.
@@ -21,6 +21,7 @@
 #include "hal/stm32/console.h"
 #include "hal/stm32/gpio.h"
 #include "hal/stm32/memory.h"
+#include "hal/stm32/quad_counter.h"
 #include "hal/stm32/tick.h"
 #include "hal/time.h"
 
@@ -28,6 +29,16 @@ namespace
 {
 constexpr uint32_t BLINK_HALF_MS = 500;
 constexpr uint32_t CORE_MHZ      = hal::stm32::BUSES.hclk_hz / 1000000;
+
+hal::stm32::QuadCounter encoder_left;
+hal::stm32::QuadCounter encoder_right;
+
+// The always-on 1 kHz tick: widen the encoder counts before anything reads them.
+void onTick()
+{
+    encoder_left.update();
+    encoder_right.update();
+}
 
 char     line[64];
 uint32_t line_len = 0;
@@ -46,6 +57,8 @@ void printStats()
                 hal::stm32::BUSES.hclk_hz / hal::stm32::tick::TICK_HZ);
     std::printf("tick period min %" PRIu32 " max %" PRIu32 " cycles\n", ticks.min_period_cycles,
                 ticks.max_period_cycles);
+    std::printf("encoders left %" PRId32 " right %" PRId32 " counts\n", encoder_left.count(),
+                encoder_right.count());
     std::printf("console ring dropped %" PRIu32 " gate dropped %" PRIu32 " rx idle %" PRIu32
                 " overruns %" PRIu32 "\n",
                 console::stm32::txRingDroppedBytes(), console::txGateDroppedBytes(),
@@ -109,7 +122,9 @@ int main()
 {
     const hal::stm32::ClockSource clock = hal::stm32::setupClocks();
     hal::stm32::gpioOutput(board::LED);
-    hal::stm32::tick::start(nullptr);
+    encoder_left.init(board::ENCODER_PINS[0], board::ENCODER_PINS[1]);
+    encoder_right.init(board::ENCODER_PINS[2], board::ENCODER_PINS[3]);
+    hal::stm32::tick::start(onTick);
     hal::console::stm32::init();
     std::printf("\nJurababa STM32 bring-up, %" PRIu32 " MHz from the %s\n", CORE_MHZ,
                 clock == hal::stm32::ClockSource::kHse ? "crystal" : "HSI (crystal fault)");
