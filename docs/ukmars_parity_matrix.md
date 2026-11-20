@@ -8,7 +8,8 @@ without losing the intentional Jurababa upgrades.
 - Tuned PID/feedforward constants and wheel geometry.
 - A*/LFR/diagonalizer planning.
 - ToF sensors and asymmetric left/right ToF calibration.
-- IMU yaw/omega rotation feedback.
+- IMU heading hold on top of the encoder rotation loop (`ROT_FEEDBACK_ENCODER` 1;
+  set it to 0 for IMU yaw/omega rotation feedback).
 - DriverLab as a standalone calibration tool.
 - Bluetooth console reliability fixes.
 - CLI `PATH`, `STYLE`, `STAGE`, working `W`, and explored-only fast runs.
@@ -56,7 +57,7 @@ without losing the intentional Jurababa upgrades.
 | `wait_until_distance()` | Present | UKMARS helper | Added |
 | Profile 5 mm braking trick | Present | Keep | Verified/kept |
 | UKMARS PD + feedforward mixer | Present | Keep tuned constants | Verified/kept |
-| Encoder-derived rotation | Not used | IMU yaw delta | Intentional difference |
+| Encoder-derived rotation | Rotation PD inner loop (`ROT_FEEDBACK_ENCODER` 1) | Same; IMU corrects absolute heading | Verified/kept |
 
 ## Maze / Planner
 

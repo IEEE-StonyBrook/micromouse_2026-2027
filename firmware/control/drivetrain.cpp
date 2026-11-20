@@ -124,8 +124,8 @@ void Drivetrain::update()
     right_history_total_ -= right_history_[averager_index_];
     left_history_total_ += d_left;
     right_history_total_ += d_right;
-    left_history_[averager_index_]  = static_cast<int8_t>(d_left);
-    right_history_[averager_index_] = static_cast<int8_t>(d_right);
+    left_history_[averager_index_]  = static_cast<EncoderHistoryDelta>(d_left);
+    right_history_[averager_index_] = static_cast<EncoderHistoryDelta>(d_right);
     averager_index_                 = (averager_index_ + 1) % ENCODER_AVERAGER_LENGTH;
 
     constexpr float inv_avg = 1.0f / static_cast<float>(ENCODER_AVERAGER_LENGTH);

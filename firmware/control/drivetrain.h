@@ -6,6 +6,7 @@
 #include "common/log.h"
 #include "common/utils.h"
 #include "config/motion.h"
+#include "control/encoder_history.h"
 #include "drivers/battery.h"
 #include "drivers/encoder.h"
 #include "drivers/motor.h"
@@ -106,15 +107,14 @@ class Drivetrain
     float rot_change_deg_ = 0.0f;
 
     // 8-tap moving averager state, mirroring ukmars/motorlab/src/encoders.h.
-    // Operates on integer tick deltas so the ring buffer can store int8_t
-    // exactly; conversion to mm happens after averaging. Same window for
-    // both wheels keeps fwd_change_mm_ consistent with the per-wheel
-    // velocities.
-    int8_t left_history_[ENCODER_AVERAGER_LENGTH]  = {};
-    int8_t right_history_[ENCODER_AVERAGER_LENGTH] = {};
-    int    left_history_total_                     = 0;
-    int    right_history_total_                    = 0;
-    int    averager_index_                         = 0;
+    // Operates on integer tick deltas so the ring buffer stores them exactly;
+    // conversion to mm happens after averaging. Same window for both wheels
+    // keeps fwd_change_mm_ consistent with the per-wheel velocities.
+    EncoderHistoryDelta left_history_[ENCODER_AVERAGER_LENGTH]  = {};
+    EncoderHistoryDelta right_history_[ENCODER_AVERAGER_LENGTH] = {};
+    int                 left_history_total_                     = 0;
+    int                 right_history_total_                    = 0;
+    int                 averager_index_                         = 0;
 
     // Feedforward coefficients (initialized from config, mutable for tuning)
     struct FFCoeffs

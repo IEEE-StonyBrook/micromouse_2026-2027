@@ -28,7 +28,7 @@ import serial.tools.list_ports
 
 LINK_HOST = "127.0.0.1"
 LINK_PORT = 7777
-BAUD_RATES = ["9600", "19200", "38400", "57600", "115200", "230400", "460800", "921600"]
+BAUD_RATES = ["9600", "19200", "38400", "57600", "115200", "230400", "460800", "921600", "1000000"]
 PICO_VID = 0x2E8A
 LINE_ENDING = b"\r\n"
 
@@ -40,7 +40,7 @@ def parse_args():
     p.add_argument("--port", help="COM port to open at startup (default: auto-select the Pico)")
     p.add_argument("--baud", type=int, default=115200)
     p.add_argument("--self-test", action="store_true",
-                   help="run the [DIAG] filter checks and exit (no hardware needed)")
+                   help="run the [DIAG] filter and baud-list checks and exit (no hardware needed)")
     p.add_argument("--link-port", type=int, default=LINK_PORT,
                    help="localhost port serial_cmd.py connects to; change it to run a second window")
     return p.parse_args()
@@ -482,6 +482,10 @@ def _self_test():
     # One chunk holding both kinds.
     mixed = DiagFilter()
     assert mixed.feed("a\r\n[DIAG] b\r\nc\r\n") == "a\r\nc\r\n"
+
+    # 1 Mbaud is offered for fast log dumps, and the old rates stay selectable.
+    for rate in ("9600", "115200", "921600", "1000000"):
+        assert rate in BAUD_RATES, rate
 
     print("serial_term self-test: ok")
 

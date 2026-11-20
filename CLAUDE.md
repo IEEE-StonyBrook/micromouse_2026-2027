@@ -65,7 +65,7 @@ What each layer is allowed to know:
 | `control/` | velocity, acceleration, PID, profiles, pose, kinematics | maze solving |
 | `maze/` | cells, directions, walls, coordinates, mouse pose | motors, sensors |
 | `navigation/` | flood fill, A*, goals, cell paths, L/F/R conversion | physical sensors |
-| `app/` | wiring the above together, CLI, Bluetooth, multicore | — |
+| `app/` | wiring the above together, CLI, Bluetooth, the control timer | — |
 
 Run `ls firmware/<layer>` for the current file list; it is authoritative and
 this document is not.
@@ -75,10 +75,13 @@ this document is not.
 Selected at startup: **press `M` within 3 seconds for DriverLab, otherwise
 Normal Mode starts automatically.** Keep that behaviour.
 
-**Normal Mode** is the competition mode, across both cores:
+**Normal Mode** is the competition mode. It runs on Core 0 only (the UKMARS
+single-core shape); Core 1 is unused:
 
-- Core 0 — path planning, maze algorithms, Bluetooth, high-level decisions.
-- Core 1 — motor control, sensor updates, the control loop at `LOOP_FREQUENCY_HZ` (500 Hz).
+- A repeating hardware timer in `main.cpp` calls `Motion::update()` at
+  `LOOP_FREQUENCY_HZ` (500 Hz): encoders, forward and rotation PD, motors.
+- The main loop (`cli.loop()`) handles serial and Bluetooth I/O, polls the
+  ToFs at 50 Hz, and runs path planning, maze algorithms and high-level decisions.
 
 **DriverLab Mode** is a single-core calibration and characterisation tool:
 open-loop voltage sweeps, step response, PID tuning, and export of
