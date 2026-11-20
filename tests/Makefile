@@ -16,7 +16,7 @@ FIRMWARE_SRCS := ../firmware/maze/maze_setting.cpp ../firmware/hal/console.cpp \
                  ../firmware/drivers/lsm6dsr.cpp \
                  ../firmware/maze/maze.cpp ../firmware/maze/maze_mouse.cpp \
                  ../firmware/maze/route_proof.cpp \
-                 ../firmware/navigation/path_converter.cpp \
+                 ../firmware/navigation/a_star.cpp ../firmware/navigation/path_converter.cpp \
                  ../firmware/navigation/route_planner.cpp ../firmware/navigation/run_time.cpp
 FAKE_SRCS     := $(wildcard fakes/*.cpp)
 # The physics sim library; sim/physim_main.cpp is its CLI, with its own main().

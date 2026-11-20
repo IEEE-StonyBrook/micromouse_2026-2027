@@ -15,6 +15,7 @@
 #include "app/leds.h"
 #include "config/motion.h"
 #include "control/motion.h"
+#include "control/run_log.h"
 #include "drivers/beacon_ir.h"
 #include "hal/time.h"
 #endif
@@ -2164,32 +2165,24 @@ bool Mouse::test_SS90E(bool turn_left)
 void Mouse::print_turn_trace(float target_yaw_deg)
 {
 #ifndef SIMULATOR_BUILD
-    // One CSV row per trace sample, paced to the Bluetooth UART: the 4 KB TX
-    // ring holds ~60 rows, so an unpaced dump drops the rest. haltRequested()
+    // Read only a stopped log: the control tick would overwrite the ring
+    // under the dump.
+    RunLog& log = runLog();
+    log.stop();
+    // One CSV row per sample, paced to the Bluetooth UART: the 4 KB TX ring
+    // holds ~60 rows, so an unpaced dump drops the rest. haltRequested()
     // drains the console; a ~75 byte row takes ~6.5 ms at 115200 baud.
-    const uint16_t count = motion_->traceCount();
-    LOG_INFO("TRACE n="
-             << count << " dt_ms=" << motion_->traceDtMs()
-             << " cols=t_ms,target_deg,yaw_deg,rot_err_deg,rot_v,hold_err_deg,"
-                "wall_degps,hold_degps,fwd_mmps,left_mmps,right_mmps,left_v,right_v,enc,tof_l_mm,"
-                "tof_f_mm,tof_r_mm,pos_mm");
+    // Each sample is unpacked into a local copy and formatted into `row`,
+    // both on the stack in SRAM: on the STM32 the log sits in CCM, which the
+    // console's TX DMA cannot read.
+    const uint16_t count = log.count();
+    const uint16_t dt_ms = log.dtMs();
+    LOG_INFO("TRACE n=" << count << " dt_ms=" << dt_ms << " cols=" << RunLog::COLUMNS);
     Log::drainBluetooth();
     for (uint16_t i = 0; i < count; ++i)
     {
-        const Motion::TraceSample& s = motion_->traceSample(i);
-        char                       row[160];
-        std::snprintf(row, sizeof(row),
-                      "T,%d,%.1f,%.1f,%.2f,%.2f,%.2f,%.1f,%.1f,%.0f,%.0f,%.0f,%.2f,%.2f,%d,%.0f,%."
-                      "0f,%.0f,%.1f",
-                      i * motion_->traceDtMs(), static_cast<double>(s.target_deg),
-                      static_cast<double>(s.yaw_deg), static_cast<double>(s.rot_error_deg),
-                      static_cast<double>(s.rot_volts), static_cast<double>(s.hold_err_deg),
-                      static_cast<double>(s.wall_degps), static_cast<double>(s.hold_degps),
-                      static_cast<double>(s.fwd_mmps), static_cast<double>(s.left_mmps),
-                      static_cast<double>(s.right_mmps), static_cast<double>(s.left_volts),
-                      static_cast<double>(s.right_volts), s.encoder_rotation ? 1 : 0,
-                      static_cast<double>(s.left_tof_mm), static_cast<double>(s.front_tof_mm),
-                      static_cast<double>(s.right_tof_mm), static_cast<double>(s.pos_mm));
+        char row[RunLog::ROW_BYTES];
+        RunLog::formatRow(row, sizeof(row), i, dt_ms, log.sample(i));
         LOG_INFO(row);
         for (int k = 0; k < 4; ++k)
         {
@@ -2201,22 +2194,20 @@ void Mouse::print_turn_trace(float target_yaw_deg)
     // The SS90E line reads yaw while the IMU still lags the arc by ~40 ms.
     // Score the turn 100 ms after the rotation profile reaches its target,
     // once that lag has drained. A NaN target (CLI TRACE) has no turn.
-    const uint16_t kSettleSamples   = 100 / motion_->traceDtMs();
+    const uint16_t kSettleSamples   = (100 + dt_ms - 1) / dt_ms; // at least 100 ms
     float          final_target_deg = 0.0f;
     for (uint16_t i = 0; i < count; ++i)
-        final_target_deg =
-            std::max(final_target_deg, std::fabs(motion_->traceSample(i).target_deg));
+        final_target_deg = std::max(final_target_deg, std::fabs(log.sample(i).target_deg));
     for (uint16_t i = 0; i < count && !std::isnan(target_yaw_deg); ++i)
     {
-        if (std::fabs(motion_->traceSample(i).target_deg) < final_target_deg - 0.2f)
+        if (std::fabs(log.sample(i).target_deg) < final_target_deg - 0.2f)
             continue;
         const uint16_t j = i + kSettleSamples;
         if (j < count)
         {
-            LOG_INFO(
-                "TRACE turn_yaw_error_settled="
-                << signedFixed1(normalizeYawDelta(target_yaw_deg - motion_->traceSample(j).yaw_deg))
-                << " at_ms=" << j * motion_->traceDtMs());
+            LOG_INFO("TRACE turn_yaw_error_settled="
+                     << signedFixed1(normalizeYawDelta(target_yaw_deg - log.sample(j).yaw_deg))
+                     << " at_ms=" << j * dt_ms);
         }
         break;
     }

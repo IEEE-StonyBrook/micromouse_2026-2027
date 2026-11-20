@@ -250,12 +250,16 @@ make -j4
 
 STM32F405 bring-up firmware for the Adafruit Feather STM32F405 Express
 (pins and timers in `config/board_feather.h`): 168 MHz clock, 1 kHz TIM7
-tick, USART3 console at 1 Mbaud with `stats`, `flood`, `profile` and `arm`
+tick, USART3 console at 1 Mbaud with `stats`, `flood`, `profile`, `arm`,
+`logfill` (fill the run log with a test pattern) and `log` (dump it)
 commands, TIM3/TIM4 encoders and an LSM6DSR on SPI2. At boot it reads the
 chip UID and loads the board profile it saved in the flash store; an unknown
 board lists the presets (`config/board_profiles.h`) and refuses to arm until
 `profile <n>` saves one. A damaged store shows as 2 LED flashes every 2 s,
-no usable record as 4. Separate build directory; needs an Arm GNU
+no usable record as 4. The run log (`control/run_log.h`: int16-packed
+samples every 8 ms, about 13 s) sits in CCM, which DMA cannot reach, so a
+dump formats each row into an SRAM buffer before the console queues it.
+Separate build directory; needs an Arm GNU
 Toolchain with newlib, found through `ARM_TOOLCHAIN_PATH`,
 `PICO_TOOLCHAIN_PATH` or `PATH`:
 

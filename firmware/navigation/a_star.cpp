@@ -1,13 +1,38 @@
 #include "navigation/a_star.h"
+
+#include <cmath>
+#include <limits>
+
 #include "navigation/path_converter.h"
+#include "navigation/static_heap.h"
+
+namespace
+{
+struct AStarNode
+{
+    Cell* cell;
+    float g_cost, f_cost;
+    bool  operator<(const AStarNode& other) const { return f_cost > other.f_cost; }
+};
+
+// The search's working memory, sized for the largest maze. Planning runs on
+// the main loop only, one search at a time. A cell holds at most one live
+// open entry (a push only lowers its cost), so one slot per cell is enough
+// once stale entries are pruned.
+float                                     g_costs[CellPath::CAPACITY];
+StaticHeap<AStarNode, CellPath::CAPACITY> open_set;
+CellPath                                  candidate_path;
+CellPath                                  best_path;
+} // namespace
 
 AStar::AStar(MazeMouse* mouse) : mouse_(mouse)
 {
 }
 
-std::string AStar::pathTo(std::vector<std::array<int, 2>> goals, bool diagonals, bool pass_goals)
+std::string AStar::pathTo(const std::vector<std::array<int, 2>>& goals, bool diagonals,
+                          bool pass_goals)
 {
-    std::vector<Cell*> path = findBestPath(goals, diagonals, pass_goals);
+    std::vector<Cell*> path = cellPath(goals, diagonals, pass_goals);
     LOG_DEBUG(pathToString(path));
 
     std::string lfr =
@@ -16,77 +41,90 @@ std::string AStar::pathTo(std::vector<std::array<int, 2>> goals, bool diagonals,
     return lfr;
 }
 
-std::vector<Cell*> AStar::cellPath(std::vector<std::array<int, 2>> goals, bool diagonals,
+std::vector<Cell*> AStar::cellPath(const std::vector<std::array<int, 2>>& goals, bool diagonals,
                                    bool pass_goals)
 {
-    return findBestPath(goals, diagonals, pass_goals);
+    return route(goals, diagonals, pass_goals).toVector();
 }
 
-std::vector<Cell*> AStar::findBestPath(std::vector<std::array<int, 2>> goals, bool diagonals,
-                                       bool pass_goals)
+const CellPath& AStar::route(const std::vector<std::array<int, 2>>& goals, bool diagonals,
+                             bool pass_goals)
 {
-    std::vector<Cell*> best;
-    float              best_cost = std::numeric_limits<float>::infinity();
+    best_path.clear();
+    float best_cost = std::numeric_limits<float>::infinity();
 
-    for (auto& goal : goals)
+    for (const auto& goal : goals)
     {
-        std::vector<Cell*> path =
-            findPathTo(mouse_->cellAt(goal[0], goal[1]), diagonals, pass_goals);
-
-        if (path.empty())
+        if (!findPathTo(mouse_->cellAt(goal[0], goal[1]), diagonals, pass_goals, candidate_path))
+            continue;
+        if (candidate_path.empty())
             continue;
 
         if (total_cost_ < best_cost)
         {
-            best      = path;
+            best_path = candidate_path;
             best_cost = total_cost_;
         }
     }
 
-    return best;
+    return best_path;
 }
 
-struct AStarNode
+bool AStar::findPathTo(Cell* end, bool diagonals, bool pass_goals, CellPath& out)
 {
-    Cell* cell;
-    float g_cost, f_cost;
-    bool  operator<(const AStarNode& other) const { return f_cost > other.f_cost; }
-};
-
-std::vector<Cell*> AStar::findPathTo(Cell* end, bool diagonals, bool pass_goals)
-{
+    out.clear();
     mouse_->resetPathfinding();
 
     Cell* start = mouse_->currentCell();
     int   w     = mouse_->mazeWidth();
     int   h     = mouse_->mazeHeight();
-
-    std::vector<std::vector<float>> g_costs(
-        w, std::vector<float>(h, std::numeric_limits<float>::infinity()));
-
-    std::priority_queue<AStarNode> open;
-
-    g_costs[start->x()][start->y()] = 0.0f;
-    open.push({start, 0.0f, heuristic(start, end)});
-
-    while (!open.empty())
+    if (w * h > CellPath::CAPACITY)
     {
-        AStarNode current = open.top();
-        open.pop();
+        LOG_ERROR("AStar: maze larger than MAZE_SIZE x MAZE_SIZE.");
+        return false;
+    }
+
+    auto index = [h](Cell* cell) { return cell->x() * h + cell->y(); };
+    for (int i = 0; i < w * h; ++i)
+        g_costs[i] = std::numeric_limits<float>::infinity();
+    open_set.clear();
+
+    // A full heap still holds entries for processed cells or superseded
+    // costs; dropping them leaves at most one entry per unprocessed cell.
+    auto push = [&](const AStarNode& node)
+    {
+        if (open_set.push(node))
+            return true;
+        open_set.prune([&](const AStarNode& e)
+                       { return e.cell->processed || e.g_cost > g_costs[index(e.cell)]; });
+        return open_set.push(node);
+    };
+
+    g_costs[index(start)] = 0.0f;
+    push({start, 0.0f, heuristic(start, end)});
+
+    while (!open_set.empty())
+    {
+        AStarNode current = open_set.top();
+        open_set.pop();
 
         if (current.cell == end)
         {
             total_cost_ = current.f_cost;
-            return reconstructPath(start, end);
+            reconstructPath(start, end, out);
+            return true;
         }
 
         if (current.cell->processed)
             continue;
         current.cell->processed = true;
 
-        for (Cell* neighbor : mouse_->cellNeighbors(current.cell, diagonals))
+        std::array<Cell*, 8> neighbors;
+        const int            count = mouse_->cellNeighbors(current.cell, diagonals, neighbors);
+        for (int i = 0; i < count; ++i)
         {
-            bool is_end = (neighbor == end);
+            Cell* neighbor = neighbors[i];
+            bool  is_end   = (neighbor == end);
             if (neighbor->processed || (!pass_goals && mouse_->isGoal(neighbor) && !is_end) ||
                 !mouse_->canMoveBetween(current.cell, neighbor, diagonals))
             {
@@ -94,16 +132,19 @@ std::vector<Cell*> AStar::findPathTo(Cell* end, bool diagonals, bool pass_goals)
             }
 
             float new_g = current.g_cost + heuristic(current.cell, neighbor);
-            int   nx    = neighbor->x();
-            int   ny    = neighbor->y();
             if (neighbor->explored())
                 new_g += explored_cell_cost_;
 
-            if (new_g < g_costs[nx][ny])
+            if (new_g < g_costs[index(neighbor)])
             {
-                g_costs[nx][ny]  = new_g;
-                neighbor->parent = current.cell;
-                open.push({neighbor, new_g, new_g + heuristic(neighbor, end)});
+                g_costs[index(neighbor)] = new_g;
+                neighbor->parent         = current.cell;
+                if (!push({neighbor, new_g, new_g + heuristic(neighbor, end)}))
+                {
+                    LOG_ERROR("AStar: open set full.");
+                    mouse_->resetPathfinding();
+                    return false;
+                }
             }
         }
     }
@@ -111,7 +152,7 @@ std::vector<Cell*> AStar::findPathTo(Cell* end, bool diagonals, bool pass_goals)
     if (!quiet_)
         LOG_ERROR("AStar: No path found!");
     mouse_->resetPathfinding();
-    return {};
+    return false;
 }
 
 float AStar::heuristic(Cell* from, Cell* to)
@@ -122,20 +163,15 @@ float AStar::heuristic(Cell* from, Cell* to)
     return (dx + dy) + (std::sqrt(2.0f) - 2.0f) * std::fmin(dx, dy);
 }
 
-std::vector<Cell*> AStar::reconstructPath(Cell* start, Cell* end)
+void AStar::reconstructPath(Cell* start, Cell* end, CellPath& out)
 {
-    std::vector<Cell*> path;
-    Cell*              node = end;
+    Cell* node = end;
 
-    while (node && node != start)
-    {
-        path.push_back(node);
+    while (node && node != start && out.push(node))
         node = node->parent;
-    }
 
-    std::reverse(path.begin(), path.end());
+    out.reverse();
     mouse_->resetPathfinding();
-    return path;
 }
 
 std::string AStar::pathToString(const std::vector<Cell*>& path)

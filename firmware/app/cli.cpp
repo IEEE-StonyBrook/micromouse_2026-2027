@@ -863,9 +863,9 @@ void CommandLineInterface::handle_search_command(const Args& args)
 
     deps_.mouse->set_hand_start(true);
     printFormat("Search to %d,%d\n", x, y);
-    // 20 ms samples: the 1500-sample buffer covers ~30 s, a whole bench search.
+    // 20 ms samples: the run log covers ~33 s, a whole bench search.
     // TRACE prints it.
-    deps_.motion->start_trace(LOOP_TICKS(0.020f));
+    deps_.motion->start_trace(20);
     std::vector<std::array<int, 2>> goals = {{x, y}};
     const bool                      ok    = deps_.mouse->search_to(goals);
     printFormat(ok ? "Search done.\n" : "Search failed.\n");
@@ -1359,7 +1359,7 @@ bool CommandLineInterface::run_path_segments(std::vector<PathSegment>& segments,
         printFormat("PATH requires Motion/Mouse in ToF CLI mode.\n");
         return false;
     }
-    // Record the run for TRACE; the buffer holds the first 2.4 s.
+    // Record the run for TRACE; the ring keeps its last 13.4 s.
     deps_.motion->start_trace();
 
     if (smooth_turns)
@@ -2170,8 +2170,7 @@ void CommandLineInterface::run_function(int cmd)
             if (deps_.mouse != nullptr)
                 deps_.mouse->setPhaseColor('y');
             printFormat("Searching maze...\n");
-            if (deps_.motion != nullptr)
-                deps_.motion->start_trace(LOOP_TICKS(0.020f)); // 20 ms: TRACE after the run
+            deps_.motion->start_trace(20); // 20 ms: TRACE after the run
             printFormat(deps_.mouse->search_maze() ? "Search done.\n" : "Search failed.\n");
             break;
 

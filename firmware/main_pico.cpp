@@ -46,6 +46,7 @@
 #include "control/drivetrain.h"
 #include "control/line_follower.h"
 #include "control/motion.h"
+#include "control/run_log.h"
 #include "driver_lab/driver_lab.h"
 #include "drivers/battery.h"
 #include "drivers/beacon_ir.h"
@@ -536,6 +537,7 @@ static void runMouseAppMode(Battery* battery, SensorMode sensor_mode, bool compe
                                        battery);
         static Motion       motion(&drivetrain, &imu);
         static LineFollower line_follower(&line_sensor, &motion);
+        motion.set_run_log(&runLog());
         line_follower_ptr = &line_follower;
         motion_ptr        = &motion;
 
@@ -559,6 +561,7 @@ static void runMouseAppMode(Battery* battery, SensorMode sensor_mode, bool compe
         static Drivetrain drivetrain(&left_motor, &right_motor, &left_encoder, &right_encoder,
                                      battery);
         static Motion     motion(&drivetrain, &imu);
+        motion.set_run_log(&runLog());
 
         mouse.set_motion(&motion);
         mouse.setTofSensors(&left_tof, &front_tof, &right_tof);

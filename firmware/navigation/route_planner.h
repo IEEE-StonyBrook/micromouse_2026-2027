@@ -4,6 +4,7 @@
 #include <array>
 #include <vector>
 
+#include "navigation/cell_path.h"
 #include "navigation/run_time.h"
 
 class Cell;
@@ -32,6 +33,15 @@ std::vector<Cell*> fastestExploredPath(MazeMouse*                             ma
 std::vector<Cell*> plannedExploredPath(MazeMouse*                             maze_mouse,
                                        const std::vector<std::array<int, 2>>& goals,
                                        RoutePlanner                           planner);
+
+// The same routes with no heap use: each fills `out` (empty when there is
+// none) and returns whether it found a route.
+bool shortestExploredRoute(MazeMouse* maze_mouse, const std::vector<std::array<int, 2>>& goals,
+                           CellPath& out);
+bool fastestExploredRoute(MazeMouse* maze_mouse, const std::vector<std::array<int, 2>>& goals,
+                          CellPath& out, const RunTimeModel& model = {});
+bool plannedExploredRoute(MazeMouse* maze_mouse, const std::vector<std::array<int, 2>>& goals,
+                          RoutePlanner planner, CellPath& out);
 
 const char* routePlannerName(RoutePlanner planner);
 

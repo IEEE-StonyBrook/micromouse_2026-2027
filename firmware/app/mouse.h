@@ -102,7 +102,7 @@ class Mouse
     // mazerunner-core turn_smooth(): shared by search, SMOOTH RUN and PATH.
     bool smooth_turn(bool turn_left, float centre_ahead_mm, float end_after_centre_mm);
     bool smooth_turn_step(bool turn_left);
-    // Dumps Motion's turn trace as CSV rows prefixed "T,".
+    // Stops the run log and dumps it as CSV rows prefixed "T,".
     void print_turn_trace(float target_yaw_deg);
     bool turn_IP180();
     bool turn_IP90R();
