@@ -219,9 +219,12 @@ class SerialLink:
                 continue
             if self.ser is None:
                 try:
-                    s = open_port(self.port, self.baud)
+                    port = self.port
+                    s = open_port(port, self.baud)
                     with self.lock:
-                        if not self.want_connected:
+                        # A BLE open blocks for seconds; the user may have
+                        # picked another port meanwhile.
+                        if not self.want_connected or self.port != port:
                             s.close()
                             continue
                         self.ser = s
