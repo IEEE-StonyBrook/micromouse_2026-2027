@@ -66,7 +66,7 @@ What each layer is allowed to know:
 | `control/` | velocity, acceleration, PID, profiles, pose, kinematics | maze solving |
 | `maze/` | cells, directions, walls, coordinates, mouse pose | motors, sensors |
 | `navigation/` | flood fill, A*, goals, cell paths, L/F/R conversion | physical sensors |
-| `hal/` | platform-neutral interfaces (time, critical section, reset cause, peripheral handles); backends in `hal/pico/` and `hal/host/` | robot logic |
+| `hal/` | platform-neutral interfaces (time, critical section, reset cause, peripheral handles, console); backends in `hal/pico/` and `hal/host/` | robot logic |
 | `app/` | wiring the above together, CLI, Bluetooth, the control timer | — |
 
 Only `hal/pico/`, the driver `.cpp` files, `app/`, `driver_lab/*.cpp` and
@@ -75,7 +75,8 @@ enforces this, and `make -C tests` compiles the platform-neutral code against
 `hal/host`.
 
 `make -C tests` also builds and runs `tests/host_tests`, the doctest unit tests
-(`tests/*_test.cpp`) for Profile, PID, Drivetrain, Motion and the maze parser.
+(`tests/*_test.cpp`) for Profile, PID, Drivetrain, Motion, the maze parser and
+the console HAL.
 `tests/fakes/` stands in for the Motor, Encoder and IMU drivers on the host and
 adds a first-order two-wheel plant, so control changes can be tested without a
 mouse. Add a test case to a `*_test.cpp` file; the Makefile picks new files up.

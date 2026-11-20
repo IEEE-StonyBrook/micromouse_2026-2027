@@ -54,6 +54,7 @@
 #include "drivers/line_sensor.h"
 #include "drivers/motor.h"
 #include "drivers/tof.h"
+#include "hal/pico/console.h"
 #include "maze/maze.h"
 #include "maze/maze_mouse.h"
 
@@ -402,6 +403,7 @@ static void runDriverLabMode(Battery* battery, SensorMode sensor_mode)
     uart_set_format(uart0, 8, 1, UART_PARITY_NONE);
     uart_set_fifo_enabled(uart0, true);
     stdio_set_driver_enabled(&bt_driver, true);
+    hal::console::pico::setUartRxPolling(true); // DriverLab reads the HC-05 by polling
 
     printf("\n=== DriverLab ===\n");
     printf("Battery: %.2f V\n", battery->voltage());

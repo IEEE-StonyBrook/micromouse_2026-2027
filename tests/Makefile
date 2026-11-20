@@ -7,7 +7,7 @@ LIB      := $(OUT)/libfirmware_host.a
 
 # One binary holds every test case; main.cpp supplies doctest's main().
 TEST_SRCS     := $(wildcard *_test.cpp)
-FIRMWARE_SRCS := ../firmware/maze/maze_setting.cpp
+FIRMWARE_SRCS := ../firmware/maze/maze_setting.cpp ../firmware/hal/console.cpp
 FAKE_SRCS     := $(wildcard fakes/*.cpp)
 
 .PHONY: test
