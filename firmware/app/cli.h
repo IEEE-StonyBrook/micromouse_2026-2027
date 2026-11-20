@@ -112,6 +112,7 @@ class CommandLineInterface
     void handle_stage_command(const Args& args);
     void handle_comp_command(const Args& args);
     void handle_style_command(const Args& args);
+    void handle_planner_command(const Args& args);
     void handle_path_command(const Args& args);
     void handle_center_command(const Args& args);
     void handle_line_command(const Args& args);

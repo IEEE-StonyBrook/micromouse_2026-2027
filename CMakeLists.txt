@@ -71,6 +71,8 @@ set(NAVIGATION_SOURCES
     firmware/navigation/flood_fill.cpp
     firmware/navigation/path_converter.cpp
     firmware/navigation/path_utils.cpp
+    firmware/navigation/route_planner.cpp
+    firmware/navigation/run_time.cpp
     firmware/navigation/diagonalizer.cpp
 )
 
@@ -93,6 +95,8 @@ set(DRIVER_LAB_SOURCES
 
 # Platform-neutral interfaces live in firmware/hal/; these are the Pico backends.
 set(HAL_SOURCES
+    firmware/hal/console.cpp
+    firmware/hal/pico/console.cpp
     firmware/hal/pico/critical_section.cpp
     firmware/hal/pico/system.cpp
     firmware/hal/pico/time.cpp
