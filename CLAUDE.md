@@ -96,6 +96,11 @@ against `hal/host/memory_flash.h`, which can cut power at any word:
 record always loads. The next-boot reset verdict (`common/reset_report.h`:
 the reset cause plus the breadcrumb, `common/breadcrumb.h`) is platform-neutral
 too and tested in `reset_report_test.cpp`.
+The STM32's DRV8874 motor drivers sit behind `drivers/motor_bridge.h`
+(platform-neutral, against `hal/h_bridge.h`; the register glue is
+`hal/stm32/h_bridge.*`): zero duty brakes, a second braked or `sleep()`
+drops nSLEEP, a command given asleep waits out tWAKE and is never lost, and
+IPROPI counts become amps. `motor_bridge_test.cpp` runs it on a fake port.
 `tests/fakes/` stands in for the Motor, Encoder and IMU drivers on the host and
 adds a first-order two-wheel plant, so control changes can be tested without a
 mouse. `tests/sim/` grows that into a physics sim: a DC-motor, two-wheel
@@ -167,7 +172,8 @@ stall current at near-zero wheel speed (only where a board supplies a current
 reader; the Pico has none) or forward PD error that keeps growing. Thresholds
 are times in `config/motion.h` (`CRASH_*`). `Motion::update()` checks it every
 tick and, on a trip, cuts the motors itself (`Drivetrain::stop()`, then the
-optional cut hook where the STM32 will sleep its drivers) and holds them cut
+optional cut hook, where a board calls `MotorBridge::sleep()`; its current
+reader is `MotorBridge::readAmps`) and holds them cut
 with the move frozen; the trip latches until `Motion::clear_crash()`. The main
 loop (`CommandLineInterface::reportCrash()`) prints the cause, flashes the
 cause code in orange on the LED and halts the run. `CRASH ON|OFF|CLEAR|INHIBIT
@@ -255,8 +261,9 @@ make -j4
 STM32F405 bring-up firmware for the Adafruit Feather STM32F405 Express
 (pins and timers in `config/board_feather.h`): 168 MHz clock, 1 kHz TIM7
 tick, USART3 console at 1 Mbaud with `stats`, `flood`, `profile`, `arm`,
-`logfill` (fill the run log with a test pattern) and `log` (dump it)
-commands, TIM3/TIM4 encoders and an LSM6DSR on SPI2. At boot it reads the
+`logfill` (fill the run log with a test pattern), `log` (dump it) and
+`motor` (driver state and current, `motor <l> <r>` duties, `motor sleep`;
+only where `board::MOTOR_DRIVERS_FITTED`, false on the Feather) commands, TIM3/TIM4 encoders and an LSM6DSR on SPI2. At boot it reads the
 chip UID and loads the board profile it saved in the flash store; an unknown
 board lists the presets (`config/board_profiles.h`) and refuses to arm until
 `profile <n>` saves one. A damaged store shows as 2 LED flashes every 2 s,
