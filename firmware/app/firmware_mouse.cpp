@@ -4,7 +4,7 @@
 #include "config/sensors.h"
 #include "control/motion.h"
 #include "drivers/tof.h"
-#include "pico/stdlib.h"
+#include "hal/time.h"
 
 namespace
 {
@@ -60,7 +60,7 @@ void FirmwareMouse::serviceSensors()
         right_tof_ == nullptr)
         return;
 
-    const uint32_t now_ms = to_ms_since_boot(get_absolute_time());
+    const uint32_t now_ms = hal::time::nowMs();
     if (now_ms < next_tof_poll_ms_)
         return;
 

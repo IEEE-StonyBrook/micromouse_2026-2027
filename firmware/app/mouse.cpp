@@ -12,12 +12,11 @@
 #include <vector>
 
 #ifndef SIMULATOR_BUILD
-#include "pico/stdlib.h"
-
 #include "app/leds.h"
 #include "config/motion.h"
 #include "control/motion.h"
 #include "drivers/beacon_ir.h"
+#include "hal/time.h"
 #endif
 #include "common/log.h"
 #include "common/tof_wall_utils.h"
@@ -127,8 +126,7 @@ constexpr uint32_t kMousePositionWaitTimeoutMs = 3000;
 
 bool timedOut(uint32_t start_ms, uint32_t timeout_ms)
 {
-    return timeout_ms > 0 &&
-           static_cast<uint32_t>(to_ms_since_boot(get_absolute_time()) - start_ms) >= timeout_ms;
+    return timeout_ms > 0 && static_cast<uint32_t>(hal::time::nowMs() - start_ms) >= timeout_ms;
 }
 #endif
 
@@ -379,7 +377,7 @@ template <typename Done> bool Mouse::pollUntil(Done done, uint32_t timeout_ms, c
     // mazerunner-core's `delay(2)` wait loops. Halt or timeout stops the drive.
     if (motion_ == nullptr)
         return false;
-    const uint32_t start_ms = to_ms_since_boot(get_absolute_time());
+    const uint32_t start_ms = hal::time::nowMs();
     while (!done())
     {
         serviceSensors();
@@ -397,7 +395,7 @@ template <typename Done> bool Mouse::pollUntil(Done done, uint32_t timeout_ms, c
             motion_->emergency_stop();
             return false;
         }
-        sleep_ms(2);
+        hal::time::sleepMs(2);
     }
     return !haltRequested();
 #else
@@ -1130,7 +1128,7 @@ bool Mouse::stopAtCentre()
     // is. 500 ms from the start of the approach, as in mazerunner.
     motion_->move(distance_mm, ROBOT_MAX_SEARCH_SPEED_MMPS, STOP_AT_CENTRE_FRONT_SPEED_MMPS,
                   ROBOT_SEARCH_ACCEL_MMPS2);
-    const uint32_t start_ms  = to_ms_since_boot(get_absolute_time());
+    const uint32_t start_ms  = hal::time::nowMs();
     bool           by_sensor = false;
     if (!pollUntil(
             [&]
@@ -1375,7 +1373,7 @@ bool Mouse::search_to(const std::vector<std::array<int, 2>>& goals)
     bool       proving    = route_proof_ && going_home && !goal_cells_.empty();
     int        proof_legs = 0;
 #ifndef SIMULATOR_BUILD
-    const uint32_t proof_start_ms = to_ms_since_boot(get_absolute_time());
+    const uint32_t proof_start_ms = hal::time::nowMs();
 #endif
 
     int step = 1;
@@ -1395,8 +1393,7 @@ bool Mouse::search_to(const std::vector<std::array<int, 2>>& goals)
 #ifdef SIMULATOR_BUILD
             const uint32_t proof_ms = static_cast<uint32_t>(proof_legs) * kRouteProofLegMs;
 #else
-            const uint32_t proof_ms =
-                static_cast<uint32_t>(to_ms_since_boot(get_absolute_time()) - proof_start_ms);
+            const uint32_t proof_ms = static_cast<uint32_t>(hal::time::nowMs() - proof_start_ms);
 #endif
             const RouteBounds bounds = routeBounds(*maze_mouse_, start_cell_, goal_cells_);
             std::vector<std::array<int, 2>> unproven;
@@ -1852,15 +1849,7 @@ bool Mouse::turn_to_face(const std::string& heading)
 void Mouse::blink(int count)
 {
 #ifndef SIMULATOR_BUILD
-    gpio_init(PICO_DEFAULT_LED_PIN);
-    gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
-    for (int i = 0; i < count; ++i)
-    {
-        gpio_put(PICO_DEFAULT_LED_PIN, 1);
-        sleep_ms(100);
-        gpio_put(PICO_DEFAULT_LED_PIN, 0);
-        sleep_ms(100);
-    }
+    board_led::blink(count);
 #else
     (void)count;
 #endif
@@ -2205,7 +2194,7 @@ void Mouse::print_turn_trace(float target_yaw_deg)
         {
             if (haltRequested())
                 return;
-            sleep_ms(2);
+            hal::time::sleepMs(2);
         }
     }
     // The SS90E line reads yaw while the IMU still lags the arc by ~40 ms.
@@ -2369,7 +2358,7 @@ void Mouse::conf_log_front_sensor()
     while (!motion_->move_finished() && !haltRequested())
     {
         front_sensor_track();
-        sleep_ms(TOF_MEASUREMENT_PERIOD_MS);
+        hal::time::sleepMs(TOF_MEASUREMENT_PERIOD_MS);
     }
     front_sensor_track();
     motion_->reset_drive_system();
@@ -2393,7 +2382,7 @@ void Mouse::conf_sensor_spin_calibrate()
     while (!motion_->turn_finished() && !haltRequested())
     {
         report_radial_track(false);
-        sleep_ms(TOF_MEASUREMENT_PERIOD_MS);
+        hal::time::sleepMs(TOF_MEASUREMENT_PERIOD_MS);
     }
     report_radial_track(false);
     motion_->reset_drive_system();
@@ -2436,7 +2425,7 @@ void Mouse::conf_edge_detection()
         }
         left_was_wall  = left_now;
         right_was_wall = right_now;
-        sleep_ms(TOF_MEASUREMENT_PERIOD_MS);
+        hal::time::sleepMs(TOF_MEASUREMENT_PERIOD_MS);
     }
     LOG_INFO("edge_detection: done left_logged=" + std::to_string(left_logged ? 1 : 0) +
              " right_logged=" + std::to_string(right_logged ? 1 : 0));
