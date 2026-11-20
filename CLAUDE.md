@@ -225,3 +225,17 @@ Verbs: `Add`, `Fix`, `Update`, `Refactor`, `Remove`, `Change`, `Document`,
 and **sequential-thinking** (step-by-step reasoning for hard debugging).
 
 The calibration dashboard is `cd tools && python3 driverlab_dashboard.py`.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues on IEEE-StonyBrook/micromouse_2026-2027 (`gh`). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five default labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
