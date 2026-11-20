@@ -167,3 +167,33 @@ jobs:
           name: maze-results
           path: maze-results.*
           if-no-files-found: ignore
+
+  esp32-bridge:
+    name: ESP32 bridge
+    runs-on: ubuntu-24.04
+    env:
+      PLATFORMIO_VERSION: 6.2.0
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache PlatformIO packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: platformio-${{ env.PLATFORMIO_VERSION }}-${{ hashFiles('esp32/platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: pip install "platformio==${PLATFORMIO_VERSION}"
+
+      - name: Bridge logic tests
+        run: pio test -d esp32 -e native
+
+      - name: Build the ESP32-C3 firmware
+        run: pio run -d esp32 -e esp32c3
+
+      - name: BLE transport tests
+        run: python3 -m unittest discover -s tools -p 'test_*.py' -v

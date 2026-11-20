@@ -275,6 +275,10 @@ the flash store.
 
 Simulator: `cd sim && make`, producing `sim/bin/simulator`.
 
+ESP32-C3 BLE bridge (the STM32 CLI over a Nordic UART Service; radio off while
+armed via ESP32 EN): see [`esp32/README.md`](esp32/README.md). Tests with
+`pio test -d esp32 -e native`, builds with `pio run -d esp32 -e esp32c3`.
+
 ## Reporting your work
 
 Close every code change with:
