@@ -38,6 +38,7 @@ add_executable(Jurababa_stm32
     firmware/common/flash_store.cpp
     firmware/common/log.cpp
     firmware/common/reset_report.cpp
+    firmware/common/safe_outputs.cpp
     firmware/control/crash_detector.cpp
     firmware/control/drivetrain.cpp
     firmware/control/motion.cpp

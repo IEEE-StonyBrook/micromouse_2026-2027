@@ -4,6 +4,11 @@
 // store fault shows instead of the 1 Hz blink until the next good save: two
 // flashes when a damaged slot was skipped, four when no settings loaded.
 //
+// The very first thing at boot, before the clocks, drives every actuator
+// output (motor driver inputs and nSLEEP, IR emitters, fan) to its off level
+// (common/safe_outputs.h); nothing may drive them on until `arm`. On the
+// Feather, which fits none of them, no pin is touched.
+//
 // At boot the board reads its chip UID and loads the profile it saved under
 // it from the flash store (sectors 1-2). An unknown board prints the presets
 // and refuses to arm until one is picked.
@@ -14,13 +19,16 @@
 //   flood        queues 64 KB at once, to show the TX ring dropping and counting
 //   profile      this board's UID and profile, or the presets to pick from
 //   profile <n>  saves preset n as this board's profile (erases a flash sector)
-//   arm          arms the motor drivers, once the board profile is known
+//   arm          arms the motor drivers, once the board profile is known and
+//                the safe outputs are held off. On a board without drivers
+//                (the Feather) it says whether it may and stays disarmed
 //   disarm       puts the motor drivers to sleep and refuses commands again
 //   logfill      fills the run log (in CCM) with a full ring of synthetic samples
 //   log          dumps the run log as TRACE CSV rows
 //   motor        motor driver state and IPROPI current (boards with drivers)
-//   motor <l> <r> drives the motors at duty l, r in [-1, 1] (armed only);
-//                0 0 brakes, and a second of braking puts the drivers to sleep
+//   motor <l> <r> drives the motors at duty l, r in [-1, 1] once armed;
+//                0 0 brakes (armed or not), and a second of braking puts
+//                the drivers to sleep
 //   motor sleep  puts the drivers to sleep now
 //   move <mm> [<mm/s>] a straight move through Motion (armed only); prints
 //                where it ended, in mm and encoder counts
@@ -53,6 +61,7 @@
 #include "common/breadcrumb.h"
 #include "common/emitter_check.h"
 #include "common/flash_store.h"
+#include "common/safe_outputs.h"
 #include "config/board_feather.h"
 #include "config/board_stm32.h"
 #include "config/motion.h"
@@ -74,6 +83,7 @@
 #include "hal/stm32/gpio.h"
 #include "hal/stm32/h_bridge.h"
 #include "hal/stm32/memory.h"
+#include "hal/stm32/output_port.h"
 #include "hal/stm32/quad_counter.h"
 #include "hal/stm32/spi.h"
 #include "hal/stm32/tick.h"
@@ -85,6 +95,10 @@ namespace
 {
 constexpr uint32_t BLINK_HALF_MS = 500;
 constexpr uint32_t CORE_MHZ      = hal::stm32::BUSES.hclk_hz / 1000000;
+
+// Holds the actuators off from the first line of main() until `arm`.
+hal::stm32::OutputPort output_port;
+SafeOutputs safe_outputs(output_port, board::REV1_SAFE_OUTPUTS, board::SAFE_OUTPUT_COUNT);
 
 hal::stm32::QuadCounter encoder_left;
 hal::stm32::QuadCounter encoder_right;
@@ -143,9 +157,10 @@ class BringupSaveGuard final : public SaveGuard
     }
 };
 
-// TODO(rev1): the emitter and receiver pins are unknown until the rev1
-// schematic. Replace this with the TIM2/ADC2 IR bank then; until it lands,
-// `emitters` reports that the board has none.
+// TODO(rev1): the receiver pins are unknown and the emitter pins
+// (board::EMITTER_PINS) are placeholders until the rev1 schematic. Replace
+// this with the TIM2/ADC2 IR bank then; until it lands, `emitters` reports
+// that the board has none.
 class NoIrBank final : public IrBank
 {
   public:
@@ -275,16 +290,6 @@ void motorCommand(const char* arg)
     {
         motors.sleep();
     }
-    else if (*arg != '\0' && !motors.armed())
-    {
-        std::printf("motor: disarmed, arm first\n");
-        return;
-    }
-    else if (*arg != '\0' && motion.crashDetector().tripped())
-    {
-        std::printf("motor: crash latched, crash clear first\n");
-        return;
-    }
     else if (*arg != '\0')
     {
         char*       end   = nullptr;
@@ -295,6 +300,21 @@ void motorCommand(const char* arg)
         {
             std::printf("usage: motor [<left> <right> | sleep]\n");
             return;
+        }
+        // 0 0 only brakes, so it needs no arming (disarmed, the bridge
+        // drops it and stays asleep).
+        if (left != 0.0f || right != 0.0f)
+        {
+            if (!motors.armed())
+            {
+                std::printf("motor: disarmed, arm first\n");
+                return;
+            }
+            if (motion.crashDetector().tripped())
+            {
+                std::printf("motor: crash latched, crash clear first\n");
+                return;
+            }
         }
         tick_mode = TickMode::kRaw; // Motion would brake these every tick
         motors.set_duty(left, right);
@@ -452,23 +472,30 @@ void pickProfile(const char* arg)
     printProfile();
 }
 
-// Arming needs a known board: until then the drivers stay asleep and every
-// motor command is dropped (MotorBridge's arm gate).
+// MotorBridge's arm gate is the one armed state: disarmed, the drivers stay
+// asleep and every motor command is dropped. Arming needs a known board and
+// the safe outputs held off. The Feather has nothing to arm: it reports the
+// verdict only, so it never sits armed and refuses a profile save.
 void arm()
 {
     if (!identity->armAllowed())
-    {
         std::printf("arm: refused, unknown board (see profile)\n");
-        return;
+    else if (!board::MOTOR_DRIVERS_FITTED)
+        std::printf("arm: allowed, but this board has nothing to arm\n");
+    else if (!safe_outputs.arm())
+        std::printf("arm: refused, outputs not held off\n");
+    else
+    {
+        motors.arm();
+        motors.wake(); // so the first move does not wait out tWAKE
+        std::printf("arm: armed\n");
     }
-    motors.arm();
-    motors.wake(); // so the first move does not wait out tWAKE
-    std::printf("arm: armed\n");
 }
 
 void disarm()
 {
     motors.disarm();
+    safe_outputs.disarm();
     motion.reset_drive_system(); // so re-arming never resumes a move
     move_reported = true;        // aborted, not done
     std::printf("disarm: motor drivers asleep\n");
@@ -603,6 +630,15 @@ void pollConsole()
         }
     }
 }
+
+// Runs right after the safe outputs are off. Before anything notes an
+// activity, snapshot what the previous session left in the breadcrumb
+// (.noinit SRAM) and re-arm it; then start the crystal and the PLL.
+hal::stm32::ClockSource startClocks()
+{
+    Breadcrumb::begin();
+    return hal::stm32::setupClocks();
+}
 } // namespace
 
 // STM32 has no HC-05: DriverLab's Bluetooth CSV pacing does not apply, and
@@ -636,10 +672,9 @@ volatile hal::stm32::tick::Stats tick_stats;
 
 int main()
 {
-    // First, before anything notes an activity: snapshot what the previous
-    // session left in the breadcrumb (.noinit SRAM), then re-arm it.
-    Breadcrumb::begin();
-    const hal::stm32::ClockSource clock = hal::stm32::setupClocks();
+    // First of all, on the reset HSI before the clocks: every actuator output
+    // to its off level. Then startClocks().
+    const hal::stm32::ClockSource clock = powerOn(safe_outputs, startClocks);
     hal::stm32::gpioOutput(board::LED);
     encoder_left.init(board::ENCODER_PINS[0], board::ENCODER_PINS[1]);
     encoder_right.init(board::ENCODER_PINS[2], board::ENCODER_PINS[3]);

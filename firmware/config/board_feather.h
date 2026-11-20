@@ -51,6 +51,14 @@ struct TimerPin
     uint8_t af;
 };
 
+/// An actuator output held at its off level from power-on until the board
+/// arms (common/safe_outputs.h).
+struct SafeOutput
+{
+    Pin  pin;
+    bool off_high; ///< true for an active-low enable
+};
+
 struct UartConfig
 {
     uint8_t  usart; ///< USARTx number

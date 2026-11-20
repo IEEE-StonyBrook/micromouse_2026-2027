@@ -13,7 +13,9 @@
 // Crash watchdog (config/motion.h) on by default; CRASH OFF in the CLI disarms it.
 #define CRASH_WATCHDOG_DEFAULT_ENABLED 1
 
-#include "config/board_feather.h" // board::Pin, board::TimerPin
+#include <cstddef>
+
+#include "config/board_feather.h" // board::Pin, board::TimerPin, board::SafeOutput
 
 namespace board
 {
@@ -64,6 +66,37 @@ constexpr bool MOTOR_LEFT_INVERT    = false;
 constexpr bool MOTOR_RIGHT_INVERT   = false;
 constexpr bool ENCODER_LEFT_INVERT  = false;
 constexpr bool ENCODER_RIGHT_INVERT = false;
+
+// ================= IR emitters and fan ================= //
+// UNVERIFIED PLACEHOLDERS from the integration plan, until the rev1
+// schematic is final: emitter gates on PA0-PA3 (TIM2_CH1-4 later), fan gate
+// on PA8 (TIM1_CH1 later). Each is assumed an N-MOSFET gate, off when low.
+constexpr Pin EMITTER_PINS[4] = {{'A', 0}, {'A', 1}, {'A', 2}, {'A', 3}};
+constexpr Pin FAN_PIN         = {'A', 8};
+
+// ================= Power-on safe outputs ================= //
+// Driven to these levels first thing at boot, before the clocks, and held
+// until the board arms (common/safe_outputs.h, main_stm32.cpp). Every pin is
+// an UNVERIFIED placeholder from the entries above. The rev1 board fits the
+// motor drivers, emitters and fan together, so the list follows
+// MOTOR_DRIVERS_FITTED: on the Feather these pins belong to an encoder, the
+// SD card and the battery monitor, and none is touched.
+// clang-format off
+constexpr SafeOutput REV1_SAFE_OUTPUTS[] = {
+    {MOTOR_NSLEEP, false},         // both DRV8874s asleep, outputs Hi-Z
+    {MOTOR_INPUTS[0].pin, false},  // IN1 = IN2 = low: coast
+    {MOTOR_INPUTS[1].pin, false},
+    {MOTOR_INPUTS[2].pin, false},
+    {MOTOR_INPUTS[3].pin, false},
+    {EMITTER_PINS[0], false},
+    {EMITTER_PINS[1], false},
+    {EMITTER_PINS[2], false},
+    {EMITTER_PINS[3], false},
+    {FAN_PIN, false},
+};
+// clang-format on
+constexpr std::size_t SAFE_OUTPUT_COUNT =
+    MOTOR_DRIVERS_FITTED ? sizeof REV1_SAFE_OUTPUTS / sizeof REV1_SAFE_OUTPUTS[0] : 0;
 } // namespace board
 
 #endif // CONFIG_BOARD_STM32_H
