@@ -23,10 +23,10 @@ jobs:
       PICO_SDK_PATH: ${{ github.workspace }}/pico-sdk
       PICO_TOOLCHAIN_PATH: ${{ github.workspace }}/arm-toolchain
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check out the Pico SDK
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: raspberrypi/pico-sdk
           ref: ${{ env.PICO_SDK_VERSION }}
@@ -35,7 +35,7 @@ jobs:
 
       - name: Cache the Arm toolchain
         id: toolchain-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: arm-toolchain
           key: arm-gnu-toolchain-${{ env.ARM_TOOLCHAIN_VERSION }}-x86_64-arm-none-eabi
@@ -56,7 +56,7 @@ jobs:
       - name: Build
         run: ninja -C build-pico
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: jurababa-uf2
           path: build-pico/Jurababa.uf2
@@ -66,7 +66,7 @@ jobs:
     name: Simulator bot
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build
         run: make -C sim
@@ -75,7 +75,7 @@ jobs:
     name: Host tests and ISR check
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Host tests
         run: make -C tests
@@ -105,11 +105,11 @@ jobs:
       ARM_TOOLCHAIN_VERSION: 14.2.rel1
       ARM_TOOLCHAIN_PATH: ${{ github.workspace }}/arm-toolchain
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Cache the Arm toolchain
         id: toolchain-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: arm-toolchain
           key: arm-gnu-toolchain-${{ env.ARM_TOOLCHAIN_VERSION }}-x86_64-arm-none-eabi
@@ -131,7 +131,7 @@ jobs:
       - name: Build
         run: ninja -C build-stm32
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: jurababa-stm32
           path: |
@@ -144,7 +144,7 @@ jobs:
     name: Sim bot maze corpus
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build the sim bot
         run: make -C sim
@@ -161,7 +161,7 @@ jobs:
       - name: Compare the time and length route planners
         run: python3 sim/runner/runner.py --compare-planners
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: maze-results
@@ -174,14 +174,14 @@ jobs:
     env:
       PLATFORMIO_VERSION: 6.2.0
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
       - name: Cache PlatformIO packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.platformio
           key: platformio-${{ env.PLATFORMIO_VERSION }}-${{ hashFiles('esp32/platformio.ini') }}
