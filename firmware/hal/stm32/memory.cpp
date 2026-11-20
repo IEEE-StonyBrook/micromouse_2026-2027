@@ -57,6 +57,15 @@ extern "C" void* _sbrk(ptrdiff_t increment)
     return previous;
 }
 
+// The C++ ABI's handle for this image, which __cxa_atexit records with each
+// static destructor. libstdc++'s stream error categories, reached from
+// common/log.h's std::ostringstream, register theirs; the firmware never
+// exits, so none run.
+extern "C"
+{
+    void* __dso_handle = nullptr;
+}
+
 namespace hal::stm32
 {
 MemoryUsage memoryUsage()

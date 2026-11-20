@@ -1,6 +1,7 @@
 #include "common/log.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 
 #include "common/breadcrumb.h"
@@ -115,6 +116,8 @@ void Log::message(LogPriority priority, std::string msg)
 #ifdef SIMULATOR_BUILD
     // Use stderr for simulator to avoid interfering with mms protocol on stdout
     std::cerr << final_msg << '\n';
+#elif defined(STM32_BUILD)
+    std::printf("%s\n", final_msg.c_str());
 #else
     std::cout << final_msg << '\n';
 #endif
@@ -134,6 +137,8 @@ void Log::diagnostic(std::string msg)
 
 #ifdef SIMULATOR_BUILD
     std::cerr << final_msg << '\n';
+#elif defined(STM32_BUILD)
+    std::printf("%s\n", final_msg.c_str());
 #else
     std::cout << final_msg << '\n';
 #endif
