@@ -2383,7 +2383,7 @@ void CommandLineInterface::printLineStartBanner()
                 static_cast<double>(tune.kd_base_deg_per_slot),
                 static_cast<double>(LINE_GAIN_REF_SPEED_MMPS),
                 static_cast<double>(LINE_GAIN_SCHED_FLOOR_MMPS),
-                static_cast<double>(LINE_ERROR_FILTER_ALPHA),
+                static_cast<double>(lineErrorFilterAlpha(LOOP_FREQUENCY_HZ)),
                 static_cast<double>(LINE_LOOKAHEAD_TIME_S * 1000.0f));
     printFormat("LINE brake: gain=%.0f mm/s/slot lost_hold=%u ms lost_stop=%u ms recovery=%.2f\n",
                 static_cast<double>(LINE_BRAKE_GAIN_MMPS_PER_SLOT),

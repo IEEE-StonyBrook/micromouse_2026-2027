@@ -6,6 +6,7 @@
 #include "config/motion.h"
 #include "config/tuning.h"
 #include "control/drivetrain.h"
+#include "control/line_follower.h"
 #include "control/motion.h"
 #include "control/pid.h"
 #include "doctest/doctest.h"
@@ -64,4 +65,20 @@ TEST_CASE("motion trace samples every 4 ms by default at any rate")
     for (int i = 0; i < LOOP_TICKS(0.040f); i++)
         r->motion.update();
     CHECK(r->motion.traceCount() == 10); // 40 ms of 4 ms samples
+}
+
+TEST_CASE("line error filter settles in the same time at 500 Hz and 1 kHz")
+{
+    // The tuned 500 Hz filter keeps its exact gain on the Pico.
+    CHECK(lineErrorFilterAlpha(500.0f) == LINE_ERROR_FILTER_ALPHA_500HZ);
+
+    // Step response 10 ms in: 1 - 0.55^5 at 500 Hz, the same at 1 kHz.
+    for (float hz : {500.0f, 1000.0f})
+    {
+        const float alpha    = lineErrorFilterAlpha(hz);
+        float       filtered = 0.0f;
+        for (int i = 0; i < static_cast<int>(0.010f * hz + 0.5f); i++)
+            filtered += alpha * (1.0f - filtered);
+        CHECK(filtered == doctest::Approx(0.94967f).epsilon(1e-4));
+    }
 }

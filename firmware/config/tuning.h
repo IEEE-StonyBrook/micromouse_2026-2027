@@ -123,7 +123,9 @@
 
 // Error filter + predictive lookahead (substitutes for physical sensor
 // mounting offset ahead of the wheel axle).
-#define LINE_ERROR_FILTER_ALPHA 0.45f
+// The filter gain is per tick, so it is tuned at one rate and converted for
+// others (lineErrorFilterAlpha() in control/line_follower.h).
+#define LINE_ERROR_FILTER_ALPHA_500HZ 0.45f
 #define LINE_LOOKAHEAD_TIME_S   0.035f
 
 // Speed scheduling on |error|: target_v = TARGET - BRAKE * |e_filt|,
