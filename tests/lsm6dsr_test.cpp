@@ -203,6 +203,42 @@ TEST_CASE("LSM6DSR yaw sign follows how the board is mounted")
     CHECK(upside_down.yawRateDegps() == doctest::Approx(-70.0f));
 }
 
+TEST_CASE("LSM6DSR yaw integrates every gyro sample at the 1666 Hz output rate")
+{
+    FakeLsm6dsr fake;
+    Lsm6dsr     imu(fake);
+    REQUIRE(imu.init() == Lsm6dsr::Status::kOk);
+    CHECK(imu.yawDeg() == 0.0f);
+
+    // 1666 words of 1000 counts (70 dps) are one second of data at the
+    // datasheet's 1666 Hz ODR: 70 deg, however the reads split them up.
+    for (int tick = 0; tick < 833; ++tick)
+    {
+        fake.pushWord(lsm6dsr::TAG_GYRO, 0, 0, 1000);
+        if (tick % 2 == 0)
+            fake.pushWord(lsm6dsr::TAG_ACCEL, 0, 0, 4096); // not yaw
+        fake.pushWord(lsm6dsr::TAG_GYRO, 0, 0, 1000);
+        imu.readFifo();
+    }
+    CHECK(imu.yawDeg() == doctest::Approx(70.0f).epsilon(0.001));
+
+    // Two more seconds reach 210 deg, which reads as -150.
+    for (int tick = 0; tick < 1666; ++tick)
+    {
+        fake.pushWord(lsm6dsr::TAG_GYRO, 0, 0, 1000);
+        fake.pushWord(lsm6dsr::TAG_GYRO, 0, 0, 1000);
+        imu.readFifo();
+    }
+    CHECK(imu.yawDeg() == doctest::Approx(-150.0f).epsilon(0.001));
+
+    // Turning back the other way, face down: the sign applies per sample.
+    Lsm6dsr upside_down(fake, -1);
+    REQUIRE(upside_down.init() == Lsm6dsr::Status::kOk);
+    fake.pushWord(lsm6dsr::TAG_GYRO, 0, 0, 1666);
+    upside_down.readFifo();
+    CHECK(upside_down.yawDeg() == doctest::Approx(-0.07f).epsilon(0.001));
+}
+
 TEST_CASE("LSM6DSR FIFO read is capped per tick and counts overruns")
 {
     FakeLsm6dsr fake;

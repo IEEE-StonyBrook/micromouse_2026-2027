@@ -16,6 +16,11 @@ constexpr uint8_t WHO_AM_I_VALUE = 0x6B;
 
 /// Gyro sensitivity at FS = 2000 dps: 70 mdps/LSB.
 constexpr float GYRO_DEGPS_PER_LSB = 0.070f;
+/// Gyro output data rate as configured (CTRL2_G ODR_G = 1.66 kHz): 1666 Hz
+/// nominal. The internal oscillator sets the real rate to within a few
+/// percent; a measured yaw scale calibration absorbs that.
+constexpr float GYRO_ODR_HZ = 1666.0f;
+
 /// Accel sensitivity at FS = +/-8 g: 0.244 mg/LSB.
 constexpr float ACCEL_G_PER_LSB = 0.000244f;
 
@@ -115,6 +120,12 @@ class Lsm6dsr
     /// data, deg/s, + = CCW.
     float yawRateDegps() const { return yaw_rate_degps_; }
 
+    /// Yaw integrated over every gyro sample read so far, deg, + = CCW,
+    /// wrapped to [-180, 180]. Each sample counts for 1 / GYRO_ODR_HZ, so the
+    /// angle does not depend on how the reads split the samples up. A float
+    /// load: safe from the main loop too.
+    float yawDeg() const { return yaw_deg_; }
+
     /// Tick only (unlocked): latest acceleration along each chip axis, in g.
     float accelXG() const { return lsm6dsr::accelG(accel_raw_[0]); }
     float accelYG() const { return lsm6dsr::accelG(accel_raw_[1]); }
@@ -132,6 +143,7 @@ class Lsm6dsr
     hal::SpiDevice& spi_;
     int             yaw_sign_;
     float           yaw_rate_degps_ = 0.0f;
+    float           yaw_deg_        = 0.0f;
     int16_t         accel_raw_[3]   = {0, 0, 0};
     uint32_t        gyro_samples_   = 0;
     uint32_t        accel_samples_  = 0;

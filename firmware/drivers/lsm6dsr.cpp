@@ -154,6 +154,15 @@ uint32_t Lsm6dsr::readFifo(uint32_t max_words)
     {
         const float mean_raw = static_cast<float>(gyro_z_sum) / static_cast<float>(gyro_count);
         yaw_rate_degps_ = static_cast<float>(yaw_sign_) * mean_raw * lsm6dsr::GYRO_DEGPS_PER_LSB;
+        // The sum of the samples is the integral: each one spans 1 / ODR.
+        float yaw = yaw_deg_ + static_cast<float>(yaw_sign_) * static_cast<float>(gyro_z_sum) *
+                                   (lsm6dsr::GYRO_DEGPS_PER_LSB / lsm6dsr::GYRO_ODR_HZ);
+        // One read turns at most 8 samples x 2000 dps / 1666 Hz, under 10 deg.
+        if (yaw > 180.0f)
+            yaw -= 360.0f;
+        else if (yaw < -180.0f)
+            yaw += 360.0f;
+        yaw_deg_ = yaw;
         gyro_samples_ += gyro_count;
     }
     return words;
