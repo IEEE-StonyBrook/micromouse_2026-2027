@@ -146,6 +146,7 @@ class SimBotTest(unittest.TestCase):
         self.assertGreaterEqual(result["cells_searched"], 7)
         self.assertEqual(result["optimum_cells"], 6)
         self.assertTrue(result["speed_optimal"])
+        self.assertEqual(result["error_lines"], 0, result.get("log_tail"))
 
     def test_both_planners_solve_tiny_maze(self):
         for planner in ("length", "time"):
