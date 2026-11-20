@@ -45,7 +45,15 @@ host_tests: build-tests/doctest_main.o $(TEST_SRCS) $(FAKE_SRCS) $(SIM_SRCS) $(F
 host_tests_1k: build-tests/doctest_main.o $(TEST_SRCS) $(FAKE_SRCS) $(SIM_SRCS) $(FIRMWARE_SRCS) $(LIB_1K)
 	$(CXX) $(CXXFLAGS) $(DEFS_1K) build-tests/doctest_main.o $(TEST_SRCS) $(FAKE_SRCS) $(SIM_SRCS) $(FIRMWARE_SRCS) $(LIB_1K) -o $@
 
+# The physics sim CLI at the default (Pico) loop rate: prints a CSV trace.
+physim: sim/physim_main.cpp $(SIM_SRCS) sim/physim.h $(FAKE_SRCS) $(LIB)
+	$(CXX) $(CXXFLAGS) sim/physim_main.cpp $(SIM_SRCS) $(FAKE_SRCS) $(LIB) -o $@
+
+# make test builds the library first; this covers `make physim` on its own.
+$(LIB):
+	CXX="$(CXX)" sh host_compile.sh
+
 .PHONY: clean
 clean:
-	rm -f host_tests host_tests_1k
+	rm -f host_tests host_tests_1k physim
 	rm -rf $(OUT) $(OUT_1K) build-tests
