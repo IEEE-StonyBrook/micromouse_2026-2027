@@ -3,11 +3,13 @@
 
 #include <cstdint>
 
+#include "config/motion.h"
+
 /**
  * @brief Non-blocking battery voltage monitor using ADC with moving average filter.
  *
  * Uses a voltage divider (R1=10k, R2=5.1k) to scale battery voltage
- * to the Pico's 3.3V ADC range. Applies a 10-sample moving average
+ * to the Pico's 3.3V ADC range. Applies a 20 ms moving average
  * for noise reduction.
  *
  * Voltage divider math:
@@ -33,17 +35,16 @@ class Battery
     /**
      * @brief Takes a new ADC reading and updates the moving average.
      *
-     * Call this every control tick (500 Hz). Each call performs one ADC
-     * read; the 10-sample moving average gives a 20 ms time constant
-     * matched to the control loop. Producer must run on the same core
-     * that consumes voltage() — see CLAUDE.md and the per-mode table in
-     * the multicore correctness notes.
+     * Call this every control tick (LOOP_FREQUENCY_HZ). Each call performs
+     * one ADC read; the moving average spans 20 ms of ticks (10 at 500 Hz).
+     * Producer must run on the same core that consumes voltage() — see
+     * CLAUDE.md and the per-mode table in the multicore correctness notes.
      */
     void update();
 
     /**
      * @brief Returns the smoothed battery voltage.
-     * @return Battery voltage in volts (smoothed with 10-sample moving average).
+     * @return Battery voltage in volts (smoothed with a 20 ms moving average).
      */
     float voltage() const;
 
@@ -57,9 +58,10 @@ class Battery
     /// Shared by the smoothed and instantaneous paths so both scale identically.
     float voltsFromAdc(float adc_counts) const;
 
-    static constexpr int   AVERAGE_SAMPLES = 10;
+    static constexpr int   AVERAGE_SAMPLES = LOOP_TICKS(0.020f); // one per control tick
     static constexpr float ADC_MAX         = 4095.0f;
     static constexpr float ADC_REF_VOLTAGE = 3.3f;
+    static_assert(AVERAGE_SAMPLES > 0 && AVERAGE_SAMPLES <= 255, "reading_index_ is a uint8_t");
 
     uint8_t adc_pin_;
     uint8_t adc_channel_;
