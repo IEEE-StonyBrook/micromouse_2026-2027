@@ -246,6 +246,11 @@ std::vector<Cell*> MazeMouse::cellNeighbors(Cell* cell, bool include_diagonal)
     return maze_->neighbors(cell, include_diagonal);
 }
 
+int MazeMouse::cellNeighbors(Cell* cell, bool include_diagonal, std::array<Cell*, 8>& out)
+{
+    return maze_->neighbors(cell, include_diagonal, out);
+}
+
 void MazeMouse::resetPathfinding()
 {
     for (int col = 0; col < mazeWidth(); col++)

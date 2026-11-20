@@ -1,6 +1,7 @@
 #ifndef MAZE_MAZE_H
 #define MAZE_MAZE_H
 
+#include <array>
 #include <string>
 #include <vector>
 
@@ -102,6 +103,9 @@ class Maze
 
     Cell*              cell(int x, int y);
     std::vector<Cell*> neighbors(Cell* cell, bool include_diagonal = false);
+    // The same neighbours in the same order, written to `out` with no heap
+    // use; returns how many.
+    int neighbors(Cell* cell, bool include_diagonal, std::array<Cell*, 8>& out);
 
     int      width() const;
     int      height() const;
