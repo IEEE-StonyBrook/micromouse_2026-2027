@@ -109,3 +109,24 @@ TEST_CASE("An empty activity reads as nothing logged yet")
     const ResetReport r       = resetReport(c, crumb(7.8f, ""), SAG_V);
     CHECK(first(r).find("during: (nothing logged yet)") != std::string::npos);
 }
+
+TEST_CASE("A watchdog timeout with no breadcrumb still says the loop hung")
+{
+    hal::system::ResetCause c = none();
+    c.watchdog_timeout        = true;
+    const ResetReport r       = resetReport(c, Breadcrumb::Snapshot{}, SAG_V);
+    REQUIRE(r.count >= 1);
+    CHECK(r.lines[0].severity == ResetSeverity::kError);
+    CHECK(first(r) == "WATCHDOG RESET: the main loop hung; no breadcrumb survived.");
+}
+
+TEST_CASE("Window watchdog and low-power resets are named")
+{
+    hal::system::ResetCause w = none();
+    w.window_watchdog         = true;
+    CHECK(first(resetReport(w, crumb(7.8f), SAG_V)) == "Reset cause: window watchdog.");
+
+    hal::system::ResetCause lp = none();
+    lp.low_power               = true;
+    CHECK(first(resetReport(lp, crumb(7.8f), SAG_V)) == "Reset cause: low-power management reset.");
+}

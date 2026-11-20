@@ -7,10 +7,14 @@
  *        No libopencm3, so tests/stm32_reset_test.cpp runs it on the host.
  *
  * The flags are sticky across resets until RMVF clears them, so the boot
- * code reads them once, then clears them (hal/stm32/reset.cpp). Every reset
+ * code reads them once, then clears them (hal/stm32/system.cpp). Every reset
  * source drives NRST low, so PINRSTF rides along with all of them, and a
  * power-up (POR/PDR) also sets BORRSTF (RM0090 6.3.21). The decode keeps
  * one cause: the most specific flag wins.
+ *
+ * RM0090 counts a BOR as a power reset too, so a brownout may also set
+ * PORRSTF and decode as a power-up; unconfirmed on hardware. The report
+ * still calls it a power fault when the breadcrumb survived the dip.
  */
 
 #include <cstdint>

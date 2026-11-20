@@ -61,6 +61,13 @@ TEST_CASE("Internal resets also pulse NRST, so PIN does not count as the button"
     CHECK(flagsSet(decodeResetFlags(LPWR | PIN)) == 1);
 }
 
+TEST_CASE("A watchdog flag outranks a software reset left beside it")
+{
+    const auto c = decodeResetFlags(IWDG | SFT | PIN);
+    CHECK(c.watchdog_timeout);
+    CHECK(flagsSet(c) == 1);
+}
+
 TEST_CASE("No flags decode to nothing")
 {
     CHECK(flagsSet(decodeResetFlags(0)) == 0);
