@@ -2,13 +2,23 @@
 // the clock-fault pattern (three quick flashes every 2 s) when the 12 MHz
 // crystal failed to start and the core runs from the HSI instead.
 //
-// There is no console yet, so memory use and tick timing are left in
-// `memory_usage` and `tick_stats` for a debugger to read.
+// A bring-up shell runs on the USART3 console (Feather TX/RX, 1 Mbaud, 8N1):
+// it echoes what it receives and answers these lines:
+//   stats  tick timing, console drop counters, memory high-water marks
+//   flood  queues 64 KB at once, to show the TX ring dropping and counting
+// Memory use and tick timing are also left in `memory_usage` and `tick_stats`
+// for a debugger to read.
+
+#include <cinttypes>
+#include <cstdio>
+#include <cstring>
 
 #include <libopencm3/stm32/gpio.h>
 
 #include "config/board_feather.h"
+#include "hal/console.h"
 #include "hal/stm32/clock.h"
+#include "hal/stm32/console.h"
 #include "hal/stm32/gpio.h"
 #include "hal/stm32/memory.h"
 #include "hal/stm32/tick.h"
@@ -17,6 +27,78 @@
 namespace
 {
 constexpr uint32_t BLINK_HALF_MS = 500;
+constexpr uint32_t CORE_MHZ      = hal::stm32::BUSES.hclk_hz / 1000000;
+
+char     line[64];
+uint32_t line_len = 0;
+
+void printStats()
+{
+    namespace console                   = hal::console;
+    const hal::stm32::tick::Stats ticks = hal::stm32::tick::stats();
+    const hal::stm32::MemoryUsage mem   = hal::stm32::memoryUsage();
+    std::printf("clock %s, %" PRIu32 " MHz\n",
+                hal::stm32::clockSource() == hal::stm32::ClockSource::kHse ? "HSE" : "HSI (fault)",
+                CORE_MHZ);
+    std::printf("tick count %" PRIu32 " isr last %" PRIu32 " max %" PRIu32
+                " cycles (budget %" PRIu32 ")\n",
+                ticks.count, ticks.last_cycles, ticks.max_cycles,
+                hal::stm32::BUSES.hclk_hz / hal::stm32::tick::TICK_HZ);
+    std::printf("tick period min %" PRIu32 " max %" PRIu32 " cycles\n", ticks.min_period_cycles,
+                ticks.max_period_cycles);
+    std::printf("console ring dropped %" PRIu32 " gate dropped %" PRIu32 " rx idle %" PRIu32
+                " overruns %" PRIu32 "\n",
+                console::stm32::txRingDroppedBytes(), console::txGateDroppedBytes(),
+                console::stm32::rxIdleEvents(), console::stm32::rxOverruns());
+    std::printf("heap %" PRIu32 "/%" PRIu32 " stack %" PRIu32 "/%" PRIu32 " bytes\n",
+                mem.heap_peak_bytes, mem.heap_limit_bytes, mem.stack_peak_bytes,
+                mem.stack_limit_bytes);
+}
+
+void flood()
+{
+    // 64 KB in one go against a 2 KB ring: most of it must be dropped and
+    // counted, and the call must return at once rather than wait for the UART.
+    static const char chunk[] = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-\n";
+    const uint32_t    before  = hal::console::stm32::txRingDroppedBytes();
+    const uint64_t    start   = hal::time::nowUs();
+    for (int i = 0; i < 1024; ++i)
+        hal::console::write(chunk, sizeof chunk - 1);
+    const uint64_t took_us = hal::time::nowUs() - start;
+    std::printf("\nflood: %" PRIu32 " bytes dropped, queued in %" PRIu32 " us\n",
+                hal::console::stm32::txRingDroppedBytes() - before, static_cast<uint32_t>(took_us));
+}
+
+void runLine()
+{
+    line[line_len] = '\0';
+    if (std::strcmp(line, "stats") == 0)
+        printStats();
+    else if (std::strcmp(line, "flood") == 0)
+        flood();
+    else if (line_len > 0)
+        std::printf("unknown: %s (try stats, flood)\n", line);
+    line_len = 0;
+}
+
+// Echoes received bytes and collects them into a line.
+void pollConsole()
+{
+    int c;
+    while ((c = hal::console::getcNonBlocking()) >= 0)
+    {
+        if (c == '\r' || c == '\n')
+        {
+            hal::console::write("\r\n", 2);
+            runLine();
+            continue;
+        }
+        const char ch = static_cast<char>(c);
+        hal::console::write(&ch, 1);
+        if (line_len < sizeof line - 1)
+            line[line_len++] = ch;
+    }
+}
 } // namespace
 
 // Read with `print memory_usage` and `print tick_stats` in gdb.
@@ -28,6 +110,9 @@ int main()
     const hal::stm32::ClockSource clock = hal::stm32::setupClocks();
     hal::stm32::gpioOutput(board::LED);
     hal::stm32::tick::start(nullptr);
+    hal::console::stm32::init();
+    std::printf("\nJurababa STM32 bring-up, %" PRIu32 " MHz from the %s\n", CORE_MHZ,
+                clock == hal::stm32::ClockSource::kHse ? "crystal" : "HSI (crystal fault)");
 
     const uint32_t led_port       = hal::stm32::gpioPort(board::LED);
     const uint16_t led_bit        = hal::stm32::gpioBit(board::LED);
@@ -35,6 +120,7 @@ int main()
     while (true)
     {
         __asm__ volatile("wfi");
+        pollConsole();
         const uint32_t now_ms = hal::time::nowMs();
         const bool     led_on = clock == hal::stm32::ClockSource::kHse
                                     ? (now_ms / BLINK_HALF_MS) % 2 == 0

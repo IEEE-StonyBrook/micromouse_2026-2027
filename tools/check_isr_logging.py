@@ -59,6 +59,9 @@ ISR_FUNCTIONS = [
     ("firmware/common/utils.h", "wrapAngle180"),
     ("firmware/common/utils.h", "clampAbs"),
     ("firmware/hal/stm32/tick.cpp", "tim7_isr"),
+    ("firmware/hal/stm32/console.cpp", "dma1_stream3_isr"),
+    ("firmware/hal/stm32/console.cpp", "usart3_isr"),
+    ("firmware/hal/stm32/console.cpp", "kickTx"),
 ]
 
 FORBIDDEN = [
