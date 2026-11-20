@@ -101,7 +101,7 @@ add_executable(Jurababa
     ${DRIVER_LAB_SOURCES}
     ${COMMON_SOURCES}
     ${HAL_SOURCES}
-    firmware/main.cpp
+    firmware/main_pico.cpp
 )
 
 pico_generate_pio_header(Jurababa ${CMAKE_CURRENT_LIST_DIR}/firmware/drivers/ws2812.pio)

@@ -273,7 +273,7 @@ float DriverLab::feedforwardVolts(float speed_mmps, float accel_mmps2, bool left
 }
 
 // ============================================================================
-// tick() — called every 500 Hz from main.cpp
+// tick() — called every 500 Hz from main_pico.cpp
 // ============================================================================
 
 void DriverLab::tick()

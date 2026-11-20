@@ -77,7 +77,7 @@ bool parseMazeSetting(const std::string& text, int max_size, MazeSetting& out, s
         return false;
     }
 
-    // x outer, y inner: the same order main.cpp has always listed goal cells in.
+    // x outer, y inner: the same order main_pico.cpp has always listed goal cells in.
     MazeSetting setting;
     setting.size = size;
     for (int x = x_lo; x <= x_hi; ++x)

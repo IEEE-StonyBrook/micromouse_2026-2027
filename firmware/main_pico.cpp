@@ -1,5 +1,5 @@
 /**
- * main.cpp — Raspberry Pi Pico Micromouse entry point.
+ * main_pico.cpp — Raspberry Pi Pico Micromouse entry point.
  *
  * Top-level operating modes:
  *

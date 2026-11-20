@@ -78,7 +78,7 @@ Normal Mode starts automatically.** Keep that behaviour.
 **Normal Mode** is the competition mode. It runs on Core 0 only (the UKMARS
 single-core shape); Core 1 is unused:
 
-- A repeating hardware timer in `main.cpp` calls `Motion::update()` at
+- A repeating hardware timer in `main_pico.cpp` calls `Motion::update()` at
   `LOOP_FREQUENCY_HZ` (500 Hz): encoders, forward and rotation PD, motors.
 - The main loop (`cli.loop()`) handles serial and Bluetooth I/O, polls the
   ToFs at 50 Hz, and runs path planning, maze algorithms and high-level decisions.
@@ -90,7 +90,7 @@ open-loop voltage sweeps, step response, PID tuning, and export of
 DriverLab is standalone. It owns its own time-based profiles
 (`DriverLabProfile`), its own `PID` instances, and its trial state machines
 (OL, STEP, MOVE, TURN, TURN-OL, TURN-STEP), driven by one `tick()` per 500 Hz
-tick from `main.cpp`. It uses `Motor`, `Encoder`, `IMU`, `ToF` and `Battery`
+tick from `main_pico.cpp`. It uses `Motor`, `Encoder`, `IMU`, `ToF` and `Battery`
 directly — **the HAL drivers are the only seam** between DriverLab and the
 Robot/Motion stack. Keep `Motion` and `Drivetrain` out of DriverLab.
 

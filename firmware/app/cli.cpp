@@ -454,7 +454,7 @@ void CommandLineInterface::loop()
     //   3. Battery filter update at 500 Hz (cheap; ADC is non-blocking)
     //
     // Motion::update() runs concurrently via the 500 Hz hardware timer
-    // alarm registered in main.cpp for ToF mode. LineSensor mode has no
+    // alarm registered in main_pico.cpp for ToF mode. LineSensor mode has no
     // timer; the CLI loop advances LineFollower + Motion on this same 500 Hz
     // cadence.
     const uint32_t  loop_period_us = static_cast<uint32_t>(LOOP_INTERVAL_S * 1.0e6f);

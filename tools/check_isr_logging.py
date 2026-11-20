@@ -2,7 +2,7 @@
 """Fail if code reachable from the control interrupt logs or touches the heap.
 
 The 500 Hz control tick (Motion::update, run from a hardware-timer alarm in
-main.cpp) and the IMU UART interrupt must not format strings or allocate:
+main_pico.cpp) and the IMU UART interrupt must not format strings or allocate:
 LOG_* builds an std::ostringstream, which allocates and can block on stdio.
 This script checks the body of every function listed in ISR_FUNCTIONS for
 forbidden calls. Add a function here when the control path starts calling it.
@@ -20,7 +20,7 @@ REPO = Path(__file__).resolve().parent.parent
 # its definition's body; "call:<name>" checks the argument list of every call
 # to <name> (used for the lambda handed to the repeating timer).
 ISR_FUNCTIONS = [
-    ("firmware/main.cpp", "call:add_repeating_timer_us"),
+    ("firmware/main_pico.cpp", "call:add_repeating_timer_us"),
     ("firmware/control/motion.cpp", "Motion::update"),
     ("firmware/control/motion.cpp", "Motion::runPositionControl"),
     ("firmware/control/motion.cpp", "Motion::resetControlHistory"),
