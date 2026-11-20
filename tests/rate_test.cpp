@@ -31,3 +31,13 @@ TEST_CASE("pid derivative response is the same at 500 Hz and 1 kHz")
     CHECK(slow.update(0.0f, -1.0f) == doctest::Approx(5.0f));
     CHECK(fast.update(0.0f, -1.0f) == doctest::Approx(10.0f));
 }
+
+TEST_CASE("tick counts derive from a time, not a rate")
+{
+    // The encoder averager spans 16 ms: 8 taps on the Pico, 16 on the STM32.
+    CHECK(ENCODER_AVERAGER_LENGTH * LOOP_INTERVAL_S == doctest::Approx(0.016f));
+#ifndef HOST_LOOP_FREQUENCY_HZ
+    CHECK(ENCODER_AVERAGER_LENGTH == 8);
+#endif
+    CHECK(LOOP_TICKS(0.1f) == static_cast<int>(LOOP_FREQUENCY_HZ / 10.0f));
+}

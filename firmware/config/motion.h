@@ -16,17 +16,23 @@
 // change so the controller keeps that shape without switching away from the IMU.
 #define LOOP_INTERVAL_S (1.0f / LOOP_FREQUENCY_HZ)
 
-// 8-tap moving average over per-tick encoder deltas, applied in
-// Drivetrain::update() and DriverLab::sampleEncoders() to mirror
-// ukmars/motorlab/src/encoders.h:108. Adds ~16 ms phase lag at 500 Hz
-// in exchange for quantization rejection on the D-term and a clean plot
-// trace. Forward PD gains are tuned against this smoothed input.
+// Whole loop ticks in a duration (seconds), rounded to nearest. Anything that
+// counts ticks is written as a time and converted here, so a different loop
+// rate keeps the same timing. A compile-time constant when its argument is.
+#define LOOP_TICKS(seconds) (static_cast<int>((seconds) * LOOP_FREQUENCY_HZ + 0.5f))
+
+// 16 ms moving average over per-tick encoder deltas (8 taps at 500 Hz),
+// applied in Drivetrain::update() and DriverLab::sampleEncoders() to mirror
+// ukmars/motorlab/src/encoders.h:108. Adds ~7 ms group delay in exchange for
+// quantization rejection on the D-term and a clean plot trace. Forward PD
+// gains are tuned against this smoothed input.
 //
-// CAUTION (per Peter Harrison's encoders.h header): changing this length
+// CAUTION (per Peter Harrison's encoders.h header): changing this window
 // adds delay to the feedback loop and forces re-tuning of the forward
 // PD controller. Rotation PD uses the IMU, except during smooth-turn arcs
 // (see SMOOTH_TURN_ENCODER_HOLDOVER_MS), where it reads this averaged yaw.
-#define ENCODER_AVERAGER_LENGTH 8
+#define ENCODER_AVERAGER_WINDOW_S 0.016f
+#define ENCODER_AVERAGER_LENGTH   LOOP_TICKS(ENCODER_AVERAGER_WINDOW_S)
 
 // ================ Forward Speed Limits ================= //
 #define ROBOT_MAX_SEARCH_SPEED_MMPS  400.0f  // Search mode cruise speed
