@@ -27,7 +27,7 @@ rev1 actuator pins.
       reads HSE.
 - [ ] With a meter or a logic probe on each safe-output net: every one reads
       its off level after boot (nSLEEP, IN1/IN2, emitters and fan all low).
-- [ ] `motor 0.2 0.2` before `arm` prints "not armed" and nSLEEP stays low.
+- [ ] `motor 0.2 0.2` before `arm` prints "disarmed, arm first" and nSLEEP stays low.
 - [ ] After `profile <n>` (if the board is new) and `arm`: `motor 0.2 0.2`
       raises nSLEEP and PWMs IN1/IN2 on the right pins; `disarm` drops nSLEEP.
 

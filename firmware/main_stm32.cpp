@@ -482,7 +482,7 @@ void arm()
         std::printf("arm: refused, unknown board (see profile)\n");
     else if (!board::MOTOR_DRIVERS_FITTED)
         std::printf("arm: allowed, but this board has nothing to arm\n");
-    else if (!safe_outputs.arm())
+    else if (!safe_outputs.held())
         std::printf("arm: refused, outputs not held off\n");
     else
     {
@@ -495,7 +495,6 @@ void arm()
 void disarm()
 {
     motors.disarm();
-    safe_outputs.disarm();
     motion.reset_drive_system(); // so re-arming never resumes a move
     move_reported = true;        // aborted, not done
     std::printf("disarm: motor drivers asleep\n");

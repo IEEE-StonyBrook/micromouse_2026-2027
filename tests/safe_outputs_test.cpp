@@ -86,22 +86,15 @@ TEST_CASE("each safe output's off level is set before the pin starts driving")
     CHECK(indexOf(log, "level A8 high") < indexOf(log, "output A8"));
 }
 
-TEST_CASE("nothing may turn on until the board arms after power-on")
+TEST_CASE("the board may arm only once the outputs are held off")
 {
     std::vector<std::string> log;
     fake::OutputPort         port(log);
     SafeOutputs              safe(port, OUTPUTS, std::size(OUTPUTS));
 
-    CHECK_FALSE(safe.arm()); // refused: the outputs were never held off
-    CHECK_FALSE(safe.armed());
-
+    CHECK_FALSE(safe.held()); // arming refused: the outputs were never held off
     safe.holdOff();
-    CHECK_FALSE(safe.armed());
-
-    CHECK(safe.arm());
-    CHECK(safe.armed());
-    safe.disarm();
-    CHECK_FALSE(safe.armed());
+    CHECK(safe.held());
 }
 
 TEST_CASE("a board with no safe outputs touches no pin")
@@ -112,7 +105,7 @@ TEST_CASE("a board with no safe outputs touches no pin")
     safe.holdOff();
 
     CHECK(log.empty());
-    CHECK(safe.arm()); // nothing to hold, so arming is still allowed
+    CHECK(safe.held()); // nothing to hold, so arming is still allowed
 }
 
 TEST_CASE("the rev1 table holds both motor drivers, the emitters and the fan off")

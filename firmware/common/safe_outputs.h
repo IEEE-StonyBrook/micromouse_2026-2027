@@ -10,6 +10,8 @@
  * @brief The power-on order: every actuator output (motor driver inputs and
  *        nSLEEP, IR emitters, fan) is driven to its off level before any other
  *        start-up step, and the board does not arm until that has happened.
+ *        It keeps no armed state of its own: MotorBridge's arm gate is the
+ *        one armed state, and arming asks held() first (main_stm32.cpp).
  *
  * Between reset and holdOff() the pins are high-impedance, so the board's
  * pull-downs (docs/rev1-bringup-checklist.md) are what keep the actuators off
@@ -28,20 +30,17 @@ class SafeOutputs
     }
 
     /// Sets each output's off level, then makes it an output, so no pin
-    /// glitches on. Disarms.
+    /// glitches on.
     void holdOff();
 
-    /// Arms; refused (false) until holdOff() has run.
-    bool arm();
-    void disarm() { armed_ = false; }
-    bool armed() const { return armed_; }
+    /// holdOff() has run, so the board may arm.
+    bool held() const { return held_; }
 
   private:
     hal::OutputPort&         port_;
     const board::SafeOutput* outputs_;
     std::size_t              count_;
-    bool                     held_  = false;
-    bool                     armed_ = false;
+    bool                     held_ = false;
 };
 
 /// Boot: the safe outputs off first, then `startUp` (clock setup and the
