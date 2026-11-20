@@ -66,7 +66,7 @@ What each layer is allowed to know:
 | `control/` | velocity, acceleration, PID, profiles, pose, kinematics | maze solving |
 | `maze/` | cells, directions, walls, coordinates, mouse pose | motors, sensors |
 | `navigation/` | flood fill, A*, goals, cell paths, L/F/R conversion | physical sensors |
-| `hal/` | platform-neutral interfaces (time, critical section, reset cause, peripheral handles); backends in `hal/pico/` and `hal/host/` | robot logic |
+| `hal/` | platform-neutral interfaces (time, critical section, reset cause, peripheral handles, console); backends in `hal/pico/` and `hal/host/` | robot logic |
 | `app/` | wiring the above together, CLI, Bluetooth, the control timer | — |
 
 Only `hal/pico/`, the driver `.cpp` files, `app/`, `driver_lab/*.cpp` and
