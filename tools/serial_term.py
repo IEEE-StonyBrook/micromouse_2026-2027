@@ -6,6 +6,7 @@ Windows lets only one process open a COM port, so this window is the single
 owner; everything else talks through it.
 
 Run:   python tools/serial_term.py
+       python tools/serial_term.py --port ble:Jurababa   (ESP32-C3 bridge over BLE)
 Link:  127.0.0.1:7777 (line-based: each line received is sent to the device,
        everything the device prints is streamed back to every client)
 Logs:  tools/logs/latest.log (+ a timestamped copy per session)
@@ -26,6 +27,8 @@ from tkinter import ttk
 import serial
 import serial.tools.list_ports
 
+import ble_link
+
 LINK_HOST = "127.0.0.1"
 LINK_PORT = 7777
 BAUD_RATES = ["9600", "19200", "38400", "57600", "115200", "230400", "460800", "921600", "1000000"]
@@ -37,7 +40,8 @@ LOG_DIR = pathlib.Path(__file__).resolve().parent / "logs"
 
 def parse_args():
     p = argparse.ArgumentParser(description="Shared serial terminal.")
-    p.add_argument("--port", help="COM port to open at startup (default: auto-select the Pico)")
+    p.add_argument("--port", help="COM port to open at startup (default: auto-select the Pico); "
+                                  "ble:<name> connects to the ESP32 bridge over BLE")
     p.add_argument("--baud", type=int, default=115200)
     p.add_argument("--self-test", action="store_true",
                    help="run the [DIAG] filter and baud-list checks and exit (no hardware needed)")
@@ -124,6 +128,18 @@ class Log:
             f.flush()
 
 
+def open_port(port, baud):
+    """Opens a COM port, or the ESP32 bridge for a "ble:<name>" port. Both
+    raise on failure and on a dropped link, which drives the reconnect loop."""
+    name = ble_link.device_name(port)
+    if name is not None:
+        return ble_link.BleTransport(name)
+    s = serial.Serial(port, baud, timeout=0.05)
+    s.dtr = True  # Pico USB CDC only transmits once DTR is asserted
+    s.rts = True
+    return s
+
+
 class SerialLink:
     """Owns the serial port on a background thread; reconnects after the
     device drops (e.g. reflashing the Pico) until disconnect() is called."""
@@ -203,9 +219,7 @@ class SerialLink:
                 continue
             if self.ser is None:
                 try:
-                    s = serial.Serial(self.port, self.baud, timeout=0.05)
-                    s.dtr = True  # Pico USB CDC only transmits once DTR is asserted
-                    s.rts = True
+                    s = open_port(self.port, self.baud)
                     with self.lock:
                         if not self.want_connected:
                             s.close()
@@ -213,9 +227,10 @@ class SerialLink:
                         self.ser = s
                     waiting_reported = False
                     self.events.put(("status", f"connected {self.port} @ {self.baud}"))
-                except Exception:
+                except Exception as e:
                     if not waiting_reported:
-                        self.events.put(("status", f"waiting for {self.port}..."))
+                        # The reason matters for BLE: bleak missing vs. not advertising yet.
+                        self.events.put(("status", f"waiting for {self.port}... ({e})"))
                         waiting_reported = True
                     time.sleep(0.5)
                 continue
@@ -338,6 +353,13 @@ class App:
                 requested_label = label
             self.port_map[label] = p.device
             labels.append(label)
+        # The ESP32 bridge never shows up as a COM port; offer it by name.
+        ble_port = ARGS.port if ble_link.device_name(ARGS.port) else f"ble:{ble_link.DEFAULT_NAME}"
+        ble_label = f"{ble_port} - ESP32 bridge (BLE)"
+        self.port_map[ble_label] = ble_port
+        labels.append(ble_label)
+        if ARGS.port and ble_port == ARGS.port:
+            requested_label = ble_label
         if ARGS.port and requested_label is None:
             requested_label = f"{ARGS.port} - (not present yet)"
             self.port_map[requested_label] = ARGS.port
