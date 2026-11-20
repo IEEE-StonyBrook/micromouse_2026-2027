@@ -25,6 +25,8 @@
 //   move <mm> [<mm/s>] a straight move through Motion (armed only); prints
 //                where it ended, in mm and encoder counts
 //   crash [on|off|clear] the crash watchdog: state, enable, or clear a trip
+//   driverlab    hands the console to DriverLab until reset (armed only): OL
+//                and STEP measure Kv/Ks/Ka at the 1 kHz tick
 // The 1 kHz tick runs Motion (the Pico's control path) unless a `motor <l>
 // <r>` command took the motors over; `move` hands them back. The crash
 // watchdog runs inside Motion, so raw `motor` duties go unwatched, as they
@@ -46,6 +48,7 @@
 
 #include <libopencm3/stm32/gpio.h>
 
+#include "common/bluetooth_stdio.h"
 #include "common/board_identity.h"
 #include "common/breadcrumb.h"
 #include "common/emitter_check.h"
@@ -57,6 +60,7 @@
 #include "control/drivetrain.h"
 #include "control/motion.h"
 #include "control/run_log.h"
+#include "driver_lab/driver_lab.h"
 #include "drivers/battery.h"
 #include "drivers/encoder.h"
 #include "drivers/imu.h"
@@ -108,11 +112,13 @@ Drivetrain drivetrain(&left_motor, &right_motor, &left_encoder, &right_encoder, 
 Motion     motion(&drivetrain, &yaw);
 
 /// What the tick drives the motors from. kMotion runs Motion::update(), which
-/// brakes when no move is queued; kRaw leaves the duties to `motor <l> <r>`.
+/// brakes when no move is queued; kRaw leaves the duties to `motor <l> <r>`,
+/// and kDriverLab to DriverLab in the main loop (runDriverLab).
 enum class TickMode : uint8_t
 {
     kMotion,
     kRaw,
+    kDriverLab,
 };
 volatile TickMode tick_mode = TickMode::kMotion;
 
@@ -387,6 +393,23 @@ void crashCommand(const char* arg)
                 crash.tripped() ? crashCauseName(crash.cause()) : "clear", crash.tripCount());
 }
 
+bool driverlab_requested = false;
+
+void driverLabCommand()
+{
+    if (!motors.armed())
+    {
+        std::printf("driverlab: disarmed, arm first\n");
+        return;
+    }
+    if (motion.crashDetector().tripped())
+    {
+        std::printf("driverlab: crash latched, crash clear first\n");
+        return;
+    }
+    driverlab_requested = true; // the main loop hands over after this line
+}
+
 void printProfile()
 {
     std::printf("board UID %08" PRIX32 "-%08" PRIX32 "-%08" PRIX32 "\n", chip_uid.words[0],
@@ -482,11 +505,13 @@ void runLine()
         crashCommand("");
     else if (std::strncmp(line, "crash ", 6) == 0)
         crashCommand(line + 6);
+    else if (std::strcmp(line, "driverlab") == 0)
+        driverLabCommand();
     else if (std::strcmp(line, "emitters") == 0)
         runEmitterCheck(ir_bank);
     else if (line_len > 0)
         std::printf("unknown: %s (try stats, flood, profile, arm, disarm, logfill, log, motor, "
-                    "move, crash, emitters)\n",
+                    "move, crash, driverlab, emitters)\n",
                     line);
     if (line_len > 0)
         Breadcrumb::noteActivity("idle");
@@ -531,7 +556,79 @@ void pollConsole()
             line[line_len++] = ch;
     }
 }
+
+// DriverLab (#38's motor model and encoder trials) in place of the shell, for
+// good: reset to leave, as on the Pico. It drives the same Motor, Encoder and
+// IMU the control path does, with Motion off. DriverLab prints and keeps its
+// samples in vectors, so it runs here in the main loop, not in the tick: one
+// DriverLab::tick() per TIM7 tick, paced by the tick count. A pass that falls
+// more than a tick behind catches up at once, as the Pico's sleep_until loop
+// does, and counts the ticks it was late; a trial run while that count grew
+// has samples that span more than one tick and should be repeated. The
+// count prints as a '#' line, which tools/driverlab_dashboard.py skips.
+[[noreturn]] void runDriverLab()
+{
+    motors.set_duty(0.0f, 0.0f);
+    motion.reset_drive_system();
+    tick_mode = TickMode::kDriverLab;
+
+    // Null ToF and line sensor pointers: the rev1 board has neither.
+    static DriverLab driverlab(&left_motor, &right_motor, &left_encoder, &right_encoder, &yaw,
+                               &battery);
+    std::printf("\n=== DriverLab (STM32, %.0f Hz) ===\nReset to leave. Type '?' for help.\n",
+                static_cast<double>(LOOP_FREQUENCY_HZ));
+    driverlab.init();
+
+    uint32_t last_tick     = hal::stm32::tick::stats().count;
+    uint32_t late_ticks    = 0;
+    uint32_t late_reported = 0;
+    while (true)
+    {
+        __asm__ volatile("wfi");
+        hal::stm32::watchdog::feed();
+        const uint32_t now_tick = hal::stm32::tick::stats().count;
+        if (now_tick - last_tick > 1)
+            late_ticks += now_tick - last_tick - 1;
+        while (last_tick != now_tick)
+        {
+            ++last_tick;
+            driverlab.tick();
+        }
+        driverlab.processSerial();
+        Motor::reportBatteryFallback();
+        if (late_ticks != late_reported)
+        {
+            late_reported = late_ticks;
+            std::printf("# driverlab: main loop late, %" PRIu32 " ticks so far\n", late_ticks);
+        }
+    }
+}
 } // namespace
+
+// STM32 has no HC-05: DriverLab's Bluetooth CSV pacing does not apply, and
+// its diagnostics report the console's TX ring instead.
+namespace BluetoothStdio
+{
+void setCsvIntervalMs(uint32_t)
+{
+}
+
+uint32_t csvIntervalMs()
+{
+    return 0;
+}
+
+Diagnostics diagnostics()
+{
+    Diagnostics diag{};
+    diag.dropped_bytes = hal::console::stm32::txRingDroppedBytes();
+    return diag;
+}
+
+void resetDiagnostics()
+{
+}
+} // namespace BluetoothStdio
 
 // Read with `print memory_usage` and `print tick_stats` in gdb.
 volatile hal::stm32::MemoryUsage memory_usage;
@@ -584,6 +681,8 @@ int main()
         __asm__ volatile("wfi");
         hal::stm32::watchdog::feed();
         pollConsole();
+        if (driverlab_requested)
+            runDriverLab();
         reportCrash();
         reportMove();
         Motor::reportBatteryFallback();

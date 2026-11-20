@@ -44,17 +44,25 @@ add_executable(Jurababa_stm32
     firmware/control/pid.cpp
     firmware/control/profile.cpp
     firmware/control/run_log.cpp
+    firmware/driver_lab/driver_lab.cpp
+    firmware/driver_lab/profile.cpp
+    firmware/driver_lab/reporter.cpp
+    firmware/driver_lab/settings.cpp
+    firmware/driver_lab/stm32/board_io.cpp
     firmware/drivers/lsm6dsr.cpp
     firmware/drivers/motor_bridge.cpp
     firmware/drivers/stm32/battery.cpp
     firmware/drivers/stm32/encoder.cpp
     firmware/drivers/stm32/imu.cpp
     firmware/drivers/stm32/motor.cpp
+    firmware/drivers/stm32/unfitted.cpp
     firmware/main_stm32.cpp
 )
 set_target_properties(Jurababa_stm32 PROPERTIES SUFFIX .elf LINK_DEPENDS ${STM32_LINKER_SCRIPT})
 
 target_include_directories(Jurababa_stm32 PRIVATE ${CMAKE_SOURCE_DIR}/firmware)
+# drivers/tof.h names the VL53L0X API's types; DriverLab includes it.
+target_include_directories(Jurababa_stm32 SYSTEM PRIVATE ${CMAKE_SOURCE_DIR}/third_party)
 target_compile_definitions(Jurababa_stm32 PRIVATE STM32_BUILD)
 
 set(STM32_CPU_FLAGS -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16)
@@ -68,6 +76,14 @@ target_compile_options(Jurababa_stm32 PRIVATE
     -fsingle-precision-constant
     $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti -fno-threadsafe-statics>
 )
+# DriverLab formats floats through printf, whose varargs promote them to
+# double by rule; -Wdouble-promotion is here to catch double maths, and would
+# flag every one of those calls.
+set_source_files_properties(
+    firmware/driver_lab/driver_lab.cpp
+    firmware/driver_lab/reporter.cpp
+    firmware/driver_lab/settings.cpp
+    PROPERTIES COMPILE_OPTIONS -Wno-double-promotion)
 target_link_options(Jurababa_stm32 PRIVATE
     ${STM32_CPU_FLAGS}
     -T${STM32_LINKER_SCRIPT}
