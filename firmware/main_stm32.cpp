@@ -17,6 +17,10 @@
 //   arm          says whether this board may arm; nothing moves in bring-up
 //   logfill      fills the run log (in CCM) with a full ring of synthetic samples
 //   log          dumps the run log as TRACE CSV rows
+//   motor        motor driver state and IPROPI current (boards with drivers)
+//   motor <l> <r> drives the motors at duty l, r in [-1, 1]; 0 0 brakes,
+//                and a second of braking puts the drivers to sleep
+//   motor sleep  puts the drivers to sleep now
 // At boot it prints why the chip last reset (RCC_CSR) and what the previous
 // session was doing (the breadcrumb in .noinit SRAM): a brownout, a watchdog
 // timeout or the reset button. A 3 s independent watchdog, fed from the main
@@ -37,13 +41,17 @@
 #include "common/breadcrumb.h"
 #include "common/flash_store.h"
 #include "config/board_feather.h"
+#include "config/board_stm32.h"
+#include "config/motor_driver.h"
 #include "control/run_log.h"
 #include "drivers/lsm6dsr.h"
+#include "drivers/motor_bridge.h"
 #include "hal/console.h"
 #include "hal/stm32/clock.h"
 #include "hal/stm32/console.h"
 #include "hal/stm32/flash.h"
 #include "hal/stm32/gpio.h"
+#include "hal/stm32/h_bridge.h"
 #include "hal/stm32/memory.h"
 #include "hal/stm32/quad_counter.h"
 #include "hal/stm32/spi.h"
@@ -63,13 +71,24 @@ hal::stm32::SpiBus      imu_spi;
 Lsm6dsr                 imu(imu_spi, board::IMU_YAW_SIGN);
 volatile bool           imu_ready = false;
 
-/// The bring-up firmware never arms and drives no motors, fan or IR
-/// emitters, so nothing can block a save yet. The tickets that add those
-/// outputs must force them off here and report any that stay on.
+// Until board::MOTOR_DRIVERS_FITTED, motor_port is never initialised and
+// ignores every write, so the bridge's state machine runs harmlessly.
+hal::stm32::HBridge motor_port;
+MotorBridge motors(motor_port, ipropiAmpsPerCount(board::ADC_FULL_SCALE_VOLTS, 4096.0f,
+                                                  board::IPROPI_OHMS, DRV8874_AIPROPI_UA_PER_A));
+
+/// The bring-up firmware never arms and drives no fan or IR emitters yet.
+/// The motor drivers are put to sleep before every save, so an erase that
+/// stalls the tick cannot leave a motor driven. The tickets that add the fan
+/// and emitters must force them off here too.
 class BringupSaveGuard final : public SaveGuard
 {
   public:
-    SaveBlocker prepareForSave() override { return saveBlocker({false, false, false, false}); }
+    SaveBlocker prepareForSave() override
+    {
+        motors.sleep();
+        return saveBlocker({false, motors.awake(), false, false});
+    }
 };
 
 hal::stm32::StoreFlash store_flash;
@@ -85,6 +104,8 @@ void onTick()
     encoder_right.update();
     if (imu_ready)
         imu.readFifo();
+    motor_port.sample();
+    motors.update();
 }
 
 char     line[64];
@@ -171,10 +192,40 @@ void dumpRunLog()
         char row[RunLog::ROW_BYTES];
         RunLog::formatRow(row, sizeof row, i, dt_ms, log.sample(i));
         std::printf("%s\n", row);
-        hal::time::sleepMs(1); // ~100 bytes take 1 ms at 1 Mbaud
+        hal::time::sleepMs(1);        // ~100 bytes take 1 ms at 1 Mbaud
         hal::stm32::watchdog::feed(); // the whole dump takes about 2 s
     }
     std::printf("TRACE end\n");
+}
+
+void motorCommand(const char* arg)
+{
+    if (!board::MOTOR_DRIVERS_FITTED)
+    {
+        std::printf("motor: this board has no motor drivers\n");
+        return;
+    }
+    if (std::strcmp(arg, "sleep") == 0)
+    {
+        motors.sleep();
+    }
+    else if (*arg != '\0')
+    {
+        char*       end   = nullptr;
+        const float left  = std::strtof(arg, &end);
+        char*       end2  = nullptr;
+        const float right = std::strtof(end, &end2);
+        if (end == arg || end2 == end || *end2 != '\0')
+        {
+            std::printf("usage: motor [<left> <right> | sleep]\n");
+            return;
+        }
+        motors.set_duty(left, right);
+    }
+    static const char* const STATE_NAMES[] = {"asleep", "waking", "awake"};
+    std::printf("motor: %s, IPROPI left %.3f A right %.3f A\n",
+                STATE_NAMES[static_cast<int>(motors.state())], static_cast<double>(motors.amps(0)),
+                static_cast<double>(motors.amps(1)));
 }
 
 void printProfile()
@@ -239,8 +290,12 @@ void runLine()
         fillRunLog();
     else if (std::strcmp(line, "log") == 0)
         dumpRunLog();
+    else if (std::strcmp(line, "motor") == 0)
+        motorCommand("");
+    else if (std::strncmp(line, "motor ", 6) == 0)
+        motorCommand(line + 6);
     else if (line_len > 0)
-        std::printf("unknown: %s (try stats, flood, profile, arm, logfill, log)\n", line);
+        std::printf("unknown: %s (try stats, flood, profile, arm, logfill, log, motor)\n", line);
     if (line_len > 0)
         Breadcrumb::noteActivity("idle");
     line_len = 0;
@@ -299,6 +354,9 @@ int main()
     hal::stm32::gpioOutput(board::LED);
     encoder_left.init(board::ENCODER_PINS[0], board::ENCODER_PINS[1]);
     encoder_right.init(board::ENCODER_PINS[2], board::ENCODER_PINS[3]);
+    // Before the tick starts: nSLEEP low and the inputs low from here on.
+    if (board::MOTOR_DRIVERS_FITTED)
+        motor_port.init();
     hal::stm32::tick::start(onTick);
     hal::console::stm32::init();
     hal::stm32::watchdog::start();
