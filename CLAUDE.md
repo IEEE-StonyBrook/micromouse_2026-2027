@@ -114,6 +114,12 @@ plant with knobs for motor friction (kS), wheel slip, encoder resolution, gyro
 noise and bias, a floor seam and a pinned wheel, tested in `physim_test.cpp` and
 `crash_physim_test.cpp`. `make -C tests physim` builds a CLI
 (`tests/physim --scenario straight10|ip90|ss90 ...`) that prints a CSV trace.
+`python3 tools/physim_gui/server.py` builds it, serves a browser GUI for it on
+127.0.0.1:8765 and opens the page: a top-down view, time-synced charts, knobs,
+A/B comparison and demo story presets. Edit the stories in
+`tools/physim_gui/presets_spec.json`, then rerun the server with
+`--make-presets` to refresh `presets.js`, the page's offline fallback; its
+tests run with `python3 -m unittest discover -s tools/physim_gui`.
 Add a test case to a `*_test.cpp` file; the Makefile picks new files up.
 
 Run `ls firmware/<layer>` for the current file list; it is authoritative and

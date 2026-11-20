@@ -89,6 +89,9 @@ jobs:
             tests/physim --scenario "$s" > /dev/null
           done
 
+      - name: Physics sim GUI server
+        run: python3 -m unittest discover -s tools/physim_gui -v
+
       - name: No logging or heap in ISR context
         run: python3 tools/check_isr_logging.py
 
