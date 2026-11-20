@@ -36,10 +36,20 @@ add_executable(Jurababa_stm32
     firmware/common/breadcrumb.cpp
     firmware/common/emitter_check.cpp
     firmware/common/flash_store.cpp
+    firmware/common/log.cpp
     firmware/common/reset_report.cpp
+    firmware/control/crash_detector.cpp
+    firmware/control/drivetrain.cpp
+    firmware/control/motion.cpp
+    firmware/control/pid.cpp
+    firmware/control/profile.cpp
     firmware/control/run_log.cpp
     firmware/drivers/lsm6dsr.cpp
     firmware/drivers/motor_bridge.cpp
+    firmware/drivers/stm32/battery.cpp
+    firmware/drivers/stm32/encoder.cpp
+    firmware/drivers/stm32/imu.cpp
+    firmware/drivers/stm32/motor.cpp
     firmware/main_stm32.cpp
 )
 set_target_properties(Jurababa_stm32 PROPERTIES SUFFIX .elf LINK_DEPENDS ${STM32_LINKER_SCRIPT})

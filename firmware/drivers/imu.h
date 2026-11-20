@@ -7,6 +7,10 @@
 #include "common/log.h"
 #include "config/config.h"
 
+#if defined(STM32_BUILD)
+class Lsm6dsr;
+#endif
+
 /**
  * @brief Inertial Measurement Unit (IMU) interface for BNO085 sensor
  *
@@ -21,11 +25,19 @@
 class IMU
 {
   public:
+#if defined(STM32_BUILD)
+    /**
+     * @brief STM32: yaw and yaw rate from an LSM6DSR the tick drains every
+     *        tick (drivers/stm32/imu.cpp). packet_seq() counts gyro samples.
+     */
+    explicit IMU(const Lsm6dsr& gyro);
+#else
     /**
      * @brief Constructs IMU interface with UART configuration
      * @param uart_rx_pin UART receive pin for IMU communication
      */
     explicit IMU(int uart_rx_pin);
+#endif
 
     /**
      * @brief Per-tick sampler. No-op for rotation tracking under the new
@@ -83,6 +95,10 @@ class IMU
     void reset();
 
   private:
+#if defined(STM32_BUILD)
+    const Lsm6dsr* gyro_;
+    float          yaw_offset_deg_ = 0.0f; // integrated yaw at the last reset()
+#else
     const int    uart_rx_pin_;
     volatile int packet_buffer_index_;
     uint8_t      packet_buffer_[IMU_PACKET_LEN];
@@ -125,6 +141,7 @@ class IMU
     void        process_receive_data();
     void        parse_packet_and_extract_yaw();
     static void uart_interrupt_handler();
+#endif
 };
 
 #endif

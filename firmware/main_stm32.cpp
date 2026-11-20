@@ -22,6 +22,13 @@
 //   motor <l> <r> drives the motors at duty l, r in [-1, 1] (armed only);
 //                0 0 brakes, and a second of braking puts the drivers to sleep
 //   motor sleep  puts the drivers to sleep now
+//   move <mm> [<mm/s>] a straight move through Motion (armed only); prints
+//                where it ended, in mm and encoder counts
+//   crash [on|off|clear] the crash watchdog: state, enable, or clear a trip
+// The 1 kHz tick runs Motion (the Pico's control path) unless a `motor <l>
+// <r>` command took the motors over; `move` hands them back. The crash
+// watchdog runs inside Motion, so raw `motor` duties go unwatched, as they
+// always have; both refuse to start while a trip is latched.
 //   emitters     IR emitter crosstalk self-test (no emitters wired until rev1)
 // At boot it prints why the chip last reset (RCC_CSR) and what the previous
 // session was doing (the breadcrumb in .noinit SRAM): a brownout, a watchdog
@@ -45,9 +52,16 @@
 #include "common/flash_store.h"
 #include "config/board_feather.h"
 #include "config/board_stm32.h"
+#include "config/motion.h"
 #include "config/motor_driver.h"
+#include "control/drivetrain.h"
+#include "control/motion.h"
 #include "control/run_log.h"
+#include "drivers/battery.h"
+#include "drivers/encoder.h"
+#include "drivers/imu.h"
 #include "drivers/lsm6dsr.h"
+#include "drivers/motor.h"
 #include "drivers/motor_bridge.h"
 #include "hal/console.h"
 #include "hal/stm32/clock.h"
@@ -79,6 +93,34 @@ volatile bool           imu_ready = false;
 hal::stm32::HBridge motor_port;
 MotorBridge motors(motor_port, ipropiAmpsPerCount(board::ADC_FULL_SCALE_VOLTS, 4096.0f,
                                                   board::IPROPI_OHMS, DRV8874_AIPROPI_UA_PER_A));
+
+// The platform-neutral control path, as on the Pico: Motion runs Drivetrain
+// (Motor, Encoder, Battery) and reads the gyro's yaw through IMU. Here the
+// drivers wrap MotorBridge, the QuadCounters and the LSM6DSR
+// (drivers/stm32/), and Battery reads nothing until rev1 (TODO(rev1)).
+Motor      left_motor(motors, 0, board::MOTOR_LEFT_INVERT);
+Motor      right_motor(motors, 1, board::MOTOR_RIGHT_INVERT);
+Encoder    left_encoder(encoder_left, board::ENCODER_LEFT_INVERT);
+Encoder    right_encoder(encoder_right, board::ENCODER_RIGHT_INVERT);
+IMU        yaw(imu);
+Battery    battery;
+Drivetrain drivetrain(&left_motor, &right_motor, &left_encoder, &right_encoder, &battery);
+Motion     motion(&drivetrain, &yaw);
+
+/// What the tick drives the motors from. kMotion runs Motion::update(), which
+/// brakes when no move is queued; kRaw leaves the duties to `motor <l> <r>`.
+enum class TickMode : uint8_t
+{
+    kMotion,
+    kRaw,
+};
+volatile TickMode tick_mode = TickMode::kMotion;
+
+/// Crash watchdog cut hook, from the tick: the drivers sleep as well.
+void sleepMotors()
+{
+    motors.sleep();
+}
 
 /// A save is refused while armed. The motor drivers are put to sleep before
 /// every save, so an erase that stalls the tick cannot leave a motor driven.
@@ -112,7 +154,8 @@ hal::stm32::ChipUid    chip_uid;
 BoardIdentity*         identity          = nullptr;
 uint8_t                store_led_flashes = 0;
 
-// The always-on 1 kHz tick: widen the encoder counts before anything reads them.
+// The always-on 1 kHz tick: widen the encoder counts and drain the gyro
+// before anything reads them, run the control path, then drive the bridge.
 void onTick()
 {
     encoder_left.update();
@@ -120,6 +163,8 @@ void onTick()
     if (imu_ready)
         imu.readFifo();
     motor_port.sample();
+    if (tick_mode == TickMode::kMotion)
+        motion.update();
     motors.update();
 }
 
@@ -229,6 +274,11 @@ void motorCommand(const char* arg)
         std::printf("motor: disarmed, arm first\n");
         return;
     }
+    else if (*arg != '\0' && motion.crashDetector().tripped())
+    {
+        std::printf("motor: crash latched, crash clear first\n");
+        return;
+    }
     else if (*arg != '\0')
     {
         char*       end   = nullptr;
@@ -240,6 +290,7 @@ void motorCommand(const char* arg)
             std::printf("usage: motor [<left> <right> | sleep]\n");
             return;
         }
+        tick_mode = TickMode::kRaw; // Motion would brake these every tick
         motors.set_duty(left, right);
     }
     static const char* const STATE_NAMES[] = {"asleep", "waking", "awake"};
@@ -247,6 +298,93 @@ void motorCommand(const char* arg)
                 motors.armed() ? "armed" : "disarmed",
                 STATE_NAMES[static_cast<int>(motors.state())], static_cast<double>(motors.amps(0)),
                 static_cast<double>(motors.amps(1)));
+}
+
+bool move_reported = true;
+
+// A straight move through Motion, the same profile and PD the Pico runs. It
+// returns at once; the main loop reports where it ended (reportMove).
+void moveCommand(const char* arg)
+{
+    char*       end   = nullptr;
+    const float mm    = std::strtof(arg, &end);
+    char*       end2  = nullptr;
+    float       speed = std::strtof(end, &end2);
+    if (end2 == end)
+        speed = ROBOT_MAX_SEARCH_SPEED_MMPS;
+    if (end == arg || *end2 != '\0' || !(speed > 0.0f))
+    {
+        std::printf("usage: move <mm> [<mm/s>], speed above 0\n");
+        return;
+    }
+    if (!motors.armed())
+    {
+        std::printf("move: disarmed, arm first\n");
+        return;
+    }
+    if (motion.crashDetector().tripped())
+    {
+        std::printf("move: crash latched, crash clear first\n");
+        return;
+    }
+    motors.set_duty(0.0f, 0.0f); // drop a raw `motor` command
+    motion.reset_drive_system();
+    tick_mode = TickMode::kMotion;
+    motion.start_move(mm, speed, 0.0f, ROBOT_SEARCH_ACCEL_MMPS2);
+    move_reported = false; // move_finished() already sees the queued move
+    std::printf("move: %.1f mm at %.0f mm/s\n", static_cast<double>(mm),
+                static_cast<double>(speed));
+}
+
+// Main loop: once a move ends, where it ended, in mm and in counts, so a
+// tape measure gives each wheel's mm per count.
+void reportMove()
+{
+    if (move_reported || !motion.move_finished())
+        return;
+    move_reported = true;
+    std::printf("move: done at %.1f mm, encoders left %" PRId32 " right %" PRId32
+                " counts, yaw %.2f deg\n",
+                static_cast<double>(motion.position()), motion.encoder_ticks(WheelSide::LEFT),
+                motion.encoder_ticks(WheelSide::RIGHT), static_cast<double>(motion.yaw_deg()));
+}
+
+uint32_t crash_trips_reported = 0;
+
+// Main loop: each new crash watchdog trip, once. The tick already cut the
+// motors and put the drivers to sleep (sleepMotors).
+void reportCrash()
+{
+    const CrashDetector& crash = motion.crashDetector();
+    const uint32_t       trips = crash.tripCount();
+    if (trips == crash_trips_reported)
+        return;
+    crash_trips_reported   = trips;
+    move_reported          = true;
+    const CrashCause cause = crash.cause();
+    std::printf("CRASH: %s (code %d), motors cut and asleep; crash clear to re-arm\n",
+                crashCauseName(cause), static_cast<int>(cause));
+}
+
+void crashCommand(const char* arg)
+{
+    CrashDetector& crash = motion.crashDetector();
+    if (std::strcmp(arg, "on") == 0)
+        crash.set_enabled(true);
+    else if (std::strcmp(arg, "off") == 0)
+        crash.set_enabled(false);
+    else if (std::strcmp(arg, "clear") == 0)
+    {
+        motion.clear_crash();
+        hal::time::sleepMs(2); // the latch releases on the next tick
+    }
+    else if (*arg != '\0')
+    {
+        std::printf("usage: crash [on | off | clear]\n");
+        return;
+    }
+    std::printf("crash watchdog %s, %s, trips %" PRIu32 "\n", crash.enabled() ? "on" : "off",
+                crash.tripped() ? crashCauseName(crash.cause()) : "clear", crash.tripCount());
 }
 
 void printProfile()
@@ -308,6 +446,8 @@ void arm()
 void disarm()
 {
     motors.disarm();
+    motion.reset_drive_system(); // so re-arming never resumes a move
+    move_reported = true;        // aborted, not done
     std::printf("disarm: motor drivers asleep\n");
 }
 
@@ -336,11 +476,17 @@ void runLine()
         motorCommand("");
     else if (std::strncmp(line, "motor ", 6) == 0)
         motorCommand(line + 6);
+    else if (std::strncmp(line, "move ", 5) == 0)
+        moveCommand(line + 5);
+    else if (std::strcmp(line, "crash") == 0)
+        crashCommand("");
+    else if (std::strncmp(line, "crash ", 6) == 0)
+        crashCommand(line + 6);
     else if (std::strcmp(line, "emitters") == 0)
         runEmitterCheck(ir_bank);
     else if (line_len > 0)
         std::printf("unknown: %s (try stats, flood, profile, arm, disarm, logfill, log, motor, "
-                    "emitters)\n",
+                    "move, crash, emitters)\n",
                     line);
     if (line_len > 0)
         Breadcrumb::noteActivity("idle");
@@ -403,6 +549,11 @@ int main()
     // Before the tick starts: nSLEEP low and the inputs low from here on.
     if (board::MOTOR_DRIVERS_FITTED)
         motor_port.init();
+    // Before the tick: Motion's crash watchdog reads the IPROPI current and
+    // puts the drivers to sleep on a trip.
+    motion.set_motor_current_reader(MotorBridge::readAmps, &motors);
+    motion.set_crash_cut_hook(sleepMotors);
+    motion.set_run_log(&runLog());
     hal::stm32::tick::start(onTick);
     hal::console::stm32::init();
     hal::stm32::watchdog::start();
@@ -433,6 +584,9 @@ int main()
         __asm__ volatile("wfi");
         hal::stm32::watchdog::feed();
         pollConsole();
+        reportCrash();
+        reportMove();
+        Motor::reportBatteryFallback();
         const uint32_t now_ms = hal::time::nowMs();
         bool           led_on = (now_ms / BLINK_HALF_MS) % 2 == 0;
         if (clock != hal::stm32::ClockSource::kHse)

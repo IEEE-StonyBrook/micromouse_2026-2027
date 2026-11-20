@@ -55,6 +55,15 @@ constexpr uint8_t IPROPI_ADC_CHANNELS[2] = {5, 6};
 constexpr float IPROPI_OHMS = 2200.0f;
 // ADC1 reference: VDDA on the Feather; check rev1's VREF+.
 constexpr float ADC_FULL_SCALE_VOLTS = 3.3f;
+
+// Wheel directions: true flips that motor's drive, or that encoder's count,
+// so a positive command drives the wheel forward and forward counts up.
+// UNVERIFIED placeholders: none flipped until DriverLab's DIRTEST and a
+// hand push on the rev1 board show which way each one runs.
+constexpr bool MOTOR_LEFT_INVERT    = false;
+constexpr bool MOTOR_RIGHT_INVERT   = false;
+constexpr bool ENCODER_LEFT_INVERT  = false;
+constexpr bool ENCODER_RIGHT_INVERT = false;
 } // namespace board
 
 #endif // CONFIG_BOARD_STM32_H

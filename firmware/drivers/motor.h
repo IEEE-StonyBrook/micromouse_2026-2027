@@ -8,6 +8,10 @@
 #include "common/log.h"
 #include "config/config.h"
 
+#if defined(STM32_BUILD)
+class MotorBridge;
+#endif
+
 /**
  * @brief DC Motor driver using TB6552FNG with hardware inverter
  *
@@ -20,6 +24,15 @@
 class Motor
 {
   public:
+#if defined(STM32_BUILD)
+    /**
+     * @brief STM32: one motor of a DRV8874 pair (drivers/stm32/motor.cpp).
+     * @param bridge The pair's MotorBridge, which gates on arming
+     * @param motor 0 for the left motor, 1 for the right
+     * @param invert_direction If true, flips the direction logic
+     */
+    Motor(MotorBridge& bridge, int motor, bool invert_direction);
+#else
     /**
      * @brief Constructs motor controller with pin configuration
      * @param dir_pin GPIO pin for direction control (CTRL → inverter → IN1/IN2)
@@ -27,6 +40,7 @@ class Motor
      * @param invert_direction If true, flips the direction logic
      */
     Motor(int dir_pin, int pwm_pin, bool invert_direction = false);
+#endif
 
     /**
      * @brief Sets PWM command to motor
@@ -54,6 +68,10 @@ class Motor
     static void reportBatteryFallback();
 
   private:
+#if defined(STM32_BUILD)
+    MotorBridge* bridge_;
+    int          motor_;
+#else
     void setup_pins();
     void setup_pwm();
 
@@ -61,7 +79,8 @@ class Motor
     int      pwm_pin_;
     unsigned pwm_slice_;
     unsigned pwm_channel_;
-    bool     invert_direction_;
+#endif
+    bool invert_direction_;
 
     // Set by set_motor_volts() in the control interrupt when the battery reads
     // under 1 V. Shared by both motors; plain load/store is lock-free on M0+.
