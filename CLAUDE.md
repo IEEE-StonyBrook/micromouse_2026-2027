@@ -67,7 +67,7 @@ What each layer is allowed to know:
 | `control/` | velocity, acceleration, PID, profiles, pose, kinematics | maze solving |
 | `maze/` | cells, directions, walls, coordinates, mouse pose | motors, sensors |
 | `navigation/` | flood fill, A*, goals, cell paths, L/F/R conversion | physical sensors |
-| `hal/` | platform-neutral interfaces (time, critical section, reset cause, peripheral handles, console); backends in `hal/pico/`, `hal/stm32/` and `hal/host/` | robot logic |
+| `hal/` | platform-neutral interfaces (time, critical section, reset cause, peripheral handles, console, SPI, flash); backends in `hal/pico/`, `hal/stm32/` and `hal/host/` | robot logic |
 | `app/` | wiring the above together, CLI, Bluetooth, the control timer; board-specific halves (Bluetooth UART, BOOTSEL, LEDs) in `app/pico/` behind headers in `app/` | — |
 
 Only `hal/pico/`, the driver `.cpp` files, `app/pico/`, `driver_lab/*.cpp` and
@@ -85,8 +85,13 @@ the STM32's 1 kHz (`-DHOST_LOOP_FREQUENCY_HZ=1000.0f`), where
 `rate_trajectory_test.cpp` checks that a profile move and a closed-loop
 straight match the 500 Hz run. Each STM32 driver keeps its arithmetic and
 state machines in libopencm3-free headers in `hal/stm32/` (`clock_plan.h`,
-`clock_startup.h`, `counter_extender.h`, `console_rings.h`) that the host
-tests include; only the thin register glue is untested off target.
+`clock_startup.h`, `counter_extender.h`, `console_rings.h`, `flash_layout.h`)
+that the host tests include; only the thin register glue is untested off
+target. The flash store (`common/flash_store.h`, two A/B slots in sectors 1-2)
+and board identity (`common/board_identity.h`) are platform-neutral and run
+against `hal/host/memory_flash.h`, which can cut power at any word:
+`flash_store_test.cpp` cuts every word of a save and checks the old or the new
+record always loads.
 `tests/fakes/` stands in for the Motor, Encoder and IMU drivers on the host and
 adds a first-order two-wheel plant, so control changes can be tested without a
 mouse. `tests/sim/` grows that into a physics sim: a DC-motor, two-wheel
@@ -220,8 +225,12 @@ make -j4
 
 STM32F405 bring-up firmware for the Adafruit Feather STM32F405 Express
 (pins and timers in `config/board_feather.h`): 168 MHz clock, 1 kHz TIM7
-tick, USART3 console at 1 Mbaud with `stats` and `flood` commands, TIM3/TIM4
-encoders and an LSM6DSR on SPI2. Separate build directory; needs an Arm GNU
+tick, USART3 console at 1 Mbaud with `stats`, `flood`, `profile` and `arm`
+commands, TIM3/TIM4 encoders and an LSM6DSR on SPI2. At boot it reads the
+chip UID and loads the board profile it saved in the flash store; an unknown
+board lists the presets (`config/board_profiles.h`) and refuses to arm until
+`profile <n>` saves one. A damaged store shows as 2 LED flashes every 2 s,
+no usable record as 4. Separate build directory; needs an Arm GNU
 Toolchain with newlib, found through `ARM_TOOLCHAIN_PATH`,
 `PICO_TOOLCHAIN_PATH` or `PATH`:
 
