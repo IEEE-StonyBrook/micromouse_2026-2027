@@ -14,10 +14,11 @@
  *   output        = kp * m_error + kd * diff * loop_frequency_hz_;
  *
  * The `* loop_frequency_hz_` on the D-term mirrors motorlab's
- * `KD * diff * LOOP_FREQUENCY` (motors.h:147). In Jurababa's maze runner and
- * DriverLab TURN paths, forward and rotation both use the 500 Hz UKMARS
- * control cadence; the IMU driver converts its 100 Hz yaw packets into a
- * per-tick measured_change for rotation.
+ * `KD * diff * LOOP_FREQUENCY` (motors.h:147), so kd is per second and the
+ * same gain works at any loop rate (500 Hz Pico, 1 kHz STM32). In Jurababa's
+ * maze runner and DriverLab TURN paths, forward and rotation both run at the
+ * UKMARS single-rate control cadence; the IMU driver converts its 100 Hz yaw
+ * packets into a per-tick measured_change for rotation.
  *
  * `setpoint` is the COMMANDED velocity (mm/s for forward, deg/s for rotation).
  * `measured_change` is the per-tick position delta (mm or deg) actually moved.

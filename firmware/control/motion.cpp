@@ -589,7 +589,7 @@ void Motion::runPositionControl()
     float fwd_velocity   = forward_.velocity();
     float rot_velocity   = rotation_.velocity();
 
-    // Single-rate PD — both forward and rotation update every 500 Hz tick,
+    // Single-rate PD — both forward and rotation update every control tick,
     // exactly like UKMARS mazerunner-core. Rotation feedback comes from the
     // IMU as a held-flat per-tick delta; this removes the 10 ms staircase
     // that the old 100 Hz gate produced in rotation_output_ and stops the
