@@ -18,6 +18,13 @@ uint32_t nowMs()
         std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count());
 }
 
+uint64_t nowUs()
+{
+    const auto elapsed = std::chrono::steady_clock::now() - kBoot;
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count());
+}
+
 void sleepMs(uint32_t duration_ms)
 {
     std::this_thread::sleep_for(std::chrono::milliseconds(duration_ms));

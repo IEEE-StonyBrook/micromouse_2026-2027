@@ -10,7 +10,7 @@ namespace
 std::vector<board::Pin> claimedPins()
 {
     using namespace board;
-    std::vector<Pin> pins = {LED, IMU_SPI.cs};
+    std::vector<Pin> pins = {LED, TICK_PROBE, IMU_SPI.cs};
     for (const TimerPin& p : ENCODER_PINS)
         pins.push_back(p.pin);
     pins.push_back(CONSOLE.tx.pin);

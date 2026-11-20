@@ -9,6 +9,11 @@ uint32_t nowMs()
     return to_ms_since_boot(get_absolute_time());
 }
 
+uint64_t nowUs()
+{
+    return time_us_64();
+}
+
 void sleepMs(uint32_t duration_ms)
 {
     sleep_ms(duration_ms);

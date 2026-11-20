@@ -12,7 +12,7 @@
  * Verification status:
  * - Feather labels -> STM32 pins: checked against Adafruit's board definition
  *   (CircuitPython ports/stm/boards/feather_stm32f405_express, pins.c and
- *   mpconfigboard.h): LED/D13 = PC1, D5 = PC7, D6 = PC6, D10 = PB9,
+ *   mpconfigboard.h): LED/D13 = PC1, D12 = PC2, D5 = PC7, D6 = PC6, D10 = PB9,
  *   SCL = PB6, SDA = PB7, SCK/MISO/MOSI = PB13/PB14/PB15, TX/RX = PB10/PB11,
  *   12 MHz HSE. Reserved: SDIO PC8-PC12 + PD2, SPI flash PB3-PB5 + PA15,
  *   battery monitor PA3, NeoPixel PC0.
@@ -80,6 +80,11 @@ constexpr uint32_t SYSCLK_HZ = 168000000; // STM32F405 maximum
 // ================= LED ================= //
 // Red user LED on Feather pin D13, active high.
 constexpr Pin LED = {'C', 1};
+
+// ================= Tick probe ================= //
+// Feather pin D12: high for the duration of each TIM7 control tick, so a
+// scope shows the 1 kHz rate, its jitter and the ISR's length.
+constexpr Pin TICK_PROBE = {'C', 2};
 
 // ================= Encoders ================= //
 // Quadrature inputs in encoder mode. Entries 0-1 are the left encoder (A, B),
