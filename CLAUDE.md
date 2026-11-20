@@ -100,7 +100,9 @@ The STM32's DRV8874 motor drivers sit behind `drivers/motor_bridge.h`
 (platform-neutral, against `hal/h_bridge.h`; the register glue is
 `hal/stm32/h_bridge.*`): zero duty brakes, a second braked or `sleep()`
 drops nSLEEP, a command given asleep waits out tWAKE and is never lost, and
-IPROPI counts become amps. `motor_bridge_test.cpp` runs it on a fake port.
+IPROPI counts become amps. It is built disarmed: until `arm()` it stays
+asleep and drops every command, and `disarm()` cuts and sleeps at once.
+`motor_bridge_test.cpp` runs it on a fake port.
 The IR emitter self-test (`common/emitter_check.h`) is platform-neutral
 too: it fires each emitter of an `IrBank` alone, builds
 the dark-subtracted 4x4 crosstalk matrix and judges it (a receiver under 100
@@ -267,7 +269,7 @@ make -j4
 STM32F405 bring-up firmware for the Adafruit Feather STM32F405 Express
 (pins and timers in `config/board_feather.h`): 168 MHz clock, 1 kHz TIM7
 tick, USART3 console at 1 Mbaud with `stats`, `flood`, `profile`, `arm`,
-`logfill` (fill the run log with a test pattern), `log` (dump it) and
+`disarm`, `logfill` (fill the run log with a test pattern), `log` (dump it) and
 `motor` (driver state and current, `motor <l> <r>` duties, `motor sleep`;
 only where `board::MOTOR_DRIVERS_FITTED`, false on the Feather) and
 `emitters` (the IR crosstalk self-test; a stub with no emitters until the
@@ -278,6 +280,24 @@ board lists the presets (`config/board_profiles.h`) and refuses to arm until
 no usable record as 4. The run log (`control/run_log.h`: int16-packed
 samples every 8 ms, about 13 s) sits in CCM, which DMA cannot reach, so a
 dump formats each row into an SRAM buffer before the console queues it.
+
+The tick runs the Pico's control path: `Motion::update()` over Drivetrain,
+with STM32 definitions of Motor (one DRV8874 through `MotorBridge`, so the
+arm gate holds), Encoder (a QuadCounter), IMU (the LSM6DSR's yaw, integrated
+over every 1666 Hz gyro sample) and Battery (the nominal pack until rev1's
+VBAT divider is known) in `drivers/stm32/`. The crash watchdog reads IPROPI
+through `MotorBridge::readAmps` and a trip sleeps the drivers. `move <mm>
+[<mm/s>]` runs a straight move and prints where it ended in mm and counts;
+`crash [on|off|clear]` drives the watchdog. A raw `motor <l> <r>` takes the
+motors from Motion (and from the watchdog) until the next `move`.
+`driverlab` (armed) hands the console to DriverLab until reset: the main loop
+runs `DriverLab::tick()` once per TIM7 tick and prints late ticks as `#`
+lines. OL and STEP are tick-driven; its blocking readouts outlast the 3 s
+watchdog and reset the board: give `YAWCON`, `ENCCON` and `TOFCON` a
+duration under about 2000 ms, and skip `GPIO` and `DIRTEST`. The new mouse's wheel, encoder and motor-model constants
+are in `config/mouse_stm32.h` and its wheel directions in
+`config/board_stm32.h`, all UNVERIFIED placeholders until DriverLab and a
+500 mm push measure them on the rev1 board.
 Separate build directory; needs an Arm GNU
 Toolchain with newlib, found through `ARM_TOOLCHAIN_PATH`,
 `PICO_TOOLCHAIN_PATH` or `PATH`:
