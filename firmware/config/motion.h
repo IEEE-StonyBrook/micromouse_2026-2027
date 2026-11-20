@@ -34,6 +34,30 @@
 #define ENCODER_AVERAGER_WINDOW_S 0.016f
 #define ENCODER_AVERAGER_LENGTH   LOOP_TICKS(ENCODER_AVERAGER_WINDOW_S)
 
+// ================== Crash Watchdog ===================== //
+// The control tick cuts the motors itself when the mouse is plainly stuck:
+// a wheel against a wall or post, a jammed gearbox. Each cause must hold for
+// its whole window, so a hard acceleration or a seam bump doesn't trip it.
+// Our own numbers, set against the physics sim (tests/crash_physim_test.cpp).
+//
+// Saturation: either wheel's command at or above this fraction of what the
+// motor can get, min(MAX_VOLTAGE, battery), for the whole window.
+#define CRASH_SATURATION_FRACTION 0.97f
+#define CRASH_SATURATION_TIME_S   0.100f
+// Stall: current above CRASH_STALL_AMPS while that wheel turns slower than
+// CRASH_STALL_SPEED_MMPS. Needs current sensing (the STM32 DRV8874's IPROPI);
+// the Pico has none, so this cause never fires there. Placeholder current
+// until IPROPI stall readings are measured (#39).
+#define CRASH_STALL_AMPS       0.8f
+#define CRASH_STALL_SPEED_MMPS 30.0f
+#define CRASH_STALL_TIME_S     0.100f
+// Runaway: the forward PD's accumulated error above CRASH_RUNAWAY_ERROR_MM
+// and still growing by CRASH_RUNAWAY_GROWTH_MM over each window. A healthy
+// move holds its error to a few mm.
+#define CRASH_RUNAWAY_ERROR_MM  20.0f
+#define CRASH_RUNAWAY_GROWTH_MM 5.0f
+#define CRASH_RUNAWAY_TIME_S    0.100f
+
 // ================ Forward Speed Limits ================= //
 #define ROBOT_MAX_SEARCH_SPEED_MMPS  400.0f  // Search mode cruise speed
 #define ROBOT_MAX_FAST_SPEED_MMPS    1500.0f // Stage 3+ explored-path cruise (Mouse::cruiseSpeed)

@@ -95,8 +95,9 @@ record always loads.
 `tests/fakes/` stands in for the Motor, Encoder and IMU drivers on the host and
 adds a first-order two-wheel plant, so control changes can be tested without a
 mouse. `tests/sim/` grows that into a physics sim: a DC-motor, two-wheel
-plant with knobs for wheel slip, encoder resolution, gyro noise and bias and a
-floor seam, tested in `physim_test.cpp`. `make -C tests physim` builds a CLI
+plant with knobs for wheel slip, encoder resolution, gyro noise and bias, a
+floor seam and a pinned wheel, tested in `physim_test.cpp` and
+`crash_physim_test.cpp`. `make -C tests physim` builds a CLI
 (`tests/physim --scenario straight10|ip90|ss90 ...`) that prints a CSV trace.
 Add a test case to a `*_test.cpp` file; the Makefile picks new files up.
 
@@ -146,6 +147,30 @@ grows a container. Raise an atomic flag or counter there and report it from the
 main loop, as `Motor::reportBatteryFallback()` does. `python3
 tools/check_isr_logging.py` enforces this; add a function to its list when the
 control path starts calling it.
+
+**Main loop to tick.** Motion's public mutators (`start_move`, `set_position`,
+`reset_drive_system`, ...) never write the tick's state: each queues one
+command in Motion's latch under `hal::irq::Lock`, and `Motion::update()` applies
+the queue, in issue order, before anything else in the tick. Main-loop reads
+(`position()`, `move_finished()`, ...) see the live state with the queued
+commands applied, so code that reads straight after a command still sees it.
+Add a new mutator as a `Command::Op`; `python3 tools/check_motion_latch.py`
+fails if a main-loop function in `motion.cpp` writes tick-owned state.
+
+**Crash watchdog.** `control/crash_detector.*` trips on sustained voltage
+saturation (either wheel at ≥0.97·min(`MAX_VOLTAGE`, battery) for 100 ms),
+stall current at near-zero wheel speed (only where a board supplies a current
+reader; the Pico has none) or forward PD error that keeps growing. Thresholds
+are times in `config/motion.h` (`CRASH_*`). `Motion::update()` checks it every
+tick and, on a trip, cuts the motors itself (`Drivetrain::stop()`, then the
+optional cut hook where the STM32 will sleep its drivers) and holds them cut
+with the move frozen; the trip latches until `Motion::clear_crash()`. The main
+loop (`CommandLineInterface::reportCrash()`) prints the cause, flashes the
+cause code in orange on the LED and halts the run. `CRASH ON|OFF|CLEAR|INHIBIT
+ON|OFF|STATUS` drives it; `RESET` and re-arming COMP clear the latch. It
+starts **off on the Pico** (`CRASH_WATCHDOG_DEFAULT_ENABLED 0` in
+`config/board_pico.h`: the race-proven mouse keeps its behaviour unless armed
+with `CRASH ON`) and **on for STM32 builds** (`config/board_stm32.h`).
 
 ## Units
 

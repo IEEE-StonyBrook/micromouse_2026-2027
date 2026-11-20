@@ -82,12 +82,19 @@ class Drivetrain
 
     void stop();
 
-  private:
+    /**
+     * @brief Volts last commanded per wheel by setVoltage(); 0 after stop().
+     *        The crash watchdog compares them with the battery.
+     */
+    float leftVolts() const { return left_volts_; }
+    float rightVolts() const { return right_volts_; }
+
     // Returns current battery voltage; falls back to DEFAULT_BATTERY_VOLTAGE
     // when no battery driver is wired (sim, bench testing). Consumed by
     // setVoltage() to scale per-wheel volts.
     float batteryVoltage() const;
 
+  private:
     Motor*   left_motor_;
     Motor*   right_motor_;
     Encoder* left_encoder_;
@@ -96,6 +103,9 @@ class Drivetrain
 
     int32_t prev_left_ticks_  = 0;
     int32_t prev_right_ticks_ = 0;
+
+    float left_volts_  = 0.0f;
+    float right_volts_ = 0.0f;
 
     float left_velocity_mmps_  = 0.0f;
     float right_velocity_mmps_ = 0.0f;

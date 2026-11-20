@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <utility>
 
 #include "config/config.h"
 #include "config/geometry.h"
@@ -22,6 +23,7 @@ struct ImuState
 std::map<const Motor*, float>  g_duty;
 std::map<const Encoder*, int>  g_counts;
 std::map<const IMU*, ImuState> g_imu;
+std::function<void()>          g_imu_update_hook;
 } // namespace
 
 // --- Motor ---------------------------------------------------------------
@@ -82,6 +84,8 @@ IMU::IMU(int uart_rx_pin) : uart_rx_pin_(uart_rx_pin)
 
 void IMU::update()
 {
+    if (g_imu_update_hook)
+        g_imu_update_hook();
 }
 
 float IMU::robot_angle()
@@ -128,6 +132,11 @@ namespace fake
 float motorDuty(const Motor& motor)
 {
     return g_duty.at(&motor);
+}
+
+void setImuUpdateHook(std::function<void()> hook)
+{
+    g_imu_update_hook = std::move(hook);
 }
 
 void setEncoderCount(const Encoder& encoder, int count)

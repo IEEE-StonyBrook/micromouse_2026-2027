@@ -34,6 +34,6 @@ int Encoder::ticks() const
 
 void Encoder::reset()
 {
-    LOG_DEBUG("Resetting encoder tick count to zero");
+    // No log: Motion resets the encoders from the control tick.
     offset_ticks_ += ticks();
 }
