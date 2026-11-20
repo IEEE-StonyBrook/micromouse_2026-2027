@@ -276,7 +276,15 @@ only where `board::MOTOR_DRIVERS_FITTED`, false on the Feather) and
 rev1 pins are known) commands, TIM3/TIM4 encoders and an LSM6DSR on SPI2. At boot it reads the
 chip UID and loads the board profile it saved in the flash store; an unknown
 board lists the presets (`config/board_profiles.h`) and refuses to arm until
-`profile <n>` saves one. A damaged store shows as 2 LED flashes every 2 s,
+`profile <n>` saves one. The first line of `main()` drives every actuator
+output (motor driver inputs and nSLEEP, emitters, fan; `board::REV1_SAFE_OUTPUTS`)
+to its off level before the clocks start (`common/safe_outputs.h`). The one
+armed state is `MotorBridge`'s arm gate: `arm` sets it once the profile is
+known and the outputs are held off, `disarm` clears it and sleeps the drivers,
+and while disarmed every non-zero `motor`, `move` and `driverlab` is refused
+(`motor 0 0` and `motor sleep` still work). On the Feather `arm` only reports
+whether it may, so the board never sits armed and refuses a profile save.
+A damaged store shows as 2 LED flashes every 2 s,
 no usable record as 4. The run log (`control/run_log.h`: int16-packed
 samples every 8 ms, about 13 s) sits in CCM, which DMA cannot reach, so a
 dump formats each row into an SRAM buffer before the console queues it.
