@@ -516,11 +516,50 @@ void Motion::update()
     }
     drivetrain_->update();
     imu_->update();
-    forward_.update();
+    // A tripped watchdog keeps the motors cut and the move frozen.
+    if (!crash_.tripped())
+    {
+        forward_.update();
 
-    rotation_.update();
+        rotation_.update();
 
-    runPositionControl();
+        runPositionControl();
+    }
+    checkCrash();
+}
+
+void Motion::checkCrash()
+{
+    // Off and clear (the Pico default): skip the work entirely.
+    if (!crash_.enabled() && !crash_.tripped())
+        return;
+    CrashInputs in;
+    in.left_volts    = drivetrain_->leftVolts();
+    in.right_volts   = drivetrain_->rightVolts();
+    in.battery_volts = drivetrain_->batteryVoltage();
+    in.left_mmps     = drivetrain_->velocity(WheelSide::LEFT);
+    in.right_mmps    = drivetrain_->velocity(WheelSide::RIGHT);
+    in.fwd_error_mm  = forward_controller_.error();
+    if (current_reader_ != nullptr)
+        in.has_current = current_reader_(current_context_, &in.left_amps, &in.right_amps);
+    if (crash_.update(in))
+    {
+        drivetrain_->stop();
+        if (crash_cut_hook_ != nullptr)
+            crash_cut_hook_();
+    }
+}
+
+void Motion::set_motor_current_reader(CurrentReader reader, void* context)
+{
+    current_reader_  = reader;
+    current_context_ = context;
+}
+
+void Motion::clear_crash()
+{
+    reset_drive_system();
+    crash_.clear();
 }
 
 void Motion::runPositionControl()

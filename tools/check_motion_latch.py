@@ -35,6 +35,7 @@ MOTION_CPP = REPO / "firmware/control/motion.cpp"
 TICK_FUNCTIONS = {
     "Motion",  # constructor: no tick runs yet
     "update",
+    "checkCrash",
     "runPositionControl",
     "applyPendingCommands",
     "applyCommand",
