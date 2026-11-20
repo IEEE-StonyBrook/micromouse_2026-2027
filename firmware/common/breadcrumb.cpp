@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "common/log.h"
+#include "common/reset_report.h"
 
 #ifdef PICO_BUILD
 #include "config/config.h"
@@ -88,70 +89,33 @@ void Breadcrumb::noteActivity(const char* text)
 void Breadcrumb::report()
 {
 #ifdef PICO_BUILD
-    const hal::system::ResetCause cause    = hal::system::resetCause();
-    const uint32_t                bits     = cause.raw;
-    const bool                    had_por  = cause.power_on;
-    const bool                    had_run  = cause.run_pin;
-    const bool                    had_psm  = cause.debugger;
-    const bool                    software = cause.software;
-
-    const Snapshot& prev     = previous_;
-    const char*     activity = (prev.last_log[0] != '\0') ? prev.last_log : "(nothing logged yet)";
-    char            line[200];
-
-    // POR latches on the first power-up and is never cleared, so it cannot by
-    // itself separate a cold boot from a brownout. The surviving snapshot is what
-    // separates them: RAM intact means the rail dipped rather than went away.
-    if (had_psm)
+    const hal::system::ResetCause cause = hal::system::resetCause();
+    const Snapshot&               prev  = previous_;
+    const ResetReport             r     = resetReport(cause, prev, BATTERY_SAG_WARN_V);
+    for (uint8_t i = 0; i < r.count; ++i)
     {
-        LOG_WARNING("Reset cause: debugger restart.");
-    }
-    else if (software)
-    {
-        LOG_INFO("Reset cause: software reboot (reflash or bootloader). Not a power fault.");
-    }
-    else if (had_run)
-    {
-        LOG_WARNING("Reset cause: external reset (RUN pin or reset button).");
-    }
-    else if (!prev.valid)
-    {
-        LOG_INFO("Reset cause: cold power-up. No history from a previous run.");
-    }
-    else if (prev.voltage_min <= 0.0f)
-    {
-        std::snprintf(line, sizeof(line), "POWER FAULT: reset after %lu ms, during: %s",
-                      static_cast<unsigned long>(prev.uptime_ms), activity);
-        LOG_ERROR(line);
-        LOG_ERROR("  -> No battery readings were taken, so the rail cannot be assessed.");
-    }
-    else if (prev.voltage_min < BATTERY_SAG_WARN_V)
-    {
-        std::snprintf(line, sizeof(line),
-                      "POWER FAULT: the battery rail collapsed under load. It fell to %.2f V "
-                      "after %lu ms, during: %s",
-                      prev.voltage_min, static_cast<unsigned long>(prev.uptime_ms), activity);
-        LOG_ERROR(line);
-        LOG_ERROR("  -> The pack cannot deliver stall current. Check its charge and health, "
-                  "and the motor power wiring.");
-    }
-    else
-    {
-        std::snprintf(line, sizeof(line),
-                      "POWER FAULT: reset while the rail still read %.2f V, after %lu ms, "
-                      "during: %s",
-                      prev.voltage_min, static_cast<unsigned long>(prev.uptime_ms), activity);
-        LOG_ERROR(line);
-        LOG_ERROR("  -> Voltage never sagged, so suspect an intermittent power or ground "
-                  "connection rather than the battery.");
+        switch (r.lines[i].severity)
+        {
+        case ResetSeverity::kInfo:
+            LOG_INFO(r.lines[i].text);
+            break;
+        case ResetSeverity::kWarning:
+            LOG_WARNING(r.lines[i].text);
+            break;
+        case ResetSeverity::kError:
+            LOG_ERROR(r.lines[i].text);
+            break;
+        }
     }
 
+    char line[200];
     std::snprintf(line, sizeof(line),
                   "chip_reset=0x%08lx por=%d run=%d psm=%d wd=%d crumb=%s uptime_ms=%lu "
                   "v_min=%.3f v_last=%.3f",
-                  static_cast<unsigned long>(bits), had_por ? 1 : 0, had_run ? 1 : 0,
-                  had_psm ? 1 : 0, software ? 1 : 0, prev.valid ? "valid" : "decayed",
-                  static_cast<unsigned long>(prev.uptime_ms), prev.voltage_min, prev.voltage_last);
+                  static_cast<unsigned long>(cause.raw), cause.power_on ? 1 : 0,
+                  cause.run_pin ? 1 : 0, cause.debugger ? 1 : 0, cause.software ? 1 : 0,
+                  prev.valid ? "valid" : "decayed", static_cast<unsigned long>(prev.uptime_ms),
+                  prev.voltage_min, prev.voltage_last);
     LOG_DIAG(line);
 #endif
 }

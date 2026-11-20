@@ -112,6 +112,7 @@ set(HAL_SOURCES
 
 set(COMMON_SOURCES
     firmware/common/breadcrumb.cpp
+    firmware/common/reset_report.cpp
     firmware/common/log.cpp
 )
 
