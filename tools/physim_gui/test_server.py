@@ -66,6 +66,18 @@ class ParseSummaryTest(unittest.TestCase):
         self.assertEqual(s, {"finished": 1.0, "duration_s": 1.536, "yaw_deg": 93.149})
 
 
+class PresetsTest(unittest.TestCase):
+    def test_presets_js_is_current_with_the_spec(self):
+        # Edit presets_spec.json, then rerun server.py --make-presets.
+        text = server.PRESETS.read_text()
+        built = json.loads(text[text.index("{") : text.rindex("}") + 1])
+        spec = json.loads(server.PRESET_SPEC.read_text())
+        for preset in built["presets"]:
+            for run in preset["runs"]:
+                self.assertTrue(run.pop("result")["csv"].startswith("time_s,"))
+        self.assertEqual(built, spec)
+
+
 @unittest.skipUnless(server.PHYSIM.exists(), "tests/physim not built")
 class RunEndpointTest(unittest.TestCase):
     @classmethod
