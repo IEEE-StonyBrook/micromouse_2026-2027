@@ -27,12 +27,14 @@ struct RouteBounds
 };
 
 /// Limits on exploring to prove the route. A leg is one cell driven while
-/// proving; the time is the elapsed proof time in ms. Either cap ends the
-/// proof with the best known route.
+/// proving; the time is the elapsed proof time in ms; a stall is the legs
+/// driven since the known route last got shorter. Any cap ends the proof with
+/// the best known route.
 struct RouteProofCaps
 {
     int      max_legs;
     uint32_t max_ms;
+    int      max_stall_legs;
 };
 
 RouteBounds routeBounds(MazeMouse& maze, const std::array<int, 2>& start,
@@ -49,9 +51,9 @@ std::vector<std::array<int, 2>> unprovenRouteCells(MazeMouse& maze, const std::a
 /// plans over explored cells only, may then use it. Returns how many changed.
 int markKnownCellsExplored(MazeMouse& maze);
 
-/// True while the route is unproven, an optimistic route exists, and neither
-/// cap is spent.
-bool keepProving(const RouteBounds& bounds, int legs, uint32_t elapsed_ms,
+/// True while the route is unproven, an optimistic route exists, and no cap
+/// is spent.
+bool keepProving(const RouteBounds& bounds, int legs, uint32_t elapsed_ms, int stall_legs,
                  const RouteProofCaps& caps);
 
 #endif

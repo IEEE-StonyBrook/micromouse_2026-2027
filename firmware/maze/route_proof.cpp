@@ -174,10 +174,10 @@ int markKnownCellsExplored(MazeMouse& maze)
     return marked;
 }
 
-bool keepProving(const RouteBounds& bounds, int legs, uint32_t elapsed_ms,
+bool keepProving(const RouteBounds& bounds, int legs, uint32_t elapsed_ms, int stall_legs,
                  const RouteProofCaps& caps)
 {
     if (bounds.optimistic_cells == RouteBounds::NO_ROUTE || bounds.proven())
         return false;
-    return legs < caps.max_legs && elapsed_ms < caps.max_ms;
+    return legs < caps.max_legs && elapsed_ms < caps.max_ms && stall_legs < caps.max_stall_legs;
 }

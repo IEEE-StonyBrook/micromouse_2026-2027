@@ -133,9 +133,12 @@ bool timedOut(uint32_t start_ms, uint32_t timeout_ms)
 
 // Caps on exploring to prove the best route on the way home, one leg per cell
 // driven: 192 cells at search speed is about 86 s, and 90 s bounds the real
-// clock. On the corpus they cost 3 of 50 optimal speed runs and keep the
-// longest way home under 300 cells.
-constexpr RouteProofCaps ROUTE_PROOF_CAPS = {/*max_legs=*/192, /*max_ms=*/90000};
+// clock. The stall cap gives up after 130 cells (about 58 s) in which the
+// known route got no shorter: on the corpus most proofs that run that long
+// only confirm the route the search already found. The caps cost 4 of 50
+// optimal speed runs and keep the longest way home under 300 cells.
+constexpr RouteProofCaps ROUTE_PROOF_CAPS = {/*max_legs=*/192, /*max_ms=*/90000,
+                                             /*max_stall_legs=*/130};
 // While proving, drive over known exits unless that is this many cells longer
 // than the route with unknown walls open: every unexplored cell crossed is
 // time spent sensing a cell the proof did not ask for.
@@ -1373,6 +1376,9 @@ bool Mouse::search_to(const std::vector<std::array<int, 2>>& goals)
     const bool going_home = goals.size() == 1 && goals[0] == start_cell_;
     bool       proving    = route_proof_ && going_home && !goal_cells_.empty();
     int        proof_legs = 0;
+    // The known route's length and the leg it last got shorter, for the stall cap.
+    int proof_known_cells = RouteBounds::NO_ROUTE;
+    int proof_gain_leg    = 0;
 #ifndef SIMULATOR_BUILD
     const uint32_t proof_start_ms = hal::time::nowMs();
 #endif
@@ -1397,8 +1403,14 @@ bool Mouse::search_to(const std::vector<std::array<int, 2>>& goals)
             const uint32_t proof_ms = static_cast<uint32_t>(hal::time::nowMs() - proof_start_ms);
 #endif
             const RouteBounds bounds = routeBounds(*maze_mouse_, start_cell_, goal_cells_);
+            if (bounds.known_cells != proof_known_cells)
+            {
+                proof_known_cells = bounds.known_cells;
+                proof_gain_leg    = proof_legs;
+            }
             std::vector<std::array<int, 2>> unproven;
-            if (keepProving(bounds, proof_legs, proof_ms, ROUTE_PROOF_CAPS))
+            if (keepProving(bounds, proof_legs, proof_ms, proof_legs - proof_gain_leg,
+                            ROUTE_PROOF_CAPS))
                 unproven = unprovenRouteCells(*maze_mouse_, start_cell_, goal_cells_);
             if (unproven.empty())
             {

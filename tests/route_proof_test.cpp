@@ -156,15 +156,17 @@ TEST_CASE("route proof: a fully walled cell needs no visit")
 
 TEST_CASE("route proof: caps stop the proof")
 {
-    const RouteProofCaps caps{/*max_legs=*/10, /*max_ms=*/1000};
+    const RouteProofCaps caps{/*max_legs=*/10, /*max_ms=*/1000, /*max_stall_legs=*/5};
     RouteBounds          open{/*known_cells=*/6, /*optimistic_cells=*/4};
     RouteBounds          done{/*known_cells=*/4, /*optimistic_cells=*/4};
 
-    CHECK(keepProving(open, 0, 0, caps));
-    CHECK(keepProving(open, 9, 999, caps));
-    CHECK(!keepProving(done, 0, 0, caps));
-    CHECK(!keepProving(open, 10, 0, caps));
-    CHECK(!keepProving(open, 0, 1000, caps));
+    CHECK(keepProving(open, 0, 0, 0, caps));
+    CHECK(keepProving(open, 9, 999, 4, caps));
+    CHECK(!keepProving(done, 0, 0, 0, caps));
+    CHECK(!keepProving(open, 10, 0, 0, caps));
+    CHECK(!keepProving(open, 0, 1000, 0, caps));
+    // Five legs without the known route getting shorter is a stall.
+    CHECK(!keepProving(open, 5, 0, 5, caps));
     // No optimistic route at all means nothing left to explore.
-    CHECK(!keepProving(RouteBounds{}, 0, 0, caps));
+    CHECK(!keepProving(RouteBounds{}, 0, 0, 0, caps));
 }
