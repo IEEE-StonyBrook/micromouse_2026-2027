@@ -9,7 +9,7 @@ import tempfile
 import unittest
 
 from maze_file import parse_text
-from runner import maze_setting, run_maze
+from runner import compare, maze_setting, run_maze
 from test_maze_file import TINY_TEXT
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -56,6 +56,28 @@ class FailureTest(unittest.TestCase):
             result = run_maze(bot, parse_text(TINY_TEXT), timeout_s=10)
         self.assertFalse(result["ok"])
         self.assertIn("search", result["error"])
+
+
+class BaselineTest(unittest.TestCase):
+    BASE = {"m.txt": {"cells_searched": 50, "search_moves": 60,
+                      "speed_path_cells": 20.5, "speed_turns": 8}}
+
+    def run_result(self, **changes):
+        r = dict(self.BASE["m.txt"], maze="m.txt", ok=True)
+        r.update(changes)
+        return r
+
+    def test_equal_or_better_runs_are_quiet(self):
+        self.assertEqual(compare([self.run_result(speed_path_cells=19.0)], self.BASE), [])
+
+    def test_longer_speed_run_warns(self):
+        warnings = compare([self.run_result(speed_path_cells=21.0)], self.BASE)
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("speed_path_cells", warnings[0])
+
+    def test_new_maze_warns(self):
+        self.assertIn("not in the baseline",
+                      compare([self.run_result(maze="new.txt")], self.BASE)[0])
 
 
 @unittest.skipUnless(os.path.exists(BOT), "build the sim bot first: make -C sim")
