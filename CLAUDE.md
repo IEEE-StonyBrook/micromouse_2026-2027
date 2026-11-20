@@ -101,6 +101,12 @@ The STM32's DRV8874 motor drivers sit behind `drivers/motor_bridge.h`
 `hal/stm32/h_bridge.*`): zero duty brakes, a second braked or `sleep()`
 drops nSLEEP, a command given asleep waits out tWAKE and is never lost, and
 IPROPI counts become amps. `motor_bridge_test.cpp` runs it on a fake port.
+The IR emitter self-test (`common/emitter_check.h`) is platform-neutral
+too: it fires each emitter of an `IrBank` alone, builds
+the dark-subtracted 4x4 crosstalk matrix and judges it (a receiver under 100
+counts from its own emitter is weak; another emitter lifting it by over 25 %
+of that leaks), tested in `emitter_check_test.cpp` against
+`tests/fakes/fake_ir_bank.h`.
 `tests/fakes/` stands in for the Motor, Encoder and IMU drivers on the host and
 adds a first-order two-wheel plant, so control changes can be tested without a
 mouse. `tests/sim/` grows that into a physics sim: a DC-motor, two-wheel
@@ -263,7 +269,9 @@ STM32F405 bring-up firmware for the Adafruit Feather STM32F405 Express
 tick, USART3 console at 1 Mbaud with `stats`, `flood`, `profile`, `arm`,
 `logfill` (fill the run log with a test pattern), `log` (dump it) and
 `motor` (driver state and current, `motor <l> <r>` duties, `motor sleep`;
-only where `board::MOTOR_DRIVERS_FITTED`, false on the Feather) commands, TIM3/TIM4 encoders and an LSM6DSR on SPI2. At boot it reads the
+only where `board::MOTOR_DRIVERS_FITTED`, false on the Feather) and
+`emitters` (the IR crosstalk self-test; a stub with no emitters until the
+rev1 pins are known) commands, TIM3/TIM4 encoders and an LSM6DSR on SPI2. At boot it reads the
 chip UID and loads the board profile it saved in the flash store; an unknown
 board lists the presets (`config/board_profiles.h`) and refuses to arm until
 `profile <n>` saves one. A damaged store shows as 2 LED flashes every 2 s,
