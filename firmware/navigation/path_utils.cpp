@@ -340,10 +340,8 @@ bool executeFastSequence(Mouse* mouse, const std::string& sequence, bool start_f
         {
             mouse->turnRight45();
         }
-        else if (token == "GMF" || token == "GFM")
+        else if (token == "GMF")
         {
-            if (token == "GFM")
-                LOG_ERROR("FAST: Treating diagonalizer token GFM as GMF");
             mouse->ghostMoveForward(1);
         }
         else

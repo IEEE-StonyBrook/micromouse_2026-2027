@@ -571,7 +571,7 @@ void Mouse::moveForwardHalf()
     }
 #endif
     // Half-cell physical moves do not advance the logical maze cell. Diagonal
-    // sequences use GMF/GFM when the virtual mouse should move to the next cell.
+    // sequences use GMF when the virtual mouse should move to the next cell.
 }
 
 bool Mouse::move_mm(float distance_mm)
@@ -2596,10 +2596,8 @@ void Mouse::executeSequence(const std::string& sequence)
             continue;
         }
 
-        if (token == "GMF" || token == "GFM")
+        if (token == "GMF")
         {
-            if (token == "GFM")
-                LOG_ERROR("Mouse: Treating diagonalizer token GFM as GMF");
             ghostMoveForward(1);
             continue;
         }
