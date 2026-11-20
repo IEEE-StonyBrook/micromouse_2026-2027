@@ -77,13 +77,18 @@ hal::stm32::HBridge motor_port;
 MotorBridge motors(motor_port, ipropiAmpsPerCount(board::ADC_FULL_SCALE_VOLTS, 4096.0f,
                                                   board::IPROPI_OHMS, DRV8874_AIPROPI_UA_PER_A));
 
-/// The bring-up firmware never arms and drives no motors, fan or IR
-/// emitters, so nothing can block a save yet. The tickets that add those
-/// outputs must force them off here and report any that stay on.
+/// The bring-up firmware never arms and drives no fan or IR emitters yet.
+/// The motor drivers are put to sleep before every save, so an erase that
+/// stalls the tick cannot leave a motor driven. The tickets that add the fan
+/// and emitters must force them off here too.
 class BringupSaveGuard final : public SaveGuard
 {
   public:
-    SaveBlocker prepareForSave() override { return saveBlocker({false, false, false, false}); }
+    SaveBlocker prepareForSave() override
+    {
+        motors.sleep();
+        return saveBlocker({false, motors.awake(), false, false});
+    }
 };
 
 hal::stm32::StoreFlash store_flash;
