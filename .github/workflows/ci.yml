@@ -71,6 +71,18 @@ jobs:
       - name: Build
         run: make -C sim
 
+  host-checks:
+    name: Host tests and ISR check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Host tests
+        run: make -C tests
+
+      - name: No logging or heap in ISR context
+        run: python3 tools/check_isr_logging.py
+
   maze-corpus:
     name: Sim bot maze corpus
     runs-on: ubuntu-24.04
