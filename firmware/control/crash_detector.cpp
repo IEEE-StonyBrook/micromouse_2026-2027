@@ -7,9 +7,9 @@
 
 namespace
 {
-constexpr int kSaturationTicks = LOOP_TICKS(CRASH_SATURATION_TIME_S);
-constexpr int kStallTicks      = LOOP_TICKS(CRASH_STALL_TIME_S);
-constexpr int kRunawayTicks    = LOOP_TICKS(CRASH_RUNAWAY_TIME_S);
+constexpr int SATURATION_TICKS = LOOP_TICKS(CRASH_SATURATION_TIME_S);
+constexpr int STALL_TICKS      = LOOP_TICKS(CRASH_STALL_TIME_S);
+constexpr int RUNAWAY_TICKS    = LOOP_TICKS(CRASH_RUNAWAY_TIME_S);
 
 bool stalled(float amps, float mmps)
 {
@@ -77,7 +77,7 @@ bool CrashDetector::update(const CrashInputs& in)
     const bool saturated =
         std::fabs(in.left_volts) >= limit_v || std::fabs(in.right_volts) >= limit_v;
     saturation_ticks_ = saturated ? saturation_ticks_ + 1 : 0;
-    if (saturation_ticks_ >= kSaturationTicks)
+    if (saturation_ticks_ >= SATURATION_TICKS)
     {
         trip(CrashCause::kSaturation);
         return true;
@@ -86,7 +86,7 @@ bool CrashDetector::update(const CrashInputs& in)
     const bool stall = in.has_current && (stalled(in.left_amps, in.left_mmps) ||
                                           stalled(in.right_amps, in.right_mmps));
     stall_ticks_     = stall ? stall_ticks_ + 1 : 0;
-    if (stall_ticks_ >= kStallTicks)
+    if (stall_ticks_ >= STALL_TICKS)
     {
         trip(CrashCause::kStall);
         return true;
@@ -104,7 +104,7 @@ bool CrashDetector::update(const CrashInputs& in)
     {
         if (runaway_ticks_ == 0)
             runaway_start_mm_ = error_mm;
-        if (++runaway_ticks_ >= kRunawayTicks)
+        if (++runaway_ticks_ >= RUNAWAY_TICKS)
         {
             if (error_mm - runaway_start_mm_ >= CRASH_RUNAWAY_GROWTH_MM)
             {

@@ -13,14 +13,14 @@ using Coord = std::array<int, 2>;
 // Visit a cell as the search does: every side becomes a known wall or exit.
 static void visit(Maze& maze, int x, int y, const char* walls)
 {
-    Cell*             cell     = maze.cell(x, y);
-    static const char kSides[] = {'N', 'E', 'S', 'W'};
+    Cell*             cell    = maze.cell(x, y);
+    static const char SIDES[] = {'N', 'E', 'S', 'W'};
     for (int i = 0; i < 4; ++i)
     {
         if (walls[i] == '1')
-            cell->setWall(kSides[i]);
+            cell->setWall(SIDES[i]);
         else
-            cell->setExit(kSides[i]);
+            cell->setExit(SIDES[i]);
     }
     cell->markExplored();
 }

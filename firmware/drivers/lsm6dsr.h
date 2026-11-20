@@ -30,8 +30,8 @@ constexpr float accelG(int16_t raw)
 }
 
 /// FIFO_DATA_OUT_TAG sensor codes for uncompressed data.
-constexpr uint8_t kTagGyro  = 0x01;
-constexpr uint8_t kTagAccel = 0x02;
+constexpr uint8_t TAG_GYRO  = 0x01;
+constexpr uint8_t TAG_ACCEL = 0x02;
 
 /// One 7-byte FIFO word: the tag byte, then X, Y, Z as little-endian int16.
 struct FifoWord

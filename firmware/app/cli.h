@@ -199,7 +199,7 @@ class CommandLineInterface
     // kLineTelemetryTicks (500 ms). Reset on LINE START.
     static constexpr uint32_t kLineTelemetryTicks = LOOP_TICKS(0.500f);
     // BOOTSEL poll period while following a line (100 ms).
-    static constexpr uint32_t kLineButtonPollTicks      = LOOP_TICKS(0.100f);
+    static constexpr uint32_t LINE_BUTTON_POLL_TICKS    = LOOP_TICKS(0.100f);
     uint32_t                  line_telemetry_counter_   = 0;
     uint32_t                  line_button_poll_counter_ = 0;
     bool                      line_running_was_active_  = false;

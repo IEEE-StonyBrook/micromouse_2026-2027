@@ -9,7 +9,7 @@
 
 namespace
 {
-constexpr float kTenCellsMm = 10.0f * CELL_SIZE_MM;
+constexpr float TEN_CELLS_MM = 10.0f * CELL_SIZE_MM;
 
 physim::Result straight(const physim::Params& p)
 {
@@ -21,7 +21,7 @@ TEST_CASE("physim: nominal 10-cell straight ends within 3 mm")
 {
     const physim::Result r = straight(physim::nominal());
     REQUIRE(r.finished);
-    CHECK(std::fabs(r.distance_mm - kTenCellsMm) < 3.0f);
+    CHECK(std::fabs(r.distance_mm - TEN_CELLS_MM) < 3.0f);
     CHECK(std::fabs(r.yaw_deg) < 1.0f);
 }
 
@@ -48,10 +48,10 @@ TEST_CASE("physim: nominal in-place 90 ends within 1 deg" * doctest::may_fail())
 TEST_CASE("physim: the next mouse's 62.6 counts/mm encoder still lands the straight")
 {
     physim::Params p       = physim::nominal();
-    p.counts_per_mm_left   = physim::kNewMouseCountsPerMm;
-    p.counts_per_mm_right  = physim::kNewMouseCountsPerMm;
+    p.counts_per_mm_left   = physim::NEW_MOUSE_COUNTS_PER_MM;
+    p.counts_per_mm_right  = physim::NEW_MOUSE_COUNTS_PER_MM;
     const physim::Result r = straight(p);
-    CHECK(std::fabs(r.distance_mm - kTenCellsMm) < 3.0f);
+    CHECK(std::fabs(r.distance_mm - TEN_CELLS_MM) < 3.0f);
 }
 
 TEST_CASE("physim: a fixed seed reproduces a run exactly; another seed does not")
@@ -102,8 +102,8 @@ TEST_CASE("physim: a coarse encoder costs straight-line distance accuracy")
     p.counts_per_mm_left         = 0.2f; // 5 mm per count, ~15x coarser than today
     p.counts_per_mm_right        = 0.2f;
     const physim::Result r       = straight(p);
-    CHECK(std::fabs(r.distance_mm - kTenCellsMm) >
-          std::fabs(nominal.distance_mm - kTenCellsMm) + 3.0f);
+    CHECK(std::fabs(r.distance_mm - TEN_CELLS_MM) >
+          std::fabs(nominal.distance_mm - TEN_CELLS_MM) + 3.0f);
 }
 
 TEST_CASE("physim: gyro bias drags the held heading by about bias x time")

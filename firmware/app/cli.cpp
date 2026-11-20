@@ -494,10 +494,10 @@ void CommandLineInterface::loop()
                     line_telemetry_counter_ = 0;
                     printLineRunningTelemetry();
                 }
-                // BOOTSEL poll at ~10 Hz (kLineButtonPollTicks). Reading the
+                // BOOTSEL poll at ~10 Hz (LINE_BUTTON_POLL_TICKS). Reading the
                 // BOOTSEL pin briefly suspends XIP, so we keep the cadence
                 // low. A 100 ms latency on a panic-stop press is fine.
-                if (++line_button_poll_counter_ >= kLineButtonPollTicks)
+                if (++line_button_poll_counter_ >= LINE_BUTTON_POLL_TICKS)
                 {
                     line_button_poll_counter_ = 0;
                     if (abortRequested())

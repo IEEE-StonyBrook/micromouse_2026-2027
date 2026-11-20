@@ -18,15 +18,15 @@ namespace physim
 {
 namespace
 {
-constexpr float kPi       = 3.14159265f;
-constexpr float kGravity  = 9.81f;
-constexpr float kRadToDeg = 180.0f / kPi;
+constexpr float PI           = 3.14159265f;
+constexpr float GRAVITY_MPS2 = 9.81f;
+constexpr float RAD_TO_DEG   = 180.0f / PI;
 // The tyre is a stiff spring in slip speed, so the plant integrates in
 // substeps well under its ~0.4 ms slip time constant.
-constexpr float kMaxSubstepS = 20e-6f;
+constexpr float MAX_SUBSTEP_S = 20e-6f;
 // Settle after the last move, and give up on a move after this long.
-constexpr float kSettleS = 1.0f;
-constexpr float kGuardS  = 10.0f;
+constexpr float SETTLE_S = 1.0f;
+constexpr float GUARD_S  = 10.0f;
 } // namespace
 
 Params nominal()
@@ -71,7 +71,7 @@ Robot::Robot(const Params& params)
 
 float Robot::yawDeg() const
 {
-    return yaw_rad_ * kRadToDeg;
+    return yaw_rad_ * RAD_TO_DEG;
 }
 
 float Robot::wheelMmps(bool left) const
@@ -128,7 +128,7 @@ float Robot::uniform()
 float Robot::gaussian()
 {
     // Box-Muller; one value per call keeps the stream simple.
-    return std::sqrt(-2.0f * std::log(uniform())) * std::cos(2.0f * kPi * uniform());
+    return std::sqrt(-2.0f * std::log(uniform())) * std::cos(2.0f * PI * uniform());
 }
 
 float Robot::traction(Wheel& w, float mu, float ground_mps)
@@ -138,7 +138,7 @@ float Robot::traction(Wheel& w, float mu, float ground_mps)
         scale *= p_.slip.traction_scale;
     if (w.seam_left_s > 0.0f)
         scale *= p_.seam.traction_scale;
-    const float limit_n = mu * scale * p_.mass_kg * kGravity / 2.0f;
+    const float limit_n = mu * scale * p_.mass_kg * GRAVITY_MPS2 / 2.0f;
     const float force_n = p_.tyre_stiffness_n_per_mps * (w.tyre_mps - ground_mps);
     w.at_limit          = std::fabs(force_n) > limit_n;
     return std::clamp(force_n, -limit_n, limit_n);
@@ -212,8 +212,8 @@ void Robot::updateSensors(float dt)
     if (seam_t_s_ >= 0.0f && seam_t_s_ < p_.seam.duration_s)
     {
         const float phase = seam_t_s_ / p_.seam.duration_s;
-        pitch_rate_degps_ = p_.seam.pitch_rate_peak_degps * std::sin(2.0f * kPi * phase);
-        accel_z_mps2_     = p_.seam.accel_z_peak_mps2 * std::sin(kPi * phase);
+        pitch_rate_degps_ = p_.seam.pitch_rate_peak_degps * std::sin(2.0f * PI * phase);
+        accel_z_mps2_     = p_.seam.accel_z_peak_mps2 * std::sin(PI * phase);
     }
     if (seam_t_s_ >= 0.0f)
         seam_t_s_ += dt;
@@ -229,7 +229,7 @@ void Robot::updateSensors(float dt)
     // density sampled every dt has RMS density * sqrt(1/dt), so the heading
     // random walk comes out the same at any loop rate.
     const float noise_rms_degps = p_.gyro_noise_degps_rthz * std::sqrt(1.0f / dt);
-    const float omega_degps     = omega_radps_ * kRadToDeg + p_.gyro_bias_degps +
+    const float omega_degps     = omega_radps_ * RAD_TO_DEG + p_.gyro_bias_degps +
                                   (noise_rms_degps > 0.0f ? noise_rms_degps * gaussian() : 0.0f);
     imu_yaw_deg_ += omega_degps * dt;
     fake::setImu(imu, imu_yaw_deg_, omega_degps);
@@ -242,7 +242,7 @@ void Robot::step()
         pinned_ = p_.pinned_wheel.left ? &left_ : &right_;
     left_.volts   = fake::motorDuty(left_motor) * p_.battery_v;
     right_.volts  = fake::motorDuty(right_motor) * p_.battery_v;
-    const int   n = static_cast<int>(std::ceil(dt / kMaxSubstepS));
+    const int   n = static_cast<int>(std::ceil(dt / MAX_SUBSTEP_S));
     const float h = dt / static_cast<float>(n);
     for (int i = 0; i < n; i++)
         substep(h);
@@ -323,7 +323,7 @@ struct Rig
 
     template <typename Done> void waitFor(Done done)
     {
-        const int guard = LOOP_TICKS(kGuardS);
+        const int guard = LOOP_TICKS(GUARD_S);
         int       ticks = 0;
         // A trip freezes the move for good; stop waiting on it.
         while (!done() && !motion.crashDetector().tripped() && ticks++ < guard)
@@ -342,7 +342,7 @@ struct Rig
     }
     void settle()
     {
-        for (int i = 0; i < LOOP_TICKS(kSettleS); i++)
+        for (int i = 0; i < LOOP_TICKS(SETTLE_S); i++)
             tick();
     }
 };

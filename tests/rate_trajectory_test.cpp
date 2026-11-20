@@ -21,7 +21,7 @@
 namespace
 {
 // Trajectories are compared every 10 ms, a whole number of ticks at both rates.
-constexpr float kSamplePeriodS = 0.010f;
+constexpr float SAMPLE_PERIOD_S = 0.010f;
 
 struct Sample
 {
@@ -39,7 +39,7 @@ void record(Trajectory& traj, const char* series, int index, float value, float 
 
 int ticksPerSample()
 {
-    return static_cast<int>(std::lround(kSamplePeriodS * LOOP_FREQUENCY_HZ));
+    return static_cast<int>(std::lround(SAMPLE_PERIOD_S * LOOP_FREQUENCY_HZ));
 }
 
 void recordProfile(Trajectory& traj)

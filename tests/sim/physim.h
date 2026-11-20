@@ -107,7 +107,7 @@ struct Params
 Params nominal();
 
 /// Encoder resolution of the next (STM32) mouse, counts per mm of wheel travel.
-constexpr float kNewMouseCountsPerMm = 62.6f;
+constexpr float NEW_MOUSE_COUNTS_PER_MM = 62.6f;
 
 /**
  * @brief The plant, wired to fake drivers. Drivetrain and Motion take the

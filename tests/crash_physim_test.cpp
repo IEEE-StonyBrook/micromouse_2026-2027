@@ -10,14 +10,14 @@
 
 namespace
 {
-constexpr float kPinAtS = 0.6f; // mid-cruise on a search-speed straight
+constexpr float PIN_AT_S = 0.6f; // mid-cruise on a search-speed straight
 
 physim::Params pinnedLeft()
 {
     physim::Params p       = physim::nominal();
     p.pinned_wheel.enabled = true;
     p.pinned_wheel.left    = true;
-    p.pinned_wheel.at_s    = kPinAtS;
+    p.pinned_wheel.at_s    = PIN_AT_S;
     return p;
 }
 
@@ -44,8 +44,8 @@ TEST_CASE("crash sim: a pinned wheel cuts the motors within 150 ms and stays cut
     o.on_crash_cut         = countCut;
     const physim::Result r = physim::run(physim::Scenario::kStraight10, pinnedLeft(), o);
     REQUIRE(r.crash_trip_s >= 0.0f);
-    CHECK(r.crash_trip_s - kPinAtS > 0.0f);
-    CHECK(r.crash_trip_s - kPinAtS <= 0.150f);
+    CHECK(r.crash_trip_s - PIN_AT_S > 0.0f);
+    CHECK(r.crash_trip_s - PIN_AT_S <= 0.150f);
     CHECK(r.crash_cause != CrashCause::kStall); // no current sensing by default
     CHECK(r.crash_cause != CrashCause::kNone);
     // Latched: through the rest of the run the profile still wants to move,
@@ -60,7 +60,7 @@ TEST_CASE("crash sim: with current sensing a pinned wheel also trips within 150 
     o.sense_current        = true;
     const physim::Result r = physim::run(physim::Scenario::kStraight10, pinnedLeft(), o);
     REQUIRE(r.crash_trip_s >= 0.0f);
-    CHECK(r.crash_trip_s - kPinAtS <= 0.150f);
+    CHECK(r.crash_trip_s - PIN_AT_S <= 0.150f);
     CHECK(r.peak_volts_after_trip == 0.0f);
 }
 

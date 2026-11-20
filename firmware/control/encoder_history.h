@@ -19,13 +19,13 @@ template <typename T> constexpr bool holdsCountsPerTick(float counts)
 }
 
 // Worst case: the fastest wheel over the finer of the two tick sizes.
-constexpr float kMaxEncoderCountsPerTick =
+constexpr float MAX_ENCODER_COUNTS_PER_TICK =
     ROBOT_MAX_WHEEL_SPEED_MMPS /
     ((MM_PER_TICK_LEFT < MM_PER_TICK_RIGHT ? MM_PER_TICK_LEFT : MM_PER_TICK_RIGHT) *
      LOOP_FREQUENCY_HZ);
 
-static_assert(holdsCountsPerTick<EncoderHistoryDelta>(kMaxEncoderCountsPerTick) &&
-                  holdsCountsPerTick<EncoderHistoryDelta>(-kMaxEncoderCountsPerTick),
+static_assert(holdsCountsPerTick<EncoderHistoryDelta>(MAX_ENCODER_COUNTS_PER_TICK) &&
+                  holdsCountsPerTick<EncoderHistoryDelta>(-MAX_ENCODER_COUNTS_PER_TICK),
               "encoder history type too narrow for counts/mm x top speed / loop rate");
 
 #endif // CONTROL_ENCODER_HISTORY_H

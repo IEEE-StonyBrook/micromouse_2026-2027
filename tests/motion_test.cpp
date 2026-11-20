@@ -46,7 +46,7 @@ struct Rig
     }
 };
 
-constexpr int kGuardTicks = 10 * static_cast<int>(LOOP_FREQUENCY_HZ);
+constexpr int GUARD_TICKS = 10 * static_cast<int>(LOOP_FREQUENCY_HZ);
 } // namespace
 
 TEST_CASE("motion drives a straight move to rest within tolerance")
@@ -54,9 +54,9 @@ TEST_CASE("motion drives a straight move to rest within tolerance")
     // Plant matched to the tuned model: feedforward is nearly right on its own.
     auto r = std::make_unique<Rig>(MOTOR_KM, MOTOR_TM);
     r->motion.start_move(540.0f, 600.0f, 0.0f, 3000.0f);
-    const int ticks = r->runMove(kGuardTicks);
+    const int ticks = r->runMove(GUARD_TICKS);
 
-    REQUIRE(ticks < kGuardTicks);
+    REQUIRE(ticks < GUARD_TICKS);
     CHECK(std::fabs(r->robot.distanceMm() - 540.0f) < 3.0f);
     CHECK(std::fabs(r->robot.yawDeg()) < 1.0f);
     CHECK(std::fabs(r->robot.wheelMmps(true)) < 1.0f);
@@ -71,9 +71,9 @@ TEST_CASE("motion feedback corrects a plant weaker than its model")
     // PD has to make up the difference.
     auto r = std::make_unique<Rig>(0.8f * MOTOR_KM, 1.25f * MOTOR_TM);
     r->motion.start_move(360.0f, 500.0f, 0.0f, 2500.0f);
-    const int ticks = r->runMove(kGuardTicks);
+    const int ticks = r->runMove(GUARD_TICKS);
 
-    REQUIRE(ticks < kGuardTicks);
+    REQUIRE(ticks < GUARD_TICKS);
     CHECK(std::fabs(r->robot.distanceMm() - 360.0f) < 3.0f);
     CHECK(std::fabs(r->robot.yawDeg()) < 1.0f);
 }
@@ -82,7 +82,7 @@ TEST_CASE("motion reverses for a negative move")
 {
     auto r = std::make_unique<Rig>(MOTOR_KM, MOTOR_TM);
     r->motion.start_move(-180.0f, 400.0f, 0.0f, 2500.0f);
-    r->runMove(kGuardTicks);
+    r->runMove(GUARD_TICKS);
     CHECK(std::fabs(r->robot.distanceMm() + 180.0f) < 3.0f);
 }
 

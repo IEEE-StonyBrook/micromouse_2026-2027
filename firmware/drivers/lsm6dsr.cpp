@@ -121,12 +121,12 @@ uint32_t Lsm6dsr::readFifo(uint32_t max_words)
         uint8_t       rx[8] = {};
         spi_.transfer(tx, rx, 8);
         const lsm6dsr::FifoWord w = lsm6dsr::decodeFifoWord(rx + 1);
-        if (w.sensor == lsm6dsr::kTagGyro)
+        if (w.sensor == lsm6dsr::TAG_GYRO)
         {
             gyro_z_sum += w.z;
             ++gyro_count;
         }
-        else if (w.sensor == lsm6dsr::kTagAccel)
+        else if (w.sensor == lsm6dsr::TAG_ACCEL)
         {
             accel_raw_[0] = w.x;
             accel_raw_[1] = w.y;

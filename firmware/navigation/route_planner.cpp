@@ -194,13 +194,13 @@ void exploredPathTo(MazeMouse* maze_mouse, Cell* end, CellPath& out)
 }
 
 // Cardinal headings in turn order, so +1 is a right turn: N, E, S, W.
-constexpr std::array<std::array<int, 2>, 4> kHeadings = {{{0, 1}, {1, 0}, {0, -1}, {-1, 0}}};
+constexpr std::array<std::array<int, 2>, 4> HEADING_STEPS = {{{0, 1}, {1, 0}, {0, -1}, {-1, 0}}};
 
 int headingIndex(const std::array<int, 2>& heading)
 {
     for (int i = 0; i < 4; ++i)
     {
-        if (kHeadings[i] == heading)
+        if (HEADING_STEPS[i] == heading)
             return i;
     }
     return -1;
@@ -334,8 +334,8 @@ bool fastestExploredRoute(MazeMouse* maze_mouse, const std::vector<std::array<in
         Cell* from = maze_mouse->cellAt(x, y);
         for (int k = 1;; ++k)
         {
-            const int nx = x + kHeadings[heading][0] * k;
-            const int ny = y + kHeadings[heading][1] * k;
+            const int nx = x + HEADING_STEPS[heading][0] * k;
+            const int ny = y + HEADING_STEPS[heading][1] * k;
             if (nx < 0 || ny < 0 || nx >= w || ny >= h)
                 break;
             Cell* to = maze_mouse->cellAt(nx, ny);
@@ -374,8 +374,8 @@ bool fastestExploredRoute(MazeMouse* maze_mouse, const std::vector<std::array<in
                 out.clear();
                 return false;
             }
-            x -= kHeadings[heading][0];
-            y -= kHeadings[heading][1];
+            x -= HEADING_STEPS[heading][0];
+            y -= HEADING_STEPS[heading][1];
         }
     }
     out.reverse();

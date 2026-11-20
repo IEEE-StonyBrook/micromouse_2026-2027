@@ -116,7 +116,7 @@ TEST_CASE("LSM6DSR FIFO word decodes its tag and little-endian axes")
     // Tag byte: sensor in bits 7:3, tag counter in 2:1, parity in 0.
     const uint8_t bytes[7]    = {(0x01 << 3) | (2 << 1) | 1, 0x34, 0x12, 0xFF, 0xFF, 0x00, 0x80};
     const lsm6dsr::FifoWord w = lsm6dsr::decodeFifoWord(bytes);
-    CHECK(w.sensor == lsm6dsr::kTagGyro);
+    CHECK(w.sensor == lsm6dsr::TAG_GYRO);
     CHECK(w.tag_count == 2);
     CHECK(w.x == 0x1234);
     CHECK(w.y == -1);
@@ -176,9 +176,9 @@ TEST_CASE("LSM6DSR FIFO read averages this tick's gyro words into a yaw rate")
     Lsm6dsr     imu(fake);
     REQUIRE(imu.init() == Lsm6dsr::Status::kOk);
 
-    fake.pushWord(lsm6dsr::kTagGyro, 0, 0, 1000);  // 70 dps
-    fake.pushWord(lsm6dsr::kTagAccel, 0, 0, 4096); // 1 g on Z
-    fake.pushWord(lsm6dsr::kTagGyro, 0, 0, 2000);  // 140 dps
+    fake.pushWord(lsm6dsr::TAG_GYRO, 0, 0, 1000);  // 70 dps
+    fake.pushWord(lsm6dsr::TAG_ACCEL, 0, 0, 4096); // 1 g on Z
+    fake.pushWord(lsm6dsr::TAG_GYRO, 0, 0, 2000);  // 140 dps
     fake.pushWord(0x03, 1, 2, 3);                  // temperature: skipped
     CHECK(imu.readFifo() == 4);
     CHECK(imu.yawRateDegps() == doctest::Approx(105.0f)); // mean of 70 and 140
@@ -196,7 +196,7 @@ TEST_CASE("LSM6DSR yaw sign follows how the board is mounted")
     FakeLsm6dsr fake;
     Lsm6dsr     upside_down(fake, -1);
     REQUIRE(upside_down.init() == Lsm6dsr::Status::kOk);
-    fake.pushWord(lsm6dsr::kTagGyro, 0, 0, 1000);
+    fake.pushWord(lsm6dsr::TAG_GYRO, 0, 0, 1000);
     upside_down.readFifo();
     CHECK(upside_down.yawRateDegps() == doctest::Approx(-70.0f));
 }
@@ -207,7 +207,7 @@ TEST_CASE("LSM6DSR FIFO read is capped per tick and counts overruns")
     Lsm6dsr     imu(fake);
     REQUIRE(imu.init() == Lsm6dsr::Status::kOk);
     for (int i = 0; i < 10; ++i)
-        fake.pushWord(lsm6dsr::kTagGyro, 0, 0, 100);
+        fake.pushWord(lsm6dsr::TAG_GYRO, 0, 0, 100);
     fake.overrun = true;
     CHECK(imu.readFifo(4) == 4);
     CHECK(fake.fifo.size() == 6);

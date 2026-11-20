@@ -135,15 +135,15 @@ bool timedOut(uint32_t start_ms, uint32_t timeout_ms)
 // driven: 192 cells at search speed is about 86 s, and 90 s bounds the real
 // clock. On the corpus they cost 3 of 50 optimal speed runs and keep the
 // longest way home under 300 cells.
-constexpr RouteProofCaps kRouteProofCaps = {/*max_legs=*/192, /*max_ms=*/90000};
+constexpr RouteProofCaps ROUTE_PROOF_CAPS = {/*max_legs=*/192, /*max_ms=*/90000};
 // While proving, drive over known exits unless that is this many cells longer
 // than the route with unknown walls open: every unexplored cell crossed is
 // time spent sensing a cell the proof did not ask for.
-constexpr int kKnownRouteDetourCells = 4;
+constexpr int KNOWN_ROUTE_DETOUR_CELLS = 4;
 #ifdef SIMULATOR_BUILD
 // The simulator has no clock worth reading, so time a proof leg as one cell at
 // search speed: 180 mm / 400 mm/s = 450 ms.
-constexpr uint32_t kRouteProofLegMs =
+constexpr uint32_t ROUTE_PROOF_LEG_MS =
     static_cast<uint32_t>(CELL_SIZE_MM * 1000.0f / ROBOT_MAX_SEARCH_SPEED_MMPS);
 #endif
 
@@ -1392,13 +1392,13 @@ bool Mouse::search_to(const std::vector<std::array<int, 2>>& goals)
         if (proving)
         {
 #ifdef SIMULATOR_BUILD
-            const uint32_t proof_ms = static_cast<uint32_t>(proof_legs) * kRouteProofLegMs;
+            const uint32_t proof_ms = static_cast<uint32_t>(proof_legs) * ROUTE_PROOF_LEG_MS;
 #else
             const uint32_t proof_ms = static_cast<uint32_t>(hal::time::nowMs() - proof_start_ms);
 #endif
             const RouteBounds bounds = routeBounds(*maze_mouse_, start_cell_, goal_cells_);
             std::vector<std::array<int, 2>> unproven;
-            if (keepProving(bounds, proof_legs, proof_ms, kRouteProofCaps))
+            if (keepProving(bounds, proof_legs, proof_ms, ROUTE_PROOF_CAPS))
                 unproven = unprovenRouteCells(*maze_mouse_, start_cell_, goal_cells_);
             if (unproven.empty())
             {
@@ -1487,14 +1487,14 @@ bool Mouse::search_to(const std::vector<std::array<int, 2>>& goals)
         if (going_home && route_proof_ && !cell_path.empty())
         {
             maze_mouse_->setMazeMask(MASK_CLOSED);
-            AStar              known_a_star(maze_mouse_);
+            AStar known_a_star(maze_mouse_);
             known_a_star.set_quiet(true); // no known route is normal; cell_path stands
             std::vector<Cell*> known_path = known_a_star.cellPath(targets, /*diagonals=*/false,
                                                                   /*pass_goals=*/true);
             maze_mouse_->setMazeMask(MASK_OPEN);
             if (!known_path.empty() &&
                 static_cast<int>(known_path.size()) <=
-                    static_cast<int>(cell_path.size()) + kKnownRouteDetourCells)
+                    static_cast<int>(cell_path.size()) + KNOWN_ROUTE_DETOUR_CELLS)
                 cell_path = known_path;
         }
         if (cell_path.empty())
@@ -2194,7 +2194,7 @@ void Mouse::print_turn_trace(float target_yaw_deg)
     // The SS90E line reads yaw while the IMU still lags the arc by ~40 ms.
     // Score the turn 100 ms after the rotation profile reaches its target,
     // once that lag has drained. A NaN target (CLI TRACE) has no turn.
-    const uint16_t kSettleSamples   = (100 + dt_ms - 1) / dt_ms; // at least 100 ms
+    const uint16_t settle_samples   = (100 + dt_ms - 1) / dt_ms; // at least 100 ms
     float          final_target_deg = 0.0f;
     for (uint16_t i = 0; i < count; ++i)
         final_target_deg = std::max(final_target_deg, std::fabs(log.sample(i).target_deg));
@@ -2202,7 +2202,7 @@ void Mouse::print_turn_trace(float target_yaw_deg)
     {
         if (std::fabs(log.sample(i).target_deg) < final_target_deg - 0.2f)
             continue;
-        const uint16_t j = i + kSettleSamples;
+        const uint16_t j = i + settle_samples;
         if (j < count)
         {
             LOG_INFO("TRACE turn_yaw_error_settled="
