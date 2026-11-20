@@ -9,7 +9,7 @@ import tempfile
 import unittest
 
 from maze_file import parse_text
-from runner import compare, maze_setting, run_maze
+from runner import compare, compare_planners, maze_setting, run_maze, speed_route_estimate
 from test_maze_file import TINY_TEXT
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -80,6 +80,46 @@ class BaselineTest(unittest.TestCase):
                       compare([self.run_result(maze="new.txt")], self.BASE)[0])
 
 
+class SpeedRouteEstimateTest(unittest.TestCase):
+    def test_reads_the_last_speed_route_line(self):
+        log = ("[INFO] Speed route: planner=length cells=9 est_run_time_s=7.0000\n"
+               "[INFO] Speed route: planner=time cells=12 est_run_time_s=5.2500\n"
+               "[INFO] Speed run complete\n")
+        self.assertEqual(speed_route_estimate(log), 5.25)
+
+    def test_no_line_gives_none(self):
+        self.assertIsNone(speed_route_estimate("[INFO] Reached goal\n"))
+
+
+class ComparePlannersTest(unittest.TestCase):
+    def result(self, maze, est, ok=True):
+        return {"maze": maze, "ok": ok, "error": None if ok else "crashed",
+                "est_run_time_s": est}
+
+    def test_faster_or_equal_time_planner_passes(self):
+        rows, errors = compare_planners([self.result("a", 10.0), self.result("b", 4.0)],
+                                        [self.result("a", 8.0), self.result("b", 4.0)])
+        self.assertEqual(errors, [])
+        self.assertAlmostEqual(rows[0]["improvement"], 0.2)
+        self.assertAlmostEqual(rows[1]["improvement"], 0.0)
+
+    def test_slower_time_planner_fails(self):
+        _, errors = compare_planners([self.result("a", 8.0)], [self.result("a", 8.5)])
+        self.assertEqual(len(errors), 1)
+        self.assertIn("slower", errors[0])
+
+    def test_invalid_route_fails(self):
+        _, errors = compare_planners([self.result("a", 8.0)],
+                                     [self.result("a", None, ok=False)])
+        self.assertEqual(len(errors), 1)
+        self.assertIn("time planner", errors[0])
+
+    def test_missing_estimate_fails(self):
+        _, errors = compare_planners([self.result("a", None)], [self.result("a", 8.0)])
+        self.assertEqual(len(errors), 1)
+        self.assertIn("estimate", errors[0])
+
+
 @unittest.skipUnless(os.path.exists(BOT), "build the sim bot first: make -C sim")
 class SimBotTest(unittest.TestCase):
     def test_bot_solves_tiny_maze(self):
@@ -89,6 +129,12 @@ class SimBotTest(unittest.TestCase):
         # zigzag diagonally can only shorten it.
         self.assertLessEqual(result["speed_path_cells"], 6)
         self.assertGreaterEqual(result["cells_searched"], 7)
+
+    def test_both_planners_solve_tiny_maze(self):
+        for planner in ("length", "time"):
+            result = run_maze([BOT, "--planner", planner], parse_text(TINY_TEXT), timeout_s=30)
+            self.assertTrue(result["ok"], result["error"])
+            self.assertGreater(result["est_run_time_s"], 0)
 
 
 if __name__ == "__main__":
