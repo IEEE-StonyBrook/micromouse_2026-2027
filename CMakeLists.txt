@@ -79,6 +79,11 @@ set(DRIVER_LAB_SOURCES
     firmware/driver_lab/settings.cpp
 )
 
+# Platform-neutral interfaces live in firmware/hal/; these are the Pico backends.
+set(HAL_SOURCES
+    firmware/hal/pico/time.cpp
+)
+
 set(COMMON_SOURCES
     firmware/common/breadcrumb.cpp
     firmware/common/log.cpp
@@ -93,6 +98,7 @@ add_executable(Jurababa
     ${APP_SOURCES}
     ${DRIVER_LAB_SOURCES}
     ${COMMON_SOURCES}
+    ${HAL_SOURCES}
     firmware/main.cpp
 )
 
