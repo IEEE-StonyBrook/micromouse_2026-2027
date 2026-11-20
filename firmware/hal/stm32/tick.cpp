@@ -8,6 +8,7 @@
 #include <libopencm3/stm32/rcc.h>
 #include <libopencm3/stm32/timer.h>
 
+#include "config/board.h"
 #include "config/board_feather.h"
 #include "hal/stm32/clock.h"
 #include "hal/stm32/counter_extender.h"
@@ -22,6 +23,8 @@ constexpr uint32_t COUNT_HZ = 1000000; // both timers count microseconds
 
 constexpr TimerDivisors DIVISORS = timerDivisors(BUSES.tim_apb1_hz, COUNT_HZ, TICK_HZ);
 static_assert(DIVISORS.valid, "TIM7 cannot make an exact 1 kHz tick");
+static_assert(TICK_HZ == static_cast<uint32_t>(LOOP_FREQUENCY_HZ),
+              "the TIM7 tick must run at the control loop rate");
 
 // RM0090 38.16.4: DBGMCU_APB1_FZ, which libopencm3 only names for the F1.
 #define DBGMCU_APB1_FZ MMIO32(DBGMCU_BASE + 0x08)
