@@ -95,7 +95,12 @@ against `hal/host/memory_flash.h`, which can cut power at any word:
 `flash_store_test.cpp` cuts every word of a save and checks the old or the new
 record always loads. The next-boot reset verdict (`common/reset_report.h`:
 the reset cause plus the breadcrumb, `common/breadcrumb.h`) is platform-neutral
-too and tested in `reset_report_test.cpp`.
+too and tested in `reset_report_test.cpp`. So is the IR emitter self-test
+(`common/emitter_check.h`): it fires each emitter of an `IrBank` alone, builds
+the dark-subtracted 4x4 crosstalk matrix and judges it (a receiver under 100
+counts from its own emitter is weak; another emitter lifting it by over 25 %
+of that leaks), tested in `emitter_check_test.cpp` against
+`tests/fakes/fake_ir_bank.h`.
 `tests/fakes/` stands in for the Motor, Encoder and IMU drivers on the host and
 adds a first-order two-wheel plant, so control changes can be tested without a
 mouse. `tests/sim/` grows that into a physics sim: a DC-motor, two-wheel
@@ -255,8 +260,9 @@ make -j4
 STM32F405 bring-up firmware for the Adafruit Feather STM32F405 Express
 (pins and timers in `config/board_feather.h`): 168 MHz clock, 1 kHz TIM7
 tick, USART3 console at 1 Mbaud with `stats`, `flood`, `profile`, `arm`,
-`logfill` (fill the run log with a test pattern) and `log` (dump it)
-commands, TIM3/TIM4 encoders and an LSM6DSR on SPI2. At boot it reads the
+`logfill` (fill the run log with a test pattern), `log` (dump it) and
+`emitters` (the IR crosstalk self-test; a stub with no emitters until the
+rev1 pins are known) commands, TIM3/TIM4 encoders and an LSM6DSR on SPI2. At boot it reads the
 chip UID and loads the board profile it saved in the flash store; an unknown
 board lists the presets (`config/board_profiles.h`) and refuses to arm until
 `profile <n>` saves one. A damaged store shows as 2 LED flashes every 2 s,
