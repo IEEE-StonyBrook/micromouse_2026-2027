@@ -57,6 +57,7 @@ TEST_CASE("motor bridge: a command given asleep waits out tWAKE, then lands whol
 {
     fake::HBridge port;
     MotorBridge   b(port, AMPS_PER_COUNT);
+    b.arm();
     b.set_duty(0.5f, -0.25f); // given once, never repeated
     b.update();
     CHECK(port.awake); // nSLEEP rises on the first tick
@@ -83,6 +84,7 @@ TEST_CASE("motor bridge: wake() on arming brakes once awake, so the first move n
 {
     fake::HBridge port;
     MotorBridge   b(port, AMPS_PER_COUNT);
+    b.arm();
     wakeUp(b);
     CHECK(b.state() == MotorBridge::State::kAwake);
     CHECK(port.awake);
@@ -102,6 +104,7 @@ TEST_CASE(
 {
     fake::HBridge port;
     MotorBridge   b(port, AMPS_PER_COUNT);
+    b.arm();
     b.set_duty(0.2f, 0.2f);
     run(b, LOOP_TICKS(3.0f)); // a long move: never idle
     CHECK(b.state() == MotorBridge::State::kAwake);
@@ -127,6 +130,7 @@ TEST_CASE("motor bridge: sleep() cuts at once and drops the command (disarm, cra
 {
     fake::HBridge port;
     MotorBridge   b(port, AMPS_PER_COUNT);
+    b.arm();
     b.set_duty(0.8f, 0.8f);
     run(b, MotorBridge::WAKE_TICKS + 1);
     REQUIRE(port.awake);
@@ -144,7 +148,8 @@ TEST_CASE("motor bridge: IPROPI counts become amps, less the offset learned asle
 {
     fake::HBridge port;
     MotorBridge   b(port, AMPS_PER_COUNT);
-    float         l = -1.0f, r = -1.0f;
+    b.arm();
+    float l = -1.0f, r = -1.0f;
 
     // Asleep: the ADC reads its own offset, 30 counts; no current is reported.
     port.counts[0] = 30;
@@ -172,6 +177,7 @@ TEST_CASE("motor bridge: the offset is learned only after tSLEEP, not from a sti
 {
     fake::HBridge port;
     MotorBridge   b(port, AMPS_PER_COUNT);
+    b.arm();
     b.set_duty(0.5f, 0.5f);
     run(b, MotorBridge::WAKE_TICKS + 1);
     port.counts[0] = 900; // still flowing as nSLEEP falls
@@ -205,6 +211,7 @@ TEST_CASE("motor bridge: measured stall current trips the crash watchdog, which 
     auto       motion = std::make_unique<Motion>(&dt, &robot.imu);
     fake::HBridge port;
     MotorBridge   bridge(port, AMPS_PER_COUNT);
+    bridge.arm();
     cut_bridge = &bridge;
     motion->set_motor_current_reader(MotorBridge::readAmps, &bridge);
     motion->set_crash_cut_hook(sleepDrivers);
@@ -234,6 +241,7 @@ TEST_CASE("motor bridge: wake() while already awake does not undo the next idle 
 {
     fake::HBridge port;
     MotorBridge   b(port, AMPS_PER_COUNT);
+    b.arm();
     wakeUp(b);
     b.wake(); // armed again mid-run
     run(b, LOOP_TICKS(MOTOR_IDLE_SLEEP_TIME_S) + LOOP_TICKS(0.05f));
@@ -245,8 +253,66 @@ TEST_CASE("motor bridge: duty past full scale is clamped to it")
 {
     fake::HBridge port;
     MotorBridge   b(port, AMPS_PER_COUNT);
+    b.arm();
     b.set_duty(1.5f, -3.0f);
     run(b, MotorBridge::WAKE_TICKS + 1);
     CHECK(port.inputs[0].in2_high == 0.0f);
     CHECK(port.inputs[1].in1_high == 0.0f);
+}
+
+TEST_CASE("motor bridge: disarmed, it stays asleep and drops every command")
+{
+    fake::HBridge port;
+    MotorBridge   b(port, AMPS_PER_COUNT); // built disarmed
+    b.set_duty(0.5f, 0.5f);
+    b.set_motor_duty(1, -0.5f);
+    b.wake();
+    run(b, LOOP_TICKS(0.1f));
+    CHECK(b.state() == MotorBridge::State::kAsleep);
+    CHECK_FALSE(port.awake);
+    CHECK(coasting(port.inputs[0]));
+    CHECK(coasting(port.inputs[1]));
+
+    // Armed and woken, the drivers brake: the commands given disarmed are gone.
+    CHECK_FALSE(b.armed());
+    b.arm();
+    CHECK(b.armed());
+    b.wake();
+    run(b, MotorBridge::WAKE_TICKS + 1);
+    CHECK(b.state() == MotorBridge::State::kAwake);
+    CHECK(braking(port.inputs[0]));
+    CHECK(braking(port.inputs[1]));
+}
+
+TEST_CASE("motor bridge: disarm() cuts at once and refuses commands until arm()")
+{
+    fake::HBridge port;
+    MotorBridge   b(port, AMPS_PER_COUNT);
+    b.arm();
+    b.set_duty(0.8f, 0.8f);
+    run(b, MotorBridge::WAKE_TICKS + 1);
+    REQUIRE(port.awake);
+
+    b.disarm(); // no tick needed
+    CHECK_FALSE(b.armed());
+    CHECK_FALSE(port.awake);
+    CHECK(coasting(port.inputs[0]));
+    b.set_duty(0.3f, 0.3f);
+    run(b, LOOP_TICKS(0.1f));
+    CHECK_FALSE(port.awake);
+}
+
+TEST_CASE("motor bridge: one motor's duty is set without touching the other's")
+{
+    fake::HBridge port;
+    MotorBridge   b(port, AMPS_PER_COUNT);
+    b.arm();
+    b.set_duty(0.5f, -0.25f);
+    b.set_motor_duty(1, 0.4f);
+    b.set_motor_duty(0, 2.0f); // clamped like set_duty
+    run(b, MotorBridge::WAKE_TICKS + 1);
+    CHECK(port.inputs[0].in1_high == 1.0f);
+    CHECK(port.inputs[0].in2_high == 0.0f);
+    CHECK(port.inputs[1].in1_high == 1.0f);
+    CHECK(port.inputs[1].in2_high == doctest::Approx(0.6f));
 }

@@ -14,12 +14,13 @@
 //   flood        queues 64 KB at once, to show the TX ring dropping and counting
 //   profile      this board's UID and profile, or the presets to pick from
 //   profile <n>  saves preset n as this board's profile (erases a flash sector)
-//   arm          says whether this board may arm; nothing moves in bring-up
+//   arm          arms the motor drivers, once the board profile is known
+//   disarm       puts the motor drivers to sleep and refuses commands again
 //   logfill      fills the run log (in CCM) with a full ring of synthetic samples
 //   log          dumps the run log as TRACE CSV rows
 //   motor        motor driver state and IPROPI current (boards with drivers)
-//   motor <l> <r> drives the motors at duty l, r in [-1, 1]; 0 0 brakes,
-//                and a second of braking puts the drivers to sleep
+//   motor <l> <r> drives the motors at duty l, r in [-1, 1] (armed only);
+//                0 0 brakes, and a second of braking puts the drivers to sleep
 //   motor sleep  puts the drivers to sleep now
 //   emitters     IR emitter crosstalk self-test (no emitters wired until rev1)
 // At boot it prints why the chip last reset (RCC_CSR) and what the previous
@@ -79,17 +80,18 @@ hal::stm32::HBridge motor_port;
 MotorBridge motors(motor_port, ipropiAmpsPerCount(board::ADC_FULL_SCALE_VOLTS, 4096.0f,
                                                   board::IPROPI_OHMS, DRV8874_AIPROPI_UA_PER_A));
 
-/// The bring-up firmware never arms and drives no fan or IR emitters yet.
-/// The motor drivers are put to sleep before every save, so an erase that
-/// stalls the tick cannot leave a motor driven. The tickets that add the fan
-/// and emitters must force them off here too.
+/// A save is refused while armed. The motor drivers are put to sleep before
+/// every save, so an erase that stalls the tick cannot leave a motor driven.
+/// No fan or IR emitters are driven yet: the tickets that add them must force
+/// them off here too.
 class BringupSaveGuard final : public SaveGuard
 {
   public:
     SaveBlocker prepareForSave() override
     {
-        motors.sleep();
-        return saveBlocker({false, motors.awake(), false, false});
+        if (!motors.armed())
+            motors.sleep();
+        return saveBlocker({motors.armed(), motors.awake(), false, false});
     }
 };
 
@@ -222,6 +224,11 @@ void motorCommand(const char* arg)
     {
         motors.sleep();
     }
+    else if (*arg != '\0' && !motors.armed())
+    {
+        std::printf("motor: disarmed, arm first\n");
+        return;
+    }
     else if (*arg != '\0')
     {
         char*       end   = nullptr;
@@ -236,7 +243,8 @@ void motorCommand(const char* arg)
         motors.set_duty(left, right);
     }
     static const char* const STATE_NAMES[] = {"asleep", "waking", "awake"};
-    std::printf("motor: %s, IPROPI left %.3f A right %.3f A\n",
+    std::printf("motor: %s, %s, IPROPI left %.3f A right %.3f A\n",
+                motors.armed() ? "armed" : "disarmed",
                 STATE_NAMES[static_cast<int>(motors.state())], static_cast<double>(motors.amps(0)),
                 static_cast<double>(motors.amps(1)));
 }
@@ -283,6 +291,26 @@ void pickProfile(const char* arg)
     printProfile();
 }
 
+// Arming needs a known board: until then the drivers stay asleep and every
+// motor command is dropped (MotorBridge's arm gate).
+void arm()
+{
+    if (!identity->armAllowed())
+    {
+        std::printf("arm: refused, unknown board (see profile)\n");
+        return;
+    }
+    motors.arm();
+    motors.wake(); // so the first move does not wait out tWAKE
+    std::printf("arm: armed\n");
+}
+
+void disarm()
+{
+    motors.disarm();
+    std::printf("disarm: motor drivers asleep\n");
+}
+
 void runLine()
 {
     line[line_len] = '\0';
@@ -297,8 +325,9 @@ void runLine()
     else if (std::strncmp(line, "profile ", 8) == 0)
         pickProfile(line + 8);
     else if (std::strcmp(line, "arm") == 0)
-        std::printf(identity->armAllowed() ? "arm: allowed\n"
-                                           : "arm: refused, unknown board (see profile)\n");
+        arm();
+    else if (std::strcmp(line, "disarm") == 0)
+        disarm();
     else if (std::strcmp(line, "logfill") == 0)
         fillRunLog();
     else if (std::strcmp(line, "log") == 0)
@@ -310,7 +339,9 @@ void runLine()
     else if (std::strcmp(line, "emitters") == 0)
         runEmitterCheck(ir_bank);
     else if (line_len > 0)
-        std::printf("unknown: %s (try stats, flood, profile, arm, logfill, log, motor, emitters)\n", line);
+        std::printf("unknown: %s (try stats, flood, profile, arm, disarm, logfill, log, motor, "
+                    "emitters)\n",
+                    line);
     if (line_len > 0)
         Breadcrumb::noteActivity("idle");
     line_len = 0;

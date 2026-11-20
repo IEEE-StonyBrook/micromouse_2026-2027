@@ -32,11 +32,15 @@
  * boot) the offset is 0, so amps read high by the ADC's offset. IPROPI
  * cannot tell direction: amps are magnitudes.
  *
+ * Arming: the bridge is built disarmed. Disarmed, it stays asleep and drops
+ * every command and wake(), so nothing a caller does can drive a motor until
+ * the board has armed it; disarm() also sleeps the drivers at once.
+ *
  * Threading: update() belongs to the control tick, once per tick.
- * set_duty(), wake() and sleep() may be called from the tick or the main
- * loop; they take hal::irq::Lock. sleep() acts at once, so a caller that
- * needs the drivers off (a flash save, the crash watchdog) has them off
- * when it returns.
+ * set_duty(), set_motor_duty(), wake(), sleep(), arm() and disarm() may be
+ * called from the tick or the main loop; they take hal::irq::Lock. sleep()
+ * acts at once, so a caller that needs the drivers off (a flash save, the
+ * crash watchdog) has them off when it returns.
  */
 class MotorBridge
 {
@@ -49,11 +53,23 @@ class MotorBridge
     };
 
     /// amps_per_count converts IPROPI ADC counts into motor amps; see
-    /// ipropiAmpsPerCount(). Starts asleep; drives nSLEEP low.
+    /// ipropiAmpsPerCount(). Starts asleep and disarmed; drives nSLEEP low.
     MotorBridge(hal::HBridgePort& port, float amps_per_count);
 
-    /// Duty in [-1, 1] per motor, positive forward; 0 brakes.
+    /// Duty in [-1, 1] per motor, positive forward; 0 brakes. Dropped
+    /// while disarmed.
     void set_duty(float left, float right);
+
+    /// One motor's duty (0 left, 1 right); the other keeps its command.
+    void set_motor_duty(int motor, float duty);
+
+    /// Lets commands through. Does not wake the drivers: call wake() for that.
+    void arm();
+
+    /// Sleeps the drivers now and drops every command until arm().
+    void disarm();
+
+    bool armed() const { return armed_.load(); }
 
     /// Wakes the drivers with a zero (brake) command, e.g. on arming, so
     /// the first move does not wait out tWAKE.
@@ -93,8 +109,9 @@ class MotorBridge
     const float       amps_per_count_;
 
     // Written under hal::irq::Lock or from the tick.
-    float duty_[2]      = {0.0f, 0.0f};
-    bool  wake_request_ = false;
+    float             duty_[2]      = {0.0f, 0.0f};
+    bool              wake_request_ = false;
+    std::atomic<bool> armed_{false};
 
     std::atomic<uint8_t> state_{static_cast<uint8_t>(State::kAsleep)};
     std::atomic<float>   amps_[2] = {0.0f, 0.0f};

@@ -98,6 +98,7 @@ ISR_FUNCTIONS = [
     ("firmware/drivers/motor_bridge.cpp", "MotorBridge::sleepNow"),
     ("firmware/drivers/motor_bridge.cpp", "MotorBridge::sleep"),
     ("firmware/drivers/motor_bridge.cpp", "MotorBridge::set_duty"),
+    ("firmware/drivers/motor_bridge.cpp", "MotorBridge::set_motor_duty"),
     ("firmware/drivers/motor_bridge.cpp", "MotorBridge::readAmps"),
     ("firmware/hal/stm32/h_bridge.cpp", "HBridge::sample"),
     ("firmware/hal/stm32/h_bridge.cpp", "HBridge::setInputs"),

@@ -14,14 +14,40 @@ MotorBridge::MotorBridge(hal::HBridgePort& port, float amps_per_count)
 void MotorBridge::set_duty(float left, float right)
 {
     hal::irq::Lock lock;
+    if (!armed_.load())
+        return;
     duty_[0] = std::clamp(left, -1.0f, 1.0f);
     duty_[1] = std::clamp(right, -1.0f, 1.0f);
+}
+
+void MotorBridge::set_motor_duty(int motor, float duty)
+{
+    hal::irq::Lock lock;
+    if (!armed_.load())
+        return;
+    duty_[motor] = std::clamp(duty, -1.0f, 1.0f);
 }
 
 void MotorBridge::wake()
 {
     hal::irq::Lock lock;
-    wake_request_ = true;
+    if (armed_.load())
+        wake_request_ = true;
+}
+
+void MotorBridge::arm()
+{
+    armed_.store(true);
+}
+
+void MotorBridge::disarm()
+{
+    hal::irq::Lock lock;
+    armed_.store(false); // first, so no command slips in after the sleep
+    duty_[0]      = 0.0f;
+    duty_[1]      = 0.0f;
+    wake_request_ = false;
+    sleepNow();
 }
 
 void MotorBridge::sleep()
