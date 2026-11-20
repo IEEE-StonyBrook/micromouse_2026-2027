@@ -7,10 +7,8 @@
 
 #ifdef PICO_BUILD
 #include "config/config.h"
-#include "hardware/structs/vreg_and_chip_reset.h"
-#include "hardware/watchdog.h"
-#include "pico/platform/sections.h"
-#include "pico/time.h"
+#include "hal/system.h"
+#include "hal/time.h"
 #endif
 
 namespace
@@ -29,7 +27,7 @@ struct Live
 
 // Must not land in .bss: crt0 zeroes that, which would erase the history of the
 // very reset we are trying to explain.
-Live __uninitialized_ram(live_crumb);
+Live HAL_NOINIT(live_crumb);
 #endif
 } // namespace
 
@@ -81,7 +79,7 @@ void Breadcrumb::noteActivity(const char* text)
     std::strncpy(live_crumb.last_log, text, sizeof(live_crumb.last_log) - 1);
     live_crumb.last_log[sizeof(live_crumb.last_log) - 1] = '\0';
     // Stamped here rather than in noteVoltage() so the 500 Hz path never reads the clock.
-    live_crumb.uptime_ms = to_ms_since_boot(get_absolute_time());
+    live_crumb.uptime_ms = hal::time::nowMs();
 #else
     (void)text;
 #endif
@@ -90,11 +88,12 @@ void Breadcrumb::noteActivity(const char* text)
 void Breadcrumb::report()
 {
 #ifdef PICO_BUILD
-    const uint32_t bits     = vreg_and_chip_reset_hw->chip_reset;
-    const bool     had_por  = (bits & VREG_AND_CHIP_RESET_CHIP_RESET_HAD_POR_BITS) != 0;
-    const bool     had_run  = (bits & VREG_AND_CHIP_RESET_CHIP_RESET_HAD_RUN_BITS) != 0;
-    const bool     had_psm  = (bits & VREG_AND_CHIP_RESET_CHIP_RESET_HAD_PSM_RESTART_BITS) != 0;
-    const bool     software = watchdog_caused_reboot();
+    const hal::system::ResetCause cause    = hal::system::resetCause();
+    const uint32_t                bits     = cause.raw;
+    const bool                    had_por  = cause.power_on;
+    const bool                    had_run  = cause.run_pin;
+    const bool                    had_psm  = cause.debugger;
+    const bool                    software = cause.watchdog;
 
     const Snapshot& prev     = previous_;
     const char*     activity = (prev.last_log[0] != '\0') ? prev.last_log : "(nothing logged yet)";
