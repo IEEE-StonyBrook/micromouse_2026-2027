@@ -36,6 +36,7 @@ constexpr uint8_t  RX_STREAM = 1;
 constexpr hal::stm32::UsartBrr BRR =
     hal::stm32::usartBrr(hal::stm32::BUSES.pclk1_hz, board::CONSOLE.baud);
 static_assert(BRR.exact, "console baud rate does not divide the APB1 clock");
+static_assert(BRR.in_range, "console baud rate is out of the USART divider range");
 
 // In .bss, which the linker script keeps in SRAM: the DMA cannot reach CCM.
 TxRing<2048>      tx_ring;

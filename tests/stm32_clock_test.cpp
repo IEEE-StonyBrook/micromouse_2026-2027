@@ -75,6 +75,14 @@ TEST_CASE("Timer divisors give a 1 MHz count and a 1 kHz tick from 84 MHz")
     CHECK_FALSE(timerDivisors(84000000, 5000000, 1000).valid); // 84 / 5 = 16.8
 }
 
+TEST_CASE("Timer divisors refuse a PSC or ARR past the 16-bit registers")
+{
+    CHECK(timerDivisors(84000000, 1000000, 16).valid);       // ARR 62499
+    CHECK_FALSE(timerDivisors(84000000, 1000000, 10).valid); // ARR 99999
+    CHECK(timerDivisors(65536000, 1000, 1).valid);           // PSC 65535
+    CHECK_FALSE(timerDivisors(84000000, 1000, 1).valid);     // PSC 83999
+}
+
 TEST_CASE("USART BRR is exact for 1 Mbaud on either APB")
 {
     constexpr UsartBrr apb1 = usartBrr(42000000, 1000000);
@@ -87,6 +95,18 @@ TEST_CASE("USART BRR is exact for 1 Mbaud on either APB")
     const UsartBrr slow = usartBrr(42000000, 115200);
     CHECK(slow.brr == 365); // 364.58 rounds up
     CHECK_FALSE(slow.exact);
+    CHECK(slow.in_range);
+}
+
+TEST_CASE("USART BRR refuses a divider under 1 or past 16 bits, even when exact")
+{
+    CHECK(usartBrr(42000000, 1000000).in_range);
+    const UsartBrr too_fast = usartBrr(42000000, 3000000); // USARTDIV 0.875
+    CHECK(too_fast.exact);
+    CHECK_FALSE(too_fast.in_range);
+    const UsartBrr too_slow = usartBrr(42000000, 600); // 70000 > 0xFFFF
+    CHECK(too_slow.exact);
+    CHECK_FALSE(too_slow.in_range);
 }
 
 TEST_CASE("SPI divider is the smallest power of two that keeps under the device limit")

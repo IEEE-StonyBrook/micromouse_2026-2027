@@ -135,9 +135,10 @@ constexpr uint32_t flashWaitStates(uint32_t hclk_hz)
 }
 
 /// Timer prescaler and auto-reload: PSC + 1 = clock / count, ARR + 1 = count / rate.
+/// Sized for a 16-bit timer such as TIM7.
 struct TimerDivisors
 {
-    bool     valid; ///< Both ratios divide exactly and PSC fits 16 bits
+    bool     valid; ///< Both ratios divide exactly and PSC and ARR fit 16 bits
     uint32_t psc;
     uint32_t arr;
 };
@@ -150,11 +151,12 @@ constexpr TimerDivisors timerDivisors(uint32_t timer_clk_hz, uint32_t count_hz,
         count_hz % overflow_hz != 0)
         return d;
     const uint32_t psc_plus_1 = timer_clk_hz / count_hz;
-    if (psc_plus_1 > 65536)
+    const uint32_t arr_plus_1 = count_hz / overflow_hz;
+    if (psc_plus_1 > 65536 || arr_plus_1 > 65536)
         return d;
     d.valid = true;
     d.psc   = psc_plus_1 - 1;
-    d.arr   = count_hz / overflow_hz - 1;
+    d.arr   = arr_plus_1 - 1;
     return d;
 }
 
@@ -162,14 +164,17 @@ constexpr TimerDivisors timerDivisors(uint32_t timer_clk_hz, uint32_t count_hz,
 struct UsartBrr
 {
     uint16_t brr;
-    bool     exact; ///< The real baud rate equals the requested one
+    bool     exact;    ///< The real baud rate equals the requested one
+    bool     in_range; ///< USARTDIV is at least 1 and BRR fits 16 bits
 };
 
 constexpr UsartBrr usartBrr(uint32_t pclk_hz, uint32_t baud)
 {
-    UsartBrr r{};
-    r.brr   = static_cast<uint16_t>((pclk_hz + baud / 2) / baud);
-    r.exact = pclk_hz % baud == 0;
+    UsartBrr       r{};
+    const uint32_t div = (pclk_hz + baud / 2) / baud;
+    r.brr              = static_cast<uint16_t>(div);
+    r.exact            = pclk_hz % baud == 0;
+    r.in_range         = div >= 16 && div <= 0xFFFF;
     return r;
 }
 
