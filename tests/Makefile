@@ -18,6 +18,8 @@ FIRMWARE_SRCS := ../firmware/maze/maze_setting.cpp ../firmware/hal/console.cpp \
                  ../firmware/navigation/path_converter.cpp \
                  ../firmware/navigation/route_planner.cpp ../firmware/navigation/run_time.cpp
 FAKE_SRCS     := $(wildcard fakes/*.cpp)
+# The physics sim library; sim/physim_main.cpp is its CLI, with its own main().
+SIM_SRCS      := $(filter-out sim/physim_main.cpp,$(wildcard sim/*.cpp))
 
 .PHONY: test
 test:
@@ -37,11 +39,11 @@ build-tests/doctest_main.o: main.cpp
 	mkdir -p build-tests
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-host_tests: build-tests/doctest_main.o $(TEST_SRCS) $(FAKE_SRCS) $(FIRMWARE_SRCS) $(LIB)
-	$(CXX) $(CXXFLAGS) build-tests/doctest_main.o $(TEST_SRCS) $(FAKE_SRCS) $(FIRMWARE_SRCS) $(LIB) -o $@
+host_tests: build-tests/doctest_main.o $(TEST_SRCS) $(FAKE_SRCS) $(SIM_SRCS) $(FIRMWARE_SRCS) $(LIB)
+	$(CXX) $(CXXFLAGS) build-tests/doctest_main.o $(TEST_SRCS) $(FAKE_SRCS) $(SIM_SRCS) $(FIRMWARE_SRCS) $(LIB) -o $@
 
-host_tests_1k: build-tests/doctest_main.o $(TEST_SRCS) $(FAKE_SRCS) $(FIRMWARE_SRCS) $(LIB_1K)
-	$(CXX) $(CXXFLAGS) $(DEFS_1K) build-tests/doctest_main.o $(TEST_SRCS) $(FAKE_SRCS) $(FIRMWARE_SRCS) $(LIB_1K) -o $@
+host_tests_1k: build-tests/doctest_main.o $(TEST_SRCS) $(FAKE_SRCS) $(SIM_SRCS) $(FIRMWARE_SRCS) $(LIB_1K)
+	$(CXX) $(CXXFLAGS) $(DEFS_1K) build-tests/doctest_main.o $(TEST_SRCS) $(FAKE_SRCS) $(SIM_SRCS) $(FIRMWARE_SRCS) $(LIB_1K) -o $@
 
 .PHONY: clean
 clean:
