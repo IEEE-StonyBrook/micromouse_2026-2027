@@ -44,6 +44,11 @@ RouteBounds routeBounds(MazeMouse& maze, const std::array<int, 2>& start,
 std::vector<std::array<int, 2>> unprovenRouteCells(MazeMouse& maze, const std::array<int, 2>& start,
                                                    const std::vector<std::array<int, 2>>& goals);
 
+/// Mark explored every unexplored cell whose four walls are already known
+/// from its neighbours: it has nothing left to sense, and the speed run, which
+/// plans over explored cells only, may then use it. Returns how many changed.
+int markKnownCellsExplored(MazeMouse& maze);
+
 /// True while the route is unproven, an optimistic route exists, and neither
 /// cap is spent.
 bool keepProving(const RouteBounds& bounds, int legs, uint32_t elapsed_ms,

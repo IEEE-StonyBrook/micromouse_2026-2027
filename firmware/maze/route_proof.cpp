@@ -157,6 +157,23 @@ std::vector<std::array<int, 2>> unprovenRouteCells(MazeMouse& maze, const std::a
     return cells;
 }
 
+int markKnownCellsExplored(MazeMouse& maze)
+{
+    int marked = 0;
+    for (int x = 0; x < maze.mazeWidth(); ++x)
+    {
+        for (int y = 0; y < maze.mazeHeight(); ++y)
+        {
+            Cell* cell = maze.cellAt(x, y);
+            if (cell == nullptr || cell->explored() || cell->hasUnknownWalls())
+                continue;
+            cell->markExplored();
+            ++marked;
+        }
+    }
+    return marked;
+}
+
 bool keepProving(const RouteBounds& bounds, int legs, uint32_t elapsed_ms,
                  const RouteProofCaps& caps)
 {

@@ -138,6 +138,34 @@ static void nearestGoalCellCounts()
     CHECK(bounds.proven());
 }
 
+// A cell whose four sides were all seen from its neighbours has nothing left
+// to sense, so it counts as explored without a visit, and the proof that
+// failed for the unentered cell above now holds.
+static void fullyWalledCellNeedsNoVisit()
+{
+    Maze      maze(2, 3);
+    MazeMouse mm({0, 0}, "n", {{2, 0}}, &maze);
+    visit(maze, 0, 0, "0011");
+    visit(maze, 0, 1, "1001");
+    visit(maze, 1, 1, "1010");
+    visit(maze, 2, 1, "1100");
+    // (2,0)'s south and east are the maze edge, known from the start.
+    maze.cell(2, 0)->setWall('S');
+    maze.cell(2, 0)->setWall('E');
+
+    // (1,0): N from (1,1), W from (0,0), but S and E unseen. (2,0): N, E, S
+    // known, W unseen. Neither is complete yet.
+    CHECK(markKnownCellsExplored(mm) == 0);
+
+    maze.cell(1, 0)->setWall('S');
+    maze.cell(1, 0)->setExit('E');
+    CHECK(markKnownCellsExplored(mm) == 2);
+    CHECK(maze.cell(1, 0)->explored());
+    CHECK(maze.cell(2, 0)->explored());
+    CHECK(routeBounds(mm, {0, 0}, {{2, 0}}).proven());
+    CHECK(markKnownCellsExplored(mm) == 0);
+}
+
 static void capsStopTheProof()
 {
     const RouteProofCaps caps{/*max_legs=*/10, /*max_ms=*/1000};
@@ -159,6 +187,7 @@ int main()
     freshMazeIsUnproven();
     fewestUnexploredRouteIsChosen();
     nearestGoalCellCounts();
+    fullyWalledCellNeedsNoVisit();
     capsStopTheProof();
     if (failures == 0)
         std::printf("PASS: route proof\n");
