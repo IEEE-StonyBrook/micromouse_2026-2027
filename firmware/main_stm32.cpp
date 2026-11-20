@@ -6,6 +6,8 @@
 // it echoes what it receives and answers these lines:
 //   stats  tick timing, encoders, IMU, console drop counters, memory use
 //   flood  queues 64 KB at once, to show the TX ring dropping and counting
+//   logfill  fills the run log (in CCM) with a full ring of synthetic samples
+//   log      dumps the run log as TRACE CSV rows
 // Memory use and tick timing are also left in `memory_usage` and `tick_stats`
 // for a debugger to read.
 
@@ -16,6 +18,7 @@
 #include <libopencm3/stm32/gpio.h>
 
 #include "config/board_feather.h"
+#include "control/run_log.h"
 #include "drivers/lsm6dsr.h"
 #include "hal/console.h"
 #include "hal/stm32/clock.h"
@@ -94,6 +97,46 @@ void flood()
                 hal::console::stm32::txRingDroppedBytes() - before, static_cast<uint32_t>(took_us));
 }
 
+// A ramp in every field, so a dump shows the CCM ring survives a full wrap:
+// row i reads pos_mm = i (mod CAPACITY + 7).
+void fillRunLog()
+{
+    RunLog& log = runLog();
+    log.start();
+    for (int i = 0; i < RunLog::CAPACITY + 7; ++i)
+    {
+        RunLog::Sample s;
+        s.pos_mm   = static_cast<float>(i);
+        s.yaw_deg  = static_cast<float>(i % 360 - 180);
+        s.fwd_mmps = static_cast<float>(i % 1500);
+        s.events   = static_cast<uint16_t>(i & 0x7f);
+        log.record(s);
+    }
+    log.stop();
+    std::printf("run log: %u samples, %u bytes in CCM at %p\n", log.count(),
+                static_cast<unsigned>(sizeof(RunLog)), static_cast<void*>(&log));
+}
+
+// Each sample is unpacked into a stack copy and formatted into a stack row
+// (both SRAM) before the console copies it into its DMA ring: DMA cannot
+// read CCM. Paced so the 2 KB TX ring never drops a row.
+void dumpRunLog()
+{
+    RunLog& log = runLog();
+    log.stop();
+    const uint16_t count = log.count();
+    const uint16_t dt_ms = log.dtMs();
+    std::printf("TRACE n=%u dt_ms=%u cols=%s\n", count, dt_ms, RunLog::COLUMNS);
+    for (uint16_t i = 0; i < count; ++i)
+    {
+        char row[RunLog::ROW_BYTES];
+        RunLog::formatRow(row, sizeof row, i, dt_ms, log.sample(i));
+        std::printf("%s\n", row);
+        hal::time::sleepMs(1); // ~100 bytes take 1 ms at 1 Mbaud
+    }
+    std::printf("TRACE end\n");
+}
+
 void runLine()
 {
     line[line_len] = '\0';
@@ -101,8 +144,12 @@ void runLine()
         printStats();
     else if (std::strcmp(line, "flood") == 0)
         flood();
+    else if (std::strcmp(line, "logfill") == 0)
+        fillRunLog();
+    else if (std::strcmp(line, "log") == 0)
+        dumpRunLog();
     else if (line_len > 0)
-        std::printf("unknown: %s (try stats, flood)\n", line);
+        std::printf("unknown: %s (try stats, flood, logfill, log)\n", line);
     line_len = 0;
 }
 
