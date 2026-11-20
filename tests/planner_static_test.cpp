@@ -2,8 +2,10 @@
 // golden file recorded from the original std::vector/priority_queue planners,
 // and planning allocates nothing but the path it returns.
 //
-// Rewrite the golden file (only after a planner change meant to change routes):
-//   PLANNER_GOLDEN_OUT=planner_golden.txt ./host_tests -tc="planner*golden*"
+// Rewrite the golden files (only after a planner change meant to change routes),
+// once with clang/libc++ and once with GCC/libstdc++:
+//   PLANNER_GOLDEN_OUT=planner_golden_libcxx.txt ./host_tests -tc="planner*golden*"
+//   PLANNER_GOLDEN_OUT=planner_golden_libstdcxx.txt ./host_tests -tc="planner*golden*"
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -46,7 +48,15 @@ void operator delete(void* p, std::size_t) noexcept
 namespace
 {
 const char* const CORPUS_DIR  = "../sim/mazes";
-const char* const GOLDEN_FILE = "planner_golden.txt";
+// libc++ and libstdc++ implement std::push_heap/pop_heap differently, so
+// equal-cost A* entries pop in a different order and tied routes differ. Each
+// standard library gets its own golden file, both recorded from the planners
+// before they moved to static buffers; route lengths agree across the two.
+#ifdef _LIBCPP_VERSION
+const char* const GOLDEN_FILE = "planner_golden_libcxx.txt";
+#else
+const char* const GOLDEN_FILE = "planner_golden_libstdcxx.txt";
+#endif
 
 // Fixed numbers, as in route_planner_test.cpp, so retuning the mouse leaves
 // the golden routes valid.
