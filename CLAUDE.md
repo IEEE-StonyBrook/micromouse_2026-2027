@@ -298,7 +298,7 @@ The option bytes survive reflashing and mass erase. At the factory default
 (BOR off) only the 1.8 V power-down reset catches a sag, which reads as a
 power-up, or a power fault if the breadcrumb survived.
 
-Simulator: `cd sim && make`, producing `sim/bin/simulator`.
+Simulator: `cd sim && make`, producing `sim/bin/Micromouse.out`.
 
 ESP32-C3 BLE bridge (the STM32 CLI over a Nordic UART Service; radio off while
 armed via ESP32 EN): see [`esp32/README.md`](esp32/README.md). Tests with
