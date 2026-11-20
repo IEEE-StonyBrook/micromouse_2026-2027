@@ -4,7 +4,8 @@
  *
  * Simulates a competition run with mms (Micromouse Simulator):
  *   1. Search: iterative A* without diagonals to the goal
- *   2. Return: iterative A* without diagonals back to start
+ *   2. Return: iterative A* without diagonals back to start, exploring on the
+ *      way until the best start-to-goal route is proven
  *   3. Speed Run: diagonalized A* for optimal time
  *
  * Usage: Micromouse.out ["<size> <goals>"], the same text as the firmware's
@@ -49,6 +50,7 @@ int main(int argc, char** argv)
     MazeMouse maze_mouse(start, "n", goals, &maze);
     Mouse     mouse(&maze_mouse);
     mouse.run_on_simulator = true;
+    mouse.set_route_proof(true);
     mouse.setUp(start, goals);
 
     // Phase 1: SEARCH - Iterative A* to the goal, sensing walls and replanning

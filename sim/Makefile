@@ -9,7 +9,7 @@ SIM_SRCS = main.cpp
 
 # Firmware sources (algorithm code only, no hardware)
 MAZE_SRCS = ../firmware/maze/maze.cpp ../firmware/maze/maze_mouse.cpp \
-            ../firmware/maze/maze_setting.cpp
+            ../firmware/maze/maze_setting.cpp ../firmware/maze/route_proof.cpp
 NAV_SRCS = ../firmware/navigation/flood_fill.cpp \
            ../firmware/navigation/a_star.cpp \
            ../firmware/navigation/path_utils.cpp \

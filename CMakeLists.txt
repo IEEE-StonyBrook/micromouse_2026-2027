@@ -52,6 +52,7 @@ set(MAZE_SOURCES
     firmware/maze/maze.cpp
     firmware/maze/maze_mouse.cpp
     firmware/maze/maze_setting.cpp
+    firmware/maze/route_proof.cpp
 )
 
 set(NAVIGATION_SOURCES
