@@ -7,6 +7,7 @@ CXXFLAGS := -std=c++17 -Wall -Wextra -Werror -I../firmware
 test: encoder_history_test maze_setting_test
 	./encoder_history_test
 	./maze_setting_test
+	CXX="$(CXX)" sh host_compile.sh
 	@if $(CXX) $(CXXFLAGS) -fsyntax-only range_assert_fires.cpp 2>&1 | grep -q "encoder history"; \
 	then echo "PASS: range static_assert fires past the history range"; \
 	else echo "FAIL: range static_assert did not fire"; exit 1; fi
@@ -22,3 +23,4 @@ maze_setting_test: maze_setting_test.cpp ../firmware/maze/maze_setting.cpp \
 .PHONY: clean
 clean:
 	rm -f encoder_history_test maze_setting_test
+	rm -rf build-host
