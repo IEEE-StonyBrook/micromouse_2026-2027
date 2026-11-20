@@ -105,8 +105,8 @@ class FakeLsm6dsr : public hal::SpiDevice
 TEST_CASE("LSM6DSR raw counts convert at the datasheet sensitivities")
 {
     // FS = 2000 dps: 70 mdps/LSB. FS = +/-8 g: 0.244 mg/LSB.
-    CHECK(lsm6dsr::gyroDps(1000) == doctest::Approx(70.0f));
-    CHECK(lsm6dsr::gyroDps(-32768) == doctest::Approx(-2293.76f));
+    CHECK(lsm6dsr::gyroDegps(1000) == doctest::Approx(70.0f));
+    CHECK(lsm6dsr::gyroDegps(-32768) == doctest::Approx(-2293.76f));
     CHECK(lsm6dsr::accelG(4096) == doctest::Approx(0.999424f));
     CHECK(lsm6dsr::accelG(-4096) == doctest::Approx(-0.999424f));
 }
@@ -181,14 +181,14 @@ TEST_CASE("LSM6DSR FIFO read averages this tick's gyro words into a yaw rate")
     fake.pushWord(lsm6dsr::kTagGyro, 0, 0, 2000);  // 140 dps
     fake.pushWord(0x03, 1, 2, 3);                  // temperature: skipped
     CHECK(imu.readFifo() == 4);
-    CHECK(imu.yawRateDps() == doctest::Approx(105.0f)); // mean of 70 and 140
+    CHECK(imu.yawRateDegps() == doctest::Approx(105.0f)); // mean of 70 and 140
     CHECK(imu.accelZG() == doctest::Approx(0.999424f));
     CHECK(imu.gyroSamples() == 2);
     CHECK(imu.accelSamples() == 1);
 
     // An empty FIFO keeps the last rate rather than reporting zero.
     CHECK(imu.readFifo() == 0);
-    CHECK(imu.yawRateDps() == doctest::Approx(105.0f));
+    CHECK(imu.yawRateDegps() == doctest::Approx(105.0f));
 }
 
 TEST_CASE("LSM6DSR yaw sign follows how the board is mounted")
@@ -198,7 +198,7 @@ TEST_CASE("LSM6DSR yaw sign follows how the board is mounted")
     REQUIRE(upside_down.init() == Lsm6dsr::Status::kOk);
     fake.pushWord(lsm6dsr::kTagGyro, 0, 0, 1000);
     upside_down.readFifo();
-    CHECK(upside_down.yawRateDps() == doctest::Approx(-70.0f));
+    CHECK(upside_down.yawRateDegps() == doctest::Approx(-70.0f));
 }
 
 TEST_CASE("LSM6DSR FIFO read is capped per tick and counts overruns")

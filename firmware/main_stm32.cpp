@@ -100,7 +100,7 @@ void printStats()
                 encoder_right.count());
     std::printf("imu %s yaw %.2f dps accel z %.3f g, %" PRIu32 " gyro %" PRIu32
                 " accel samples, %" PRIu32 " fifo overruns\n",
-                imu_ready ? "ok" : "off", static_cast<double>(imu.yawRateDps()),
+                imu_ready ? "ok" : "off", static_cast<double>(imu.yawRateDegps()),
                 static_cast<double>(imu.accelZG()), imu.gyroSamples(), imu.accelSamples(),
                 imu.fifoOverruns());
     std::printf("console ring dropped %" PRIu32 " gate dropped %" PRIu32 " rx idle %" PRIu32

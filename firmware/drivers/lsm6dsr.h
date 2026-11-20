@@ -15,13 +15,13 @@ namespace lsm6dsr
 constexpr uint8_t WHO_AM_I_VALUE = 0x6B;
 
 /// Gyro sensitivity at FS = 2000 dps: 70 mdps/LSB.
-constexpr float GYRO_DPS_PER_LSB = 0.070f;
+constexpr float GYRO_DEGPS_PER_LSB = 0.070f;
 /// Accel sensitivity at FS = +/-8 g: 0.244 mg/LSB.
 constexpr float ACCEL_G_PER_LSB = 0.000244f;
 
-constexpr float gyroDps(int16_t raw)
+constexpr float gyroDegps(int16_t raw)
 {
-    return static_cast<float>(raw) * GYRO_DPS_PER_LSB;
+    return static_cast<float>(raw) * GYRO_DEGPS_PER_LSB;
 }
 
 constexpr float accelG(int16_t raw)
@@ -63,7 +63,7 @@ constexpr bool fifoOverrun(uint8_t status2)
  *        batched into the FIFO in continuous mode and drained every tick.
  *
  * The gyro runs at 1.66 kHz and the accel at 833 Hz, so a 1 kHz tick reads
- * one or two gyro words; yawRateDps() is their mean, which filters rather
+ * one or two gyro words; yawRateDegps() is their mean, which filters rather
  * than samples the gyro and keeps the ODR from aliasing against the tick.
  *
  * Yaw is positive counter-clockwise seen from above. The gyro's Z axis points
@@ -95,7 +95,7 @@ class Lsm6dsr
     uint32_t readFifo(uint32_t max_words = 8);
 
     /// Mean yaw rate over the last read that held gyro data, deg/s, + = CCW.
-    float yawRateDps() const { return yaw_rate_dps_; }
+    float yawRateDegps() const { return yaw_rate_degps_; }
 
     /// Latest acceleration along each chip axis, in g.
     float accelXG() const { return lsm6dsr::accelG(accel_raw_[0]); }
@@ -113,11 +113,11 @@ class Lsm6dsr
 
     hal::SpiDevice& spi_;
     int             yaw_sign_;
-    float           yaw_rate_dps_  = 0.0f;
-    int16_t         accel_raw_[3]  = {0, 0, 0};
-    uint32_t        gyro_samples_  = 0;
-    uint32_t        accel_samples_ = 0;
-    uint32_t        fifo_overruns_ = 0;
+    float           yaw_rate_degps_ = 0.0f;
+    int16_t         accel_raw_[3]   = {0, 0, 0};
+    uint32_t        gyro_samples_   = 0;
+    uint32_t        accel_samples_  = 0;
+    uint32_t        fifo_overruns_  = 0;
 };
 
 #endif // DRIVERS_LSM6DSR_H

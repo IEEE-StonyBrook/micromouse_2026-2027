@@ -138,7 +138,7 @@ uint32_t Lsm6dsr::readFifo(uint32_t max_words)
     if (gyro_count > 0)
     {
         const float mean_raw = static_cast<float>(gyro_z_sum) / static_cast<float>(gyro_count);
-        yaw_rate_dps_        = static_cast<float>(yaw_sign_) * mean_raw * lsm6dsr::GYRO_DPS_PER_LSB;
+        yaw_rate_degps_ = static_cast<float>(yaw_sign_) * mean_raw * lsm6dsr::GYRO_DEGPS_PER_LSB;
         gyro_samples_ += gyro_count;
     }
     return words;
