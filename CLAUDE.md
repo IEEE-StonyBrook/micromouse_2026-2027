@@ -74,6 +74,12 @@ Only `hal/pico/`, the driver `.cpp` files, `app/`, `driver_lab/*.cpp` and
 enforces this, and `make -C tests` compiles the platform-neutral code against
 `hal/host`.
 
+`make -C tests` also builds and runs `tests/host_tests`, the doctest unit tests
+(`tests/*_test.cpp`) for Profile, PID, Drivetrain, Motion and the maze parser.
+`tests/fakes/` stands in for the Motor, Encoder and IMU drivers on the host and
+adds a first-order two-wheel plant, so control changes can be tested without a
+mouse. Add a test case to a `*_test.cpp` file; the Makefile picks new files up.
+
 Run `ls firmware/<layer>` for the current file list; it is authoritative and
 this document is not.
 
