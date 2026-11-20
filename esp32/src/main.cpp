@@ -17,6 +17,7 @@
 #include "bridge.h"
 #include "nimble/nimble/host/include/host/ble_gatt.h"
 #include "nimble/nimble/host/include/host/ble_hs_mbuf.h"
+#include "nimble/porting/nimble/include/os/os_mbuf.h"
 
 namespace
 {
@@ -29,6 +30,11 @@ constexpr const char* NUS_TX      = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E";
 // 40 ms of input at 1 Mbaud, so a slow loop pass never overruns the driver.
 constexpr size_t   UART_RX_BUFFER_BYTES = 4096;
 constexpr uint32_t STATS_PERIOD_MS      = 5000;
+// NimBLE queues a notification in its shared mbuf pool (12 blocks by default)
+// rather than failing when the radio is busy. Leave this many blocks free so
+// the host stack can still answer writes, MTU and parameter requests while
+// the uplink streams.
+constexpr int MSYS_HEADROOM_BLOCKS = 4;
 
 HardwareSerial stm32_uart(1);
 
@@ -48,7 +54,7 @@ class ServerCallbacks : public NimBLEServerCallbacks
             std::lock_guard<std::mutex> lock(bridge_mutex);
             bridge_state.set_connected(false);
         }
-        NimBLEDevice::startAdvertising();
+        // NimBLEServer restarts advertising itself after this returns.
     }
 
     void onMTUChange(uint16_t mtu, ble_gap_conn_desc*) override
@@ -89,13 +95,17 @@ class RxCallbacks : public NimBLECharacteristicCallbacks
 };
 
 // Sends one notification through the raw NimBLE host API, because it reports
-// failure synchronously: when the controller's buffers are full the mbuf
-// allocation or the notify fails, the bytes stay in the bridge and the next
-// loop pass retries them. That is the uplink's flow control.
+// failure synchronously. NimBLE queues notifications until the radio sends
+// them, so the uplink's flow control is the mbuf pool: below the headroom, or
+// on any failure, the bytes stay in the bridge and the next loop pass retries.
 bool notify(const uint8_t* data, size_t n)
 {
     uint16_t handle = conn_handle;
     if (handle == BLE_HS_CONN_HANDLE_NONE)
+    {
+        return false;
+    }
+    if (os_msys_num_free() < MSYS_HEADROOM_BLOCKS)
     {
         return false;
     }
