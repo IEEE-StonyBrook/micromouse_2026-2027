@@ -3,8 +3,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <initializer_list>
 #include <limits>
 #include <memory>
+#include <string>
 
 #include "config/motion.h"
 #include "control/run_log.h"
