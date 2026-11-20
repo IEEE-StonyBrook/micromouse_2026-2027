@@ -53,6 +53,11 @@ Params nominal()
     const float m_eff_kg  = MOTOR_TM * ke_g * ke_g / (p.winding_ohm * r_m * r_m);
     p.rotating_mass_kg    = m_eff_kg - p.mass_kg / 2.0f;
 
+    // The identified model is V = v / Km + kS: the feedforward's kS cancels
+    // this friction, so the plant must carry it or kS over-drives every move.
+    p.friction_v_left  = FORWARD_KSL;
+    p.friction_v_right = FORWARD_KSR;
+
     p.mu_left                  = 1.0f;
     p.mu_right                 = 1.0f;
     p.tyre_stiffness_n_per_mps = 100.0f;
@@ -160,7 +165,22 @@ void Robot::substep(float h)
         const float amps    = (w->volts - ke_g * w->tyre_mps / r_m) / p_.winding_ohm;
         const float drive_n = ke_g * amps / r_m;
         const float t_n     = (w == &left_) ? t_l : t_r;
-        w->tyre_mps += (drive_n - t_n) / p_.rotating_mass_kg * h;
+        const float fric_v  = (w == &left_) ? p_.friction_v_left : p_.friction_v_right;
+        // Friction force at the tyre: the stall current of fric_v through the gearbox.
+        const float fric_n = ke_g * fric_v / (p_.winding_ohm * r_m);
+        const float net_n  = drive_n - t_n;
+        if (w->tyre_mps == 0.0f && std::fabs(net_n) <= fric_n)
+        {
+            // Stuck: friction holds the gearbox until the net force beats it.
+        }
+        else
+        {
+            const float dir   = (w->tyre_mps != 0.0f) ? std::copysign(1.0f, w->tyre_mps)
+                                                      : std::copysign(1.0f, net_n);
+            const float v_new = w->tyre_mps + (net_n - dir * fric_n) / p_.rotating_mass_kg * h;
+            // Friction stops the wheel; it never drives it backwards.
+            w->tyre_mps = (v_new * dir < 0.0f) ? 0.0f : v_new;
+        }
         if (w == pinned_)
             w->tyre_mps = 0.0f;
         w->tyre_m += w->tyre_mps * h;

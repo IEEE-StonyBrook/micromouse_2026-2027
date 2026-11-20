@@ -32,12 +32,11 @@ TEST_CASE("physim: nominal smooth 90 ends within 1 deg")
     CHECK(std::fabs(r.yaw_deg - 90.0f) < 1.0f);
 }
 
-// Known gap, kept visible rather than hidden: a lone start_turn() spin leads
-// its profile by ~2-3 deg (the PD integrates the encoder averager's delayed
-// yaw), and the motors cut when the profile ends, so the robot coasts to ~93
-// deg (~92 at 1 kHz). The first-order fake::Robot shows the same. In a maze
-// run the next move's rotation PD pulls most of it back.
-TEST_CASE("physim: nominal in-place 90 ends within 1 deg" * doctest::may_fail())
+// The plant carries the kS friction the feedforward cancels. Without it the
+// spin overran by ~3 deg: kS over-drove the wheels, the rotation PD held
+// ~-1.7 deg of error against it until the profile ended and cut the motors,
+// and the frictionless gearbox coasted on.
+TEST_CASE("physim: nominal in-place 90 ends within 1 deg")
 {
     const physim::Result r = physim::run(physim::Scenario::kInPlace90, physim::nominal());
     REQUIRE(r.finished);
@@ -99,9 +98,11 @@ TEST_CASE("physim: a coarse encoder costs straight-line distance accuracy")
 {
     const physim::Result nominal = straight(physim::nominal());
     physim::Params       p       = physim::nominal();
-    p.counts_per_mm_left         = 0.2f; // 5 mm per count, ~15x coarser than today
-    p.counts_per_mm_right        = 0.2f;
-    const physim::Result r       = straight(p);
+    // 10 mm per count, ~30x coarser than today. At 5 mm the kS friction stops
+    // the wheels close enough to a count edge that the 1 kHz run landed 2.4 mm off.
+    p.counts_per_mm_left   = 0.1f;
+    p.counts_per_mm_right  = 0.1f;
+    const physim::Result r = straight(p);
     CHECK(std::fabs(r.distance_mm - TEN_CELLS_MM) >
           std::fabs(nominal.distance_mm - TEN_CELLS_MM) + 3.0f);
 }

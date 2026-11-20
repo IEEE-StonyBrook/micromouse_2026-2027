@@ -83,6 +83,10 @@ struct Params
     float back_emf_vs_per_rad = 0.0f; // = torque constant, N m / A, at the motor shaft
     float gear_ratio          = 0.0f;
     float rotating_mass_kg    = 0.0f; // rotor and wheel inertia reflected to the tyre, per wheel
+    // Coulomb friction in the motor and gearbox, as the voltage that just
+    // overcomes it: the kS the OL sweep identifies and the feedforward adds.
+    float friction_v_left  = 0.0f;
+    float friction_v_right = 0.0f;
 
     // Traction: a stiff tyre up to a friction limit of mu * (wheel load).
     float      mu_left                  = 0.0f;

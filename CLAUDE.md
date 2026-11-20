@@ -99,8 +99,8 @@ too and tested in `reset_report_test.cpp`.
 `tests/fakes/` stands in for the Motor, Encoder and IMU drivers on the host and
 adds a first-order two-wheel plant, so control changes can be tested without a
 mouse. `tests/sim/` grows that into a physics sim: a DC-motor, two-wheel
-plant with knobs for wheel slip, encoder resolution, gyro noise and bias, a
-floor seam and a pinned wheel, tested in `physim_test.cpp` and
+plant with knobs for motor friction (kS), wheel slip, encoder resolution, gyro
+noise and bias, a floor seam and a pinned wheel, tested in `physim_test.cpp` and
 `crash_physim_test.cpp`. `make -C tests physim` builds a CLI
 (`tests/physim --scenario straight10|ip90|ss90 ...`) that prints a CSV trace.
 Add a test case to a `*_test.cpp` file; the Makefile picks new files up.
