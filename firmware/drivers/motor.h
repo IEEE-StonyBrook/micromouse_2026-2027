@@ -7,9 +7,6 @@
 
 #include "common/log.h"
 #include "config/config.h"
-#include "hardware/gpio.h"
-#include "hardware/pwm.h"
-#include "pico/stdlib.h"
 
 /**
  * @brief DC Motor driver using TB6552FNG with hardware inverter
@@ -60,11 +57,11 @@ class Motor
     void setup_pins();
     void setup_pwm();
 
-    int  dir_pin_;
-    int  pwm_pin_;
-    uint pwm_slice_;
-    uint pwm_channel_;
-    bool invert_direction_;
+    int      dir_pin_;
+    int      pwm_pin_;
+    unsigned pwm_slice_;
+    unsigned pwm_channel_;
+    bool     invert_direction_;
 
     // Set by set_motor_volts() in the control interrupt when the battery reads
     // under 1 V. Shared by both motors; plain load/store is lock-free on M0+.

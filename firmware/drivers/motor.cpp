@@ -1,5 +1,9 @@
 #include "drivers/motor.h"
 
+#include "hardware/gpio.h"
+#include "hardware/pwm.h"
+#include "pico/stdlib.h"
+
 std::atomic<bool> Motor::battery_fallback_{false};
 
 Motor::Motor(int dir_pin, int pwm_pin, bool invert_direction)
