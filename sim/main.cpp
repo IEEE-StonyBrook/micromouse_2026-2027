@@ -6,9 +6,14 @@
  *   1. Search: iterative A* without diagonals to the goal
  *   2. Return: iterative A* without diagonals back to start
  *   3. Speed Run: diagonalized A* for optimal time
+ *
+ * Usage: Micromouse.out ["<size> <goals>"], the same text as the firmware's
+ * MAZE command, e.g. "16 7,7..8,8". Without it the bot assumes a 16x16 maze
+ * with goal (2, 2). mms cannot report goal cells, so the caller passes them.
  */
 
 #include <array>
+#include <string>
 #include <vector>
 
 #include "app/mouse.h"
@@ -16,17 +21,31 @@
 #include "config/geometry.h"
 #include "maze/maze.h"
 #include "maze/maze_mouse.h"
+#include "maze/maze_setting.h"
 #include "navigation/path_utils.h"
 
-int main()
+int main(int argc, char** argv)
 {
     LOG_INFO("=== MICROMOUSE COMPETITION SIMULATOR ===\n");
 
-    // Initialize 16x16 maze with center goal
-    std::array<int, 2>              start = {0, 0};
-    std::vector<std::array<int, 2>> goals = {{2, 2}};
+    MazeSetting setting;
+    setting.size  = MAZE_SIZE;
+    setting.goals = {{2, 2}};
+    if (argc > 1)
+    {
+        std::string error;
+        if (!parseMazeSetting(argv[1], MAZE_SIZE, setting, error))
+        {
+            LOG_ERROR("Bad maze setting \"" + std::string(argv[1]) + "\": " + error);
+            return 2;
+        }
+    }
+    LOG_INFO("Maze " + mazeSettingText(setting));
 
-    Maze      maze(MAZE_SIZE, MAZE_SIZE);
+    std::array<int, 2>                     start = {0, 0};
+    const std::vector<std::array<int, 2>>& goals = setting.goals;
+
+    Maze      maze(setting.size, setting.size);
     MazeMouse maze_mouse(start, "n", goals, &maze);
     Mouse     mouse(&maze_mouse);
     mouse.run_on_simulator = true;
