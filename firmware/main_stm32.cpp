@@ -6,7 +6,8 @@
 
 #include <libopencm3/cm3/systick.h>
 
-#include "hal/stm32/board_feather.h"
+#include "config/board_feather.h"
+#include "hal/stm32/gpio.h"
 #include "hal/stm32/memory.h"
 
 namespace
@@ -28,8 +29,7 @@ extern "C" void sys_tick_handler()
 
 int main()
 {
-    rcc_periph_clock_enable(board::LED_RCC);
-    gpio_mode_setup(board::LED_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, board::LED_PIN);
+    hal::stm32::gpioOutput(board::LED);
 
     systick_set_clocksource(STK_CSR_CLKSOURCE_AHB);
     systick_set_reload(HSI_HZ / TICK_HZ - 1);
@@ -43,7 +43,7 @@ int main()
         if (uptime_ms - last_toggle_ms >= BLINK_HALF_MS)
         {
             last_toggle_ms += BLINK_HALF_MS;
-            gpio_toggle(board::LED_PORT, board::LED_PIN);
+            gpio_toggle(hal::stm32::gpioPort(board::LED), hal::stm32::gpioBit(board::LED));
 
             const hal::stm32::MemoryUsage usage = hal::stm32::memoryUsage();
             memory_usage.heap_peak_bytes        = usage.heap_peak_bytes;
