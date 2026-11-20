@@ -1,7 +1,7 @@
 # Host tests: the platform-neutral firmware, built against hal/host with no
 # Pico SDK, plus the doctest unit tests that run on it. Run with `make -C tests`.
 CXX      ?= g++
-CXXFLAGS := -std=c++17 -Wall -Wextra -Werror -I../firmware -isystem ../third_party -I.
+CXXFLAGS := -std=c++17 -ffp-contract=off -Wall -Wextra -Werror -I../firmware -isystem ../third_party -I.
 OUT      := build-host
 LIB      := $(OUT)/libfirmware_host.a
 # The same suite rebuilt at the STM32's 1 kHz loop rate (config/board.h).
