@@ -406,8 +406,8 @@ static void runDriverLabMode(Battery* battery, SensorMode sensor_mode)
     printf("\n=== DriverLab ===\n");
     printf("Battery: %.2f V\n", battery->voltage());
 
-    Encoder left_encoder(pio0, PIN_ENCODER_L_A, false);
-    Encoder right_encoder(pio0, PIN_ENCODER_R_A, true);
+    Encoder left_encoder(hal::PioBlock::kPio0, PIN_ENCODER_L_A, false);
+    Encoder right_encoder(hal::PioBlock::kPio0, PIN_ENCODER_R_A, true);
     Motor   left_motor(PIN_MOTOR_L_DIR, PIN_MOTOR_L_PWM, true);
     Motor   right_motor(PIN_MOTOR_R_DIR, PIN_MOTOR_R_PWM, true);
     IMU     imu(PIN_IMU_RX);
@@ -524,8 +524,8 @@ static void runMouseAppMode(Battery* battery, SensorMode sensor_mode, bool compe
         static LineSensor line_sensor(i2c0, PIN_LINE_SDA, PIN_LINE_SCL);
         line_sensor.begin();
 
-        static Encoder left_encoder(pio0, PIN_ENCODER_L_A, false);
-        static Encoder right_encoder(pio0, PIN_ENCODER_R_A, true);
+        static Encoder left_encoder(hal::PioBlock::kPio0, PIN_ENCODER_L_A, false);
+        static Encoder right_encoder(hal::PioBlock::kPio0, PIN_ENCODER_R_A, true);
         static Motor   left_motor(PIN_MOTOR_L_DIR, PIN_MOTOR_L_PWM, true);
         static Motor   right_motor(PIN_MOTOR_R_DIR, PIN_MOTOR_R_PWM, true);
         static IMU     imu(PIN_IMU_RX);
@@ -546,8 +546,8 @@ static void runMouseAppMode(Battery* battery, SensorMode sensor_mode, bool compe
         // below. The CLI's main loop (cli.loop()) handles serial I/O and
         // polls ToFs at 50 Hz, exactly like mazerunner-core's Arduino
         // loop() / Timer2 split.
-        static Encoder    left_encoder(pio0, PIN_ENCODER_L_A, false);
-        static Encoder    right_encoder(pio0, PIN_ENCODER_R_A, true);
+        static Encoder    left_encoder(hal::PioBlock::kPio0, PIN_ENCODER_L_A, false);
+        static Encoder    right_encoder(hal::PioBlock::kPio0, PIN_ENCODER_R_A, true);
         static Motor      left_motor(PIN_MOTOR_L_DIR, PIN_MOTOR_L_PWM, true);
         static Motor      right_motor(PIN_MOTOR_R_DIR, PIN_MOTOR_R_PWM, true);
         static IMU        imu(PIN_IMU_RX);

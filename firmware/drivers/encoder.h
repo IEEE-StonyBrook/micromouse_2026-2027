@@ -5,9 +5,7 @@
 
 #include "common/log.h"
 #include "config/config.h"
-#include "hardware/pio.h"
-#include "pico/stdlib.h"
-#include "quadrature_encoder/QuadratureEncoder.h"
+#include "hal/peripherals.h"
 
 /**
  * @brief Quadrature encoder reader using PIO hardware
@@ -21,11 +19,11 @@ class Encoder
   public:
     /**
      * @brief Constructs encoder reader with PIO configuration
-     * @param pio_instance PIO hardware instance (pio0 or pio1)
+     * @param pio_block PIO block that runs the decoder program
      * @param gpio_pin Base GPIO pin (channel B assumed to be next sequential pin)
      * @param invert_direction If true, inverts tick count direction
      */
-    Encoder(PIO pio_instance, int gpio_pin, bool invert_direction = false);
+    Encoder(hal::PioBlock pio_block, int gpio_pin, bool invert_direction = false);
 
     /**
      * @brief Resets encoder tick count to zero
@@ -39,13 +37,13 @@ class Encoder
     int ticks() const;
 
   private:
-    void load_pio_program(PIO pio_instance);
+    void load_pio_program();
 
-    const PIO pio_instance_;
-    uint      state_machine_;
-    int       offset_ticks_;
-    bool      invert_direction_;
-    int       gpio_pin_;
+    const hal::PioBlock pio_block_;
+    unsigned            state_machine_;
+    int                 offset_ticks_;
+    bool                invert_direction_;
+    int                 gpio_pin_;
 };
 
 #endif
