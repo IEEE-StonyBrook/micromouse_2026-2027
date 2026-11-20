@@ -72,6 +72,10 @@ template <typename Raw, typename Wide> class CounterExtender
 
 /// TIM5's 32-bit microsecond count widened to 64 bits (wraps after 584 000 years).
 using TimeExtender = CounterExtender<uint32_t, uint64_t>;
+
+/// An encoder timer's 16-bit count widened to signed 32 bits. Sampled at
+/// 1 kHz, it holds up to 32767 counts per millisecond either way.
+using EncoderExtender = CounterExtender<uint16_t, int32_t>;
 } // namespace hal::stm32
 
 #endif // HAL_STM32_COUNTER_EXTENDER_H
