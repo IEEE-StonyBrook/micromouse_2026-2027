@@ -1081,7 +1081,21 @@ void Motion::applyCommand(const Command& command)
         case Op::ResetWallSteeringStats:
             clearWallSteeringStats();
             break;
-        default:
+        // Fully applied by applyCommanded(); listed so a new Op trips -Wswitch.
+        case Op::StartMove:
+        case Op::StartTurn:
+        case Op::SpinTurn:
+        case Op::ResetRotation:
+        case Op::StopAt:
+        case Op::StopAfter:
+        case Op::StopForward:
+        case Op::SetPosition:
+        case Op::AdjustPosition:
+        case Op::SetTargetVelocity:
+        case Op::SetFinalVelocity:
+        case Op::ExtendMove:
+        case Op::SetLineSteering:
+        case Op::ClearLineSteering:
             break;
     }
 }
