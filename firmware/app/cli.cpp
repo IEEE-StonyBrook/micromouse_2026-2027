@@ -30,6 +30,7 @@
 #include "drivers/tof.h"
 #include "maze/maze.h"
 #include "maze/maze_mouse.h"
+#include "maze/maze_setting.h"
 #include "navigation/path_utils.h"
 
 namespace
@@ -383,6 +384,55 @@ void CommandLineInterface::drainConsole()
 
     Log::drainBluetooth();
     deps_.bluetooth->drain();
+}
+
+void CommandLineInterface::printMazeSetting()
+{
+    MazeSetting setting;
+    setting.size  = deps_.maze_size;
+    setting.goals = deps_.goal_cells;
+    printFormat("Maze: %s\n", mazeSettingText(setting).c_str());
+}
+
+void CommandLineInterface::handle_maze_command(const Args& args)
+{
+    if (args.argc < 2)
+    {
+        printMazeSetting();
+        return;
+    }
+    if (comp_armed_)
+    {
+        printFormat("MAZE refused while COMP is armed.\n");
+        return;
+    }
+
+    // tokenise() splits on commas too, so "16 7,7..8,8" arrives as
+    // 16 | 7 | 7..8 | 8. Rejoin the goal tokens with commas for the parser.
+    std::string text = args.argv[1];
+    for (int i = 2; i < args.argc; ++i)
+        text += (i == 2 ? " " : ",") + std::string(args.argv[i]);
+
+    // The Maze grid is allocated once at boot and keeps its boundary walls there;
+    // a smaller size only bounds the goals. It can never exceed the grid.
+    const int   max_size = deps_.maze != nullptr ? deps_.maze->width() : MAZE_SIZE;
+    MazeSetting setting;
+    std::string error;
+    if (!parseMazeSetting(text, max_size, setting, error))
+    {
+        printFormat("MAZE rejected: %s\n", error.c_str());
+        return;
+    }
+
+    deps_.maze_size  = setting.size;
+    deps_.goal_cells = setting.goals;
+    // setUp() carries the goals into Mouse and MazeMouse; it also returns the
+    // pose to the start cell. Known walls are kept.
+    if (deps_.mouse != nullptr)
+        deps_.mouse->setUp(deps_.start_cell, deps_.goal_cells);
+    else if (deps_.maze_mouse != nullptr)
+        deps_.maze_mouse->reset(deps_.start_cell, "n", deps_.goal_cells);
+    printMazeSetting();
 }
 
 void CommandLineInterface::greet()
@@ -756,6 +806,11 @@ void CommandLineInterface::run_long_cmd(const Args& args)
     if (std::strcmp(args.argv[0], "SMOOTH") == 0)
     {
         handle_smooth_command(args);
+        return;
+    }
+    if (std::strcmp(args.argv[0], "MAZE") == 0)
+    {
+        handle_maze_command(args);
         return;
     }
     if (std::strcmp(args.argv[0], "HALT") == 0)
@@ -2819,6 +2874,7 @@ void CommandLineInterface::help()
     printFormat(" 14 = \n");
     printFormat(" 15 = \n");
     printFormat("SEARCH x y : search to location (x,y)\n");
+    printFormat("MAZE [size goals] : show or set maze size and goals, e.g. MAZE 16 7,7..8,8\n");
     printFormat("S : sensor snapshot (ToF or LineSensor)\n");
     printFormat("LINE STATUS : readable line sensor snapshot\n");
     printFormat("LINE START/STOP/LEFT/RIGHT : LineSensor mode control\n");

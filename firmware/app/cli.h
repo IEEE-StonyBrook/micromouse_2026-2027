@@ -68,11 +68,15 @@ class CommandLineInterface
         SensorMode                      sensor_mode   = SensorMode::TOF;
         std::array<int, 2>              start_cell    = {0, 0};
         std::vector<std::array<int, 2>> goal_cells    = {};
+        // Side of the square maze being run, in cells. Goals must lie inside it.
+        int maze_size = 0;
     };
 
     explicit CommandLineInterface(const Deps& deps);
 
     void greet();
+    // Prints maze size and goals so a practice setting can't reach a contest unnoticed.
+    void printMazeSetting();
     void loop();
     void runCompetitionMode();
     void runCheeseHuntMode();
@@ -112,6 +116,7 @@ class CommandLineInterface
     void handle_center_command(const Args& args);
     void handle_line_command(const Args& args);
     void handle_smooth_command(const Args& args);
+    void handle_maze_command(const Args& args);
     void printSmoothTuning();
     bool run_smooth_turn_trial(bool turn_left);
     bool waitForLineStartButton();
