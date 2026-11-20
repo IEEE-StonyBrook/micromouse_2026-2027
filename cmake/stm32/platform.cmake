@@ -33,6 +33,7 @@ add_executable(Jurababa_stm32
     ${STM32_HAL_SOURCES}
     firmware/common/board_identity.cpp
     firmware/common/breadcrumb.cpp
+    firmware/common/emitter_check.cpp
     firmware/common/flash_store.cpp
     firmware/common/reset_report.cpp
     firmware/control/run_log.cpp

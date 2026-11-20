@@ -29,8 +29,6 @@ class IrBank
     static constexpr std::size_t kMaxChannels = 4;
     static constexpr int         kAllOff      = -1;
 
-    virtual ~IrBank() = default;
-
     /// Emitter/receiver pairs on this board, 0..kMaxChannels.
     virtual std::size_t channels() const = 0;
 
@@ -38,6 +36,11 @@ class IrBank
     /// to settle, reads every receiver's raw ADC counts into
     /// counts[0..channels()), and leaves every emitter off on return.
     virtual void readAll(int emitter, uint16_t* counts) = 0;
+
+  protected:
+    // Non-virtual and trivial, so a static bank needs no exit-time destructor
+    // (the STM32 link has no __dso_handle). Never deleted through IrBank*.
+    ~IrBank() = default;
 };
 
 /// Dark/lit read pairs averaged per emitter.

@@ -17,6 +17,7 @@
 //   arm          says whether this board may arm; nothing moves in bring-up
 //   logfill      fills the run log (in CCM) with a full ring of synthetic samples
 //   log          dumps the run log as TRACE CSV rows
+//   emitters     IR emitter crosstalk self-test (no emitters wired until rev1)
 // At boot it prints why the chip last reset (RCC_CSR) and what the previous
 // session was doing (the breadcrumb in .noinit SRAM): a brownout, a watchdog
 // timeout or the reset button. A 3 s independent watchdog, fed from the main
@@ -35,6 +36,7 @@
 
 #include "common/board_identity.h"
 #include "common/breadcrumb.h"
+#include "common/emitter_check.h"
 #include "common/flash_store.h"
 #include "config/board_feather.h"
 #include "control/run_log.h"
@@ -72,6 +74,17 @@ class BringupSaveGuard final : public SaveGuard
     SaveBlocker prepareForSave() override { return saveBlocker({false, false, false, false}); }
 };
 
+// TODO(rev1): the emitter and receiver pins are unknown until the rev1
+// schematic. Replace this with the TIM2/ADC2 IR bank then; until it lands,
+// `emitters` reports that the board has none.
+class NoIrBank final : public IrBank
+{
+  public:
+    std::size_t channels() const override { return 0; }
+    void        readAll(int, uint16_t*) override {}
+};
+
+NoIrBank               ir_bank;
 hal::stm32::StoreFlash store_flash;
 BringupSaveGuard       save_guard;
 hal::stm32::ChipUid    chip_uid;
@@ -239,8 +252,10 @@ void runLine()
         fillRunLog();
     else if (std::strcmp(line, "log") == 0)
         dumpRunLog();
+    else if (std::strcmp(line, "emitters") == 0)
+        runEmitterCheck(ir_bank);
     else if (line_len > 0)
-        std::printf("unknown: %s (try stats, flood, profile, arm, logfill, log)\n", line);
+        std::printf("unknown: %s (try stats, flood, profile, arm, logfill, log, emitters)\n", line);
     if (line_len > 0)
         Breadcrumb::noteActivity("idle");
     line_len = 0;
