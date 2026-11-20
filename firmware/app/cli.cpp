@@ -533,6 +533,7 @@ bool CommandLineInterface::process_serial_data()
     drainConsole();
     Motor::reportBatteryFallback();
     reportCrash();
+    reportLatchOverflows();
 
     if (deps_.battery != nullptr && deps_.sensor_mode != SensorMode::TOF)
         deps_.battery->update();
@@ -2110,6 +2111,7 @@ void CommandLineInterface::pollHaltOnly()
     // reported while process_serial_data() is not being polled.
     Motor::reportBatteryFallback();
     reportCrash();
+    reportLatchOverflows();
 
     int c = hal::console::getcNonBlocking();
     if (c >= 0)
@@ -2840,6 +2842,20 @@ void CommandLineInterface::reportCrash()
     halted_ = true;
 }
 
+void CommandLineInterface::reportLatchOverflows()
+{
+    // Main loop only: Motion::issue() counts a burst that filled the latch
+    // and was applied with interrupts masked; say so once per new burst.
+    if (deps_.motion == nullptr)
+        return;
+    const uint32_t overflows = deps_.motion->latchOverflows();
+    if (overflows == latch_overflows_reported_)
+        return;
+    latch_overflows_reported_ = overflows;
+    LOG_WARNING("Motion latch overflowed (" + std::to_string(overflows) +
+                " total): a command burst was applied from the main loop");
+}
+
 void CommandLineInterface::handle_crash_command(const Args& args)
 {
     if (deps_.motion == nullptr)
@@ -2868,6 +2884,8 @@ void CommandLineInterface::handle_crash_command(const Args& args)
                 crash.inhibited() ? "ON" : "OFF",
                 crash.tripped() ? crashCauseName(crash.cause()) : "clear",
                 static_cast<unsigned long>(crash.tripCount()));
+    printFormat("MOTION latch overflows %lu\n",
+                static_cast<unsigned long>(deps_.motion->latchOverflows()));
 }
 
 void CommandLineInterface::reset()

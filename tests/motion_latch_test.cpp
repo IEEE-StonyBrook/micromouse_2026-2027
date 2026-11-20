@@ -190,3 +190,18 @@ TEST_CASE("encoder reads straight after a queued reset start from zero")
     r->tick();
     CHECK(r->motion.encoder_ticks(WheelSide::LEFT) == 0);
 }
+
+TEST_CASE("a burst past the latch capacity is applied in order and counted")
+{
+    // With no tick to drain it, the 17th command finds the latch full: issue()
+    // applies the backlog itself and counts it for the main loop to report.
+    auto rig = std::make_unique<Rig>();
+    REQUIRE(rig->motion.latchOverflows() == 0);
+    for (int i = 1; i <= 17; i++)
+        rig->motion.set_position(static_cast<float>(i));
+    CHECK(rig->motion.latchOverflows() == 1);
+    CHECK(rig->motion.position() == doctest::Approx(17.0f));
+    rig->tick();
+    CHECK(rig->motion.position() == doctest::Approx(17.0f));
+    CHECK(rig->motion.latchOverflows() == 1);
+}
