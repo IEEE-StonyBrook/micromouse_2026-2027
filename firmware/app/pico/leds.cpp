@@ -122,6 +122,20 @@ void setBeaconFound()
     putPixel(grbPixel(0, kGoalBrightness, 0));
 }
 
+void showCrash(int cause)
+{
+    // Orange is used by nothing else, so a crash reads apart from an abort.
+    const uint32_t orange = grbPixel(kAbortBrightness, kAbortBrightness / 4, 0);
+    for (int i = 0; i < cause; ++i)
+    {
+        putPixel(orange);
+        sleep_ms(150);
+        putPixel(0);
+        sleep_ms(150);
+    }
+    putPixel(orange);
+}
+
 void setIdle()
 {
     putPixel(0);

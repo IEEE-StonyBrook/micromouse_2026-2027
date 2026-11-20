@@ -49,6 +49,12 @@ void setCheeseHunting();
 // Solid green once Cheese Hunt has deactivated the beacon.
 void setBeaconFound();
 
+// Crash watchdog cause code (CrashCause, 1-3): flashes orange cause times,
+// then holds solid orange until the next LED change. Blocking ~cause * 300
+// ms; called from the main loop after the control tick has already cut the
+// motors, so the wait costs nothing.
+void showCrash(int cause);
+
 // LED off.
 void setIdle();
 
