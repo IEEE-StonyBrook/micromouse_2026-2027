@@ -126,7 +126,7 @@ constexpr SpiConfig IMU_SPI = {
 // +1 with the breakout's chip face up (its Z axis pointing up), -1 face down,
 // so that positive yaw is counter-clockwise seen from above. UNVERIFIED: set
 // from the datasheet's axis drawing, not yet checked by turning the board.
-constexpr int IMU_YAW_SIGN = 1;
+constexpr int GYRO_YAW_SIGN = 1;
 } // namespace board
 
 #endif // CONFIG_BOARD_FEATHER_H

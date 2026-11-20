@@ -71,7 +71,7 @@ constexpr uint32_t CORE_MHZ      = hal::stm32::BUSES.hclk_hz / 1000000;
 hal::stm32::QuadCounter encoder_left;
 hal::stm32::QuadCounter encoder_right;
 hal::stm32::SpiBus      imu_spi;
-Lsm6dsr                 imu(imu_spi, board::IMU_YAW_SIGN);
+Lsm6dsr                 imu(imu_spi, board::GYRO_YAW_SIGN);
 volatile bool           imu_ready = false;
 
 // Until board::MOTOR_DRIVERS_FITTED, motor_port is never initialised and
