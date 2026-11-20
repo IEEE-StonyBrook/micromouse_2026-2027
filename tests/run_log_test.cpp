@@ -1,5 +1,6 @@
 // Run log: int16-packed samples with event bits in a fixed ring, decimated by
 // time. make -C tests runs this at 500 Hz and again at 1 kHz.
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -213,6 +214,29 @@ TEST_CASE("run log: decimation is by time, the same at 500 Hz and 1 kHz")
     while (!log->due())
         ++first;
     CHECK(first + 1 == LOOP_TICKS(0.008f));
+}
+
+TEST_CASE("run log: a period rounds to the nearest whole tick")
+{
+    // A period of exactly half a tick more (an odd ms at 500 Hz) may round
+    // either way: LOOP_TICKS rounds in float, where 0.251 s is not exact.
+    auto      log = freshLog();
+    const int hz  = static_cast<int>(LOOP_FREQUENCY_HZ);
+    for (int period_ms = 1; period_ms <= 1000; ++period_ms)
+    {
+        const int  twice   = 2 * period_ms * hz / 1000; // ticks x2, floored
+        const bool tie     = (2 * period_ms * hz) % 1000 == 0 && twice % 2 == 1;
+        const int  nearest = std::max(1, (period_ms * hz + 500) / 1000);
+        log->start(static_cast<uint16_t>(period_ms));
+        int ticks = 1;
+        while (!log->due())
+            ++ticks;
+        CAPTURE(period_ms);
+        if (tie)
+            CHECK((ticks == nearest || ticks == std::max(1, nearest - 1)));
+        else
+            CHECK(ticks == nearest);
+    }
 }
 
 TEST_CASE("run log: a period shorter than a tick samples every tick")

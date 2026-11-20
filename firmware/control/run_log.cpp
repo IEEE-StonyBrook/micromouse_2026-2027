@@ -3,7 +3,7 @@
 #include <cmath>
 #include <cstdio>
 
-#include "config/board.h"
+#include "config/motion.h"
 #include "hal/system.h"
 
 namespace
@@ -127,14 +127,13 @@ void RunLog::formatRow(char* out, size_t size, uint16_t index, uint16_t dt_ms, c
 
 void RunLog::start(uint16_t period_ms)
 {
-    active_ = false;
-    count_  = 0;
-    next_   = 0;
-    tick_   = 0;
-    const int ticks =
-        static_cast<int>(static_cast<float>(period_ms) * LOOP_FREQUENCY_HZ / 1000.0f + 0.5f);
-    period_ticks_ = static_cast<uint16_t>(ticks > 0 ? ticks : 1);
-    active_       = true;
+    active_         = false;
+    count_          = 0;
+    next_           = 0;
+    tick_           = 0;
+    const int ticks = LOOP_TICKS(static_cast<float>(period_ms) / 1000.0f);
+    period_ticks_   = static_cast<uint16_t>(ticks > 0 ? ticks : 1);
+    active_         = true;
 }
 
 void RunLog::stop()
