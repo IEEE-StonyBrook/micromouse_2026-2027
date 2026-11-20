@@ -60,6 +60,7 @@ set(NAVIGATION_SOURCES
     firmware/navigation/path_converter.cpp
     firmware/navigation/path_utils.cpp
     firmware/navigation/route_planner.cpp
+    firmware/navigation/run_time.cpp
     firmware/navigation/diagonalizer.cpp
 )
 
