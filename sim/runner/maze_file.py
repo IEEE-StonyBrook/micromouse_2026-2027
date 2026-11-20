@@ -5,6 +5,7 @@ and y grows north. Walls are stored once per cell side and mirrored onto the
 neighbouring cell, so a wall always reads the same from both sides.
 """
 
+import collections
 import os
 
 DIRECTIONS = "nesw"
@@ -39,6 +40,29 @@ class Maze:
 
     def wall(self, x, y, d):
         return d in self._walls[(x, y)]
+
+
+def shortest_route_cells(maze):
+    """Cells walked on the shortest start-to-goal route with every wall known, or None.
+
+    This is the cost the bot's speed-run planner minimises (one per cell
+    entered), so it is the best speed-run route the bot could find.
+    """
+    goals = set(maze.goals)
+    steps = {maze.start: 0}
+    queue = collections.deque([maze.start])
+    while queue:
+        cell = queue.popleft()
+        if cell in goals:
+            return steps[cell]
+        x, y = cell
+        for d in DIRECTIONS:
+            dx, dy = _STEP[d]
+            nxt = (x + dx, y + dy)
+            if not maze.wall(x, y, d) and maze.inside(*nxt) and nxt not in steps:
+                steps[nxt] = steps[cell] + 1
+                queue.append(nxt)
+    return None
 
 
 def centre_goals(width, height):

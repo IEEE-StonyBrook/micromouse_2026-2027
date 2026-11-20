@@ -12,12 +12,11 @@
 #include <vector>
 
 #ifndef SIMULATOR_BUILD
-#include "pico/stdlib.h"
-
 #include "app/leds.h"
 #include "config/motion.h"
 #include "control/motion.h"
 #include "drivers/beacon_ir.h"
+#include "hal/time.h"
 #endif
 #include "common/log.h"
 #include "common/tof_wall_utils.h"
@@ -26,6 +25,7 @@
 #include "config/smooth_turn.h"
 #include "maze/maze.h"
 #include "maze/maze_mouse.h"
+#include "maze/route_proof.h"
 #include "navigation/a_star.h"
 #include "navigation/diagonalizer.h"
 #include "navigation/path_converter.h"
@@ -126,9 +126,24 @@ constexpr uint32_t kMousePositionWaitTimeoutMs = 3000;
 
 bool timedOut(uint32_t start_ms, uint32_t timeout_ms)
 {
-    return timeout_ms > 0 &&
-           static_cast<uint32_t>(to_ms_since_boot(get_absolute_time()) - start_ms) >= timeout_ms;
+    return timeout_ms > 0 && static_cast<uint32_t>(hal::time::nowMs() - start_ms) >= timeout_ms;
 }
+#endif
+
+// Caps on exploring to prove the best route on the way home, one leg per cell
+// driven: 192 cells at search speed is about 86 s, and 90 s bounds the real
+// clock. On the corpus they cost 3 of 50 optimal speed runs and keep the
+// longest way home under 300 cells.
+constexpr RouteProofCaps kRouteProofCaps = {/*max_legs=*/192, /*max_ms=*/90000};
+// While proving, drive over known exits unless that is this many cells longer
+// than the route with unknown walls open: every unexplored cell crossed is
+// time spent sensing a cell the proof did not ask for.
+constexpr int kKnownRouteDetourCells = 4;
+#ifdef SIMULATOR_BUILD
+// The simulator has no clock worth reading, so time a proof leg as one cell at
+// search speed: 180 mm / 400 mm/s = 450 ms.
+constexpr uint32_t kRouteProofLegMs =
+    static_cast<uint32_t>(CELL_SIZE_MM * 1000.0f / ROBOT_MAX_SEARCH_SPEED_MMPS);
 #endif
 
 void logSearchStepInfo(const std::string& message)
@@ -362,7 +377,7 @@ template <typename Done> bool Mouse::pollUntil(Done done, uint32_t timeout_ms, c
     // mazerunner-core's `delay(2)` wait loops. Halt or timeout stops the drive.
     if (motion_ == nullptr)
         return false;
-    const uint32_t start_ms = to_ms_since_boot(get_absolute_time());
+    const uint32_t start_ms = hal::time::nowMs();
     while (!done())
     {
         serviceSensors();
@@ -380,7 +395,7 @@ template <typename Done> bool Mouse::pollUntil(Done done, uint32_t timeout_ms, c
             motion_->emergency_stop();
             return false;
         }
-        sleep_ms(2);
+        hal::time::sleepMs(2);
     }
     return !haltRequested();
 #else
@@ -1113,7 +1128,7 @@ bool Mouse::stopAtCentre()
     // is. 500 ms from the start of the approach, as in mazerunner.
     motion_->move(distance_mm, ROBOT_MAX_SEARCH_SPEED_MMPS, STOP_AT_CENTRE_FRONT_SPEED_MMPS,
                   ROBOT_SEARCH_ACCEL_MMPS2);
-    const uint32_t start_ms  = to_ms_since_boot(get_absolute_time());
+    const uint32_t start_ms  = hal::time::nowMs();
     bool           by_sensor = false;
     if (!pollUntil(
             [&]
@@ -1352,6 +1367,15 @@ bool Mouse::search_to(const std::vector<std::array<int, 2>>& goals)
     int                             goal_extra_steps   = 0;
     constexpr int                   kMaxGoalExtraSteps = 2;
 
+    // Way home with route proof: target unexplored cells on an optimistic best
+    // start-to-goal route until it is proven or a cap is spent.
+    const bool going_home = goals.size() == 1 && goals[0] == start_cell_;
+    bool       proving    = route_proof_ && going_home && !goal_cells_.empty();
+    int        proof_legs = 0;
+#ifndef SIMULATOR_BUILD
+    const uint32_t proof_start_ms = hal::time::nowMs();
+#endif
+
     int step = 1;
     while (true)
     {
@@ -1361,10 +1385,43 @@ bool Mouse::search_to(const std::vector<std::array<int, 2>>& goals)
             return false;
 
         update_map();
+        if (route_proof_)
+            markKnownCellsExplored(*maze_mouse_);
 
+        if (proving)
+        {
+#ifdef SIMULATOR_BUILD
+            const uint32_t proof_ms = static_cast<uint32_t>(proof_legs) * kRouteProofLegMs;
+#else
+            const uint32_t proof_ms = static_cast<uint32_t>(hal::time::nowMs() - proof_start_ms);
+#endif
+            const RouteBounds bounds = routeBounds(*maze_mouse_, start_cell_, goal_cells_);
+            std::vector<std::array<int, 2>> unproven;
+            if (keepProving(bounds, proof_legs, proof_ms, kRouteProofCaps))
+                unproven = unprovenRouteCells(*maze_mouse_, start_cell_, goal_cells_);
+            if (unproven.empty())
+            {
+                proving = false;
+                targets = goals;
+                LOG_INFO("search_to: route " +
+                         std::string(bounds.proven() ? "proven" : "unproven") +
+                         " known_cells=" + std::to_string(bounds.known_cells) +
+                         " optimistic_cells=" + std::to_string(bounds.optimistic_cells) + " legs=" +
+                         std::to_string(proof_legs) + " proof_ms=" + std::to_string(proof_ms));
+            }
+            else
+            {
+                targets = unproven;
+                ++proof_legs;
+            }
+        }
+
+        // While proving, passing through the start is not arriving home.
         bool reached_goal = false;
         for (const auto& goal : goals)
         {
+            if (proving)
+                break;
             if (current->x() == goal[0] && current->y() == goal[1])
             {
                 reached_goal = true;
@@ -1420,11 +1477,24 @@ bool Mouse::search_to(const std::vector<std::array<int, 2>>& goals)
         }
 
         AStar a_star(maze_mouse_);
-        // Way home: take an unexplored route unless it is ~1.5x longer.
-        if (goals.size() == 1 && goals[0] == start_cell_)
+        // Way home: take an unexplored route unless it is ~1.5x longer. Route
+        // proof picks its own cells to explore, so it prefers known exits.
+        if (going_home && !route_proof_)
             a_star.set_explored_cell_cost(0.5f);
         std::vector<Cell*> cell_path = a_star.cellPath(targets, /*diagonals=*/false,
                                                        /*pass_goals=*/true);
+        if (going_home && route_proof_ && !cell_path.empty())
+        {
+            maze_mouse_->setMazeMask(MASK_CLOSED);
+            AStar              known_a_star(maze_mouse_);
+            std::vector<Cell*> known_path = known_a_star.cellPath(targets, /*diagonals=*/false,
+                                                                  /*pass_goals=*/true);
+            maze_mouse_->setMazeMask(MASK_OPEN);
+            if (!known_path.empty() &&
+                static_cast<int>(known_path.size()) <=
+                    static_cast<int>(cell_path.size()) + kKnownRouteDetourCells)
+                cell_path = known_path;
+        }
         if (cell_path.empty())
         {
             LOG_ERROR("search_to: no path found from (" + std::to_string(current->x()) + "," +
@@ -1779,15 +1849,7 @@ bool Mouse::turn_to_face(const std::string& heading)
 void Mouse::blink(int count)
 {
 #ifndef SIMULATOR_BUILD
-    gpio_init(PICO_DEFAULT_LED_PIN);
-    gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
-    for (int i = 0; i < count; ++i)
-    {
-        gpio_put(PICO_DEFAULT_LED_PIN, 1);
-        sleep_ms(100);
-        gpio_put(PICO_DEFAULT_LED_PIN, 0);
-        sleep_ms(100);
-    }
+    board_led::blink(count);
 #else
     (void)count;
 #endif
@@ -2132,7 +2194,7 @@ void Mouse::print_turn_trace(float target_yaw_deg)
         {
             if (haltRequested())
                 return;
-            sleep_ms(2);
+            hal::time::sleepMs(2);
         }
     }
     // The SS90E line reads yaw while the IMU still lags the arc by ~40 ms.
@@ -2296,7 +2358,7 @@ void Mouse::conf_log_front_sensor()
     while (!motion_->move_finished() && !haltRequested())
     {
         front_sensor_track();
-        sleep_ms(TOF_MEASUREMENT_PERIOD_MS);
+        hal::time::sleepMs(TOF_MEASUREMENT_PERIOD_MS);
     }
     front_sensor_track();
     motion_->reset_drive_system();
@@ -2320,7 +2382,7 @@ void Mouse::conf_sensor_spin_calibrate()
     while (!motion_->turn_finished() && !haltRequested())
     {
         report_radial_track(false);
-        sleep_ms(TOF_MEASUREMENT_PERIOD_MS);
+        hal::time::sleepMs(TOF_MEASUREMENT_PERIOD_MS);
     }
     report_radial_track(false);
     motion_->reset_drive_system();
@@ -2363,7 +2425,7 @@ void Mouse::conf_edge_detection()
         }
         left_was_wall  = left_now;
         right_was_wall = right_now;
-        sleep_ms(TOF_MEASUREMENT_PERIOD_MS);
+        hal::time::sleepMs(TOF_MEASUREMENT_PERIOD_MS);
     }
     LOG_INFO("edge_detection: done left_logged=" + std::to_string(left_logged ? 1 : 0) +
              " right_logged=" + std::to_string(right_logged ? 1 : 0));

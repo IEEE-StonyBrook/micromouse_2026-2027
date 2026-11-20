@@ -1,8 +1,9 @@
 # Maze corpus
 
 The headless runner (`sim/runner/runner.py`) runs the sim bot over every maze
-here. Its CI job fails if any maze fails, and warns when a run is worse than
-`baseline.json`.
+here. Its CI job fails if any maze fails or if fewer than 90% of speed runs
+match the maze's true optimum (the shortest route with every wall known, in
+cells entered), and warns when a run is worse than `baseline.json`.
 
 ## classic/
 

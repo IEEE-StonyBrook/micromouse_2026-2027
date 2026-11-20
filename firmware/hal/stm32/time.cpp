@@ -14,11 +14,16 @@ uint32_t nowMs()
     return static_cast<uint32_t>(nowUs() / 1000);
 }
 
+// Both sleeps wake on every tick, so they overshoot by at most 1 ms. They
+// need the tick running (tick::start()); before that the clock reads 0.
+void sleepUntilUs(uint64_t deadline_us)
+{
+    while (nowUs() < deadline_us)
+        __asm__ volatile("wfi");
+}
+
 void sleepMs(uint32_t duration_ms)
 {
-    // Wakes on every tick, so the wait overshoots by at most 1 ms.
-    const uint64_t end_us = nowUs() + 1000ull * duration_ms;
-    while (nowUs() < end_us)
-        __asm__ volatile("wfi");
+    sleepUntilUs(nowUs() + 1000ull * duration_ms);
 }
 } // namespace hal::time

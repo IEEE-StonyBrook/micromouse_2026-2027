@@ -11,8 +11,6 @@
 #include <string>
 #include <vector>
 
-#include "pico/stdlib.h"
-
 #include "app/bluetooth.h"
 #include "app/bootsel_button.h"
 #include "app/leds.h"
@@ -30,6 +28,7 @@
 #include "drivers/motor.h"
 #include "drivers/tof.h"
 #include "hal/console.h"
+#include "hal/time.h"
 #include "maze/maze.h"
 #include "maze/maze_mouse.h"
 #include "maze/maze_setting.h"
@@ -458,8 +457,8 @@ void CommandLineInterface::loop()
     // alarm registered in main_pico.cpp for ToF mode. LineSensor mode has no
     // timer; the CLI loop advances LineFollower + Motion on this same 500 Hz
     // cadence.
-    const uint32_t  loop_period_us = static_cast<uint32_t>(LOOP_INTERVAL_S * 1.0e6f);
-    absolute_time_t next_tick      = make_timeout_time_us(loop_period_us);
+    const uint32_t loop_period_us = static_cast<uint32_t>(LOOP_INTERVAL_S * 1.0e6f);
+    uint64_t       next_tick_us   = hal::time::nowUs() + loop_period_us;
     while (true)
     {
         process_serial_data();
@@ -495,10 +494,10 @@ void CommandLineInterface::loop()
                     line_telemetry_counter_ = 0;
                     printLineRunningTelemetry();
                 }
-                // BOOTSEL poll at ~10 Hz (50 ticks @ 500 Hz). Reading the
+                // BOOTSEL poll at ~10 Hz (kLineButtonPollTicks). Reading the
                 // BOOTSEL pin briefly suspends XIP, so we keep the cadence
                 // low. A 100 ms latency on a panic-stop press is fine.
-                if (++line_button_poll_counter_ >= 50)
+                if (++line_button_poll_counter_ >= kLineButtonPollTicks)
                 {
                     line_button_poll_counter_ = 0;
                     if (abortRequested())
@@ -509,8 +508,8 @@ void CommandLineInterface::loop()
                         // Wait for release so the next LINE START doesn't
                         // immediately consume this still-held press.
                         while (abortRequested())
-                            sleep_ms(20);
-                        sleep_ms(150);
+                            hal::time::sleepMs(20);
+                        hal::time::sleepMs(150);
                     }
                 }
             }
@@ -523,8 +522,8 @@ void CommandLineInterface::loop()
             }
         }
 
-        sleep_until(next_tick);
-        next_tick = delayed_by_us(next_tick, loop_period_us);
+        hal::time::sleepUntilUs(next_tick_us);
+        next_tick_us += loop_period_us;
     }
 }
 
@@ -860,7 +859,7 @@ void CommandLineInterface::handle_search_command(const Args& args)
     printFormat("Search to %d,%d\n", x, y);
     // 20 ms samples: the 1500-sample buffer covers ~30 s, a whole bench search.
     // TRACE prints it.
-    deps_.motion->start_trace(10);
+    deps_.motion->start_trace(LOOP_TICKS(0.020f));
     std::vector<std::array<int, 2>> goals = {{x, y}};
     const bool                      ok    = deps_.mouse->search_to(goals);
     printFormat(ok ? "Search done.\n" : "Search failed.\n");
@@ -946,8 +945,8 @@ void CommandLineInterface::runCompetitionMode()
         printFormat("COMP paused. BOOTSEL again to resume; HALT or X to exit.\n");
 
         while (abortRequested())
-            sleep_ms(20);
-        sleep_ms(150);
+            hal::time::sleepMs(20);
+        hal::time::sleepMs(150);
 
         while (true)
         {
@@ -966,12 +965,12 @@ void CommandLineInterface::runCompetitionMode()
             if (c == 'X' || c == 'x')
                 return false;
 
-            sleep_ms(20);
+            hal::time::sleepMs(20);
         }
 
         while (abortRequested())
-            sleep_ms(20);
-        sleep_ms(150);
+            hal::time::sleepMs(20);
+        hal::time::sleepMs(150);
 
         printFormat("COMP resume.\n");
         return true;
@@ -1024,7 +1023,7 @@ void CommandLineInterface::runCompetitionMode()
                     active_stage     = 2;
                     trusted_snapshot = take_trusted_snapshot();
                     stage_led::setGoalReached();
-                    sleep_ms(1000);
+                    hal::time::sleepMs(1000);
                     ok = run_competition_stage(2, /*wait_for_start=*/false);
                 }
                 if (ok)
@@ -1045,7 +1044,7 @@ void CommandLineInterface::runCompetitionMode()
                         deps_.mouse->turn_IP180() &&
                         deps_.mouse->move_physical(-kBackToWallMm, kBackSpeedMmps, kBackAccelMmps2);
                     if (ok)
-                        sleep_ms(2500);
+                        hal::time::sleepMs(2500);
                 }
                 break;
 
@@ -1561,7 +1560,7 @@ bool CommandLineInterface::wait_path_segment_motion()
             deps_.motion->emergency_stop();
             return false;
         }
-        sleep_ms(2);
+        hal::time::sleepMs(2);
     }
     return true;
 }
@@ -2158,7 +2157,7 @@ void CommandLineInterface::run_function(int cmd)
                 deps_.mouse->setPhaseColor('y');
             printFormat("Searching maze...\n");
             if (deps_.motion != nullptr)
-                deps_.motion->start_trace(10); // 20 ms: TRACE after the run
+                deps_.motion->start_trace(LOOP_TICKS(0.020f)); // 20 ms: TRACE after the run
             printFormat(deps_.mouse->search_maze() ? "Search done.\n" : "Search failed.\n");
             break;
 
@@ -2403,7 +2402,7 @@ void CommandLineInterface::printLineStartBanner()
                 static_cast<double>(tune.kd_base_deg_per_slot),
                 static_cast<double>(LINE_GAIN_REF_SPEED_MMPS),
                 static_cast<double>(LINE_GAIN_SCHED_FLOOR_MMPS),
-                static_cast<double>(LINE_ERROR_FILTER_ALPHA),
+                static_cast<double>(lineErrorFilterAlpha(LOOP_FREQUENCY_HZ)),
                 static_cast<double>(LINE_LOOKAHEAD_TIME_S * 1000.0f));
     printFormat("LINE brake: gain=%.0f mm/s/slot lost_hold=%u ms lost_stop=%u ms recovery=%.2f\n",
                 static_cast<double>(LINE_BRAKE_GAIN_MMPS_PER_SLOT),
@@ -2460,14 +2459,14 @@ bool CommandLineInterface::waitForLineStartButton()
         {
             // Debounce + wait for release so the in-loop BOOTSEL stop poll
             // doesn't immediately trigger from the same press.
-            sleep_ms(20);
+            hal::time::sleepMs(20);
             while (abortRequested())
-                sleep_ms(20);
-            sleep_ms(100);
+                hal::time::sleepMs(20);
+            hal::time::sleepMs(100);
             return true;
         }
 
-        sleep_ms(20);
+        hal::time::sleepMs(20);
     }
 }
 
@@ -2712,7 +2711,7 @@ void CommandLineInterface::handle_calibrate_encoders_command()
         const float angle    = (right_mm - left_mm) * DEG_PER_MM_DIFFERENCE;
         printFormat("L:%5ld R:%5ld P:%7.2f A:%7.2f\n", left_counts, right_counts,
                     static_cast<double>(position), static_cast<double>(angle));
-        sleep_ms(10);
+        hal::time::sleepMs(10);
     }
     halted_ = false;
 

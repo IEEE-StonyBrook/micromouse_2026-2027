@@ -213,8 +213,9 @@ class Motion
         float right_tof_mm;
         float pos_mm; // forward profile position (the search's cell frame)
     };
-    static constexpr uint16_t TRACE_CAPACITY   = 1500; // ~108 KB RAM
-    static constexpr uint16_t TRACE_DECIMATION = 2;    // default: 4 ms between samples at 500 Hz
+    static constexpr uint16_t TRACE_CAPACITY = 1500; // ~108 KB RAM
+    // Default sample period 4 ms: 2 ticks at 500 Hz, 4 at 1 kHz.
+    static constexpr uint16_t TRACE_DECIMATION = LOOP_TICKS(0.004f);
 
     void               start_trace(uint16_t decimation = TRACE_DECIMATION);
     void               stop_trace();

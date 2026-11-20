@@ -60,7 +60,7 @@ static const char* DRIVERLAB_VERSION = "DRIVERLAB v3.0 (Jurababa, standalone)";
 
 namespace
 {
-// Convert a duration in milliseconds to a number of 500 Hz loop ticks.
+// Convert a duration in milliseconds to a number of loop ticks.
 // Equivalent to ms * LOOP_FREQUENCY_HZ / 1000, but written in the rounding-
 // safe form `(ms * Hz + 999) / 1000` so a 1 ms request never floors to 0.
 inline uint32_t msToLoops(uint32_t ms)
@@ -461,8 +461,8 @@ void DriverLab::armOpenLoop()
 
 void DriverLab::tickOpenLoop()
 {
-    constexpr int   SKIP_SAMPLES        = 10; // 20 ms transient skip at 500 Hz
-    constexpr int   OUTPUT_EVERY        = 5;  // CSV row every 5th retained sample
+    constexpr int   SKIP_SAMPLES        = LOOP_TICKS(0.020f); // 20 ms transient skip
+    constexpr int   OUTPUT_EVERY        = LOOP_TICKS(0.010f); // CSV row every 10 ms
     constexpr float MIN_SPEED_THRESHOLD = 10.0f;
 
     // Trailing-window velocity from the oldest sample in the ring buffer.
@@ -532,8 +532,8 @@ void DriverLab::tickOpenLoop()
         return;
 
     // ------------------------ end of step ------------------------
-    // Average last 10 retained samples = steady-state.
-    const size_t avg_count = std::min(ol_.step_left_speeds.size(), size_t(10));
+    // Average the last 20 ms of retained samples = steady-state.
+    const size_t avg_count = std::min(ol_.step_left_speeds.size(), size_t(LOOP_TICKS(0.020f)));
     float        left_ss = 0.0f, right_ss = 0.0f;
     if (avg_count > 0)
     {
@@ -768,7 +768,7 @@ void DriverLab::tickStep()
         return;
     }
 
-    constexpr int SKIP_SAMPLES = 5; // 10 ms warm-up so the first VEL_WIN samples are valid
+    constexpr int SKIP_SAMPLES = StepTrial::VEL_WIN; // 10 ms warm-up: VEL_WIN samples valid
 
     // Trailing-window velocity from the oldest sample in the ring buffer.
     float win_left = 0.0f, win_right = 0.0f;
@@ -1239,7 +1239,9 @@ void DriverLab::armTurnOpenLoop()
 
 void DriverLab::tickTurnOpenLoop()
 {
-    constexpr int   SKIP_SAMPLES        = 20; // 40 ms transient skip
+    constexpr int   SKIP_SAMPLES        = LOOP_TICKS(0.040f); // 40 ms transient skip
+    constexpr int   TAIL_SAMPLES        = LOOP_TICKS(0.040f); // steady-state tail, 40 ms
+    constexpr int   REPORT_EVERY        = LOOP_TICKS(0.020f); // report every 20 ms
     constexpr float MIN_OMEGA_THRESHOLD = 5.0f;
     // 200 ms inter-step pause so the body stops spinning before the next
     // diff voltage arms.
@@ -1283,7 +1285,7 @@ void DriverLab::tickTurnOpenLoop()
         tol_.step_omegas_enc.push_back(encoderOmegaDegps());
 
         const int kept = tol_.step_loop_count - SKIP_SAMPLES;
-        if (kept % 10 == 0)
+        if (kept % REPORT_EVERY == 0)
         {
             const uint32_t now_ms = to_ms_since_boot(get_absolute_time());
             reporter_.reportTurnOpenLoop(now_ms, tol_.current_voltage, cur_yaw, omega);
@@ -1296,7 +1298,7 @@ void DriverLab::tickTurnOpenLoop()
 
     // ------------------------ end of step ------------------------
     // Average tail = steady-state omega.
-    const size_t avg_count = std::min(tol_.step_omegas.size(), size_t(20));
+    const size_t avg_count = std::min(tol_.step_omegas.size(), size_t(TAIL_SAMPLES));
     float        omega_ss  = 0.0f;
     if (avg_count > 0)
     {
@@ -1326,7 +1328,7 @@ void DriverLab::tickTurnOpenLoop()
         }
     }
 
-    const float omega_ss_enc = tailMean(tol_.step_omegas_enc, 20);
+    const float omega_ss_enc = tailMean(tol_.step_omegas_enc, TAIL_SAMPLES);
     tol_.omega_steady_enc.push_back(omega_ss_enc);
     if (std::fabs(omega_ss_enc) > MIN_OMEGA_THRESHOLD)
     {

@@ -15,6 +15,10 @@ the corner of a cell, and a diagonal step from a cell centre hits a post.
 The session also scores the run in the bot's three phases: the search run
 ends on first reaching a goal cell, the return run on reaching the start cell
 again, and the speed run on reaching a goal cell after that.
+
+Besides the cells whose centres the mouse stops on, the speed run records
+every cell it passes through, including a diagonal's cut across a cell
+corner, so its route can be measured in cells like the bot's planner does.
 """
 
 import math
@@ -54,6 +58,7 @@ class MmsSession:
         self.commands = 0
         self._stats = {p: _PhaseStats() for p in PHASES}
         self._stats["search"].cells.add(maze.start)
+        self._speed_route = set()
 
     @property
     def heading(self):
@@ -112,6 +117,11 @@ class MmsSession:
             "speed_reached": reached > 2,
             "speed_path_cells": _cells(f.distance_cells),
             "speed_turns": f.turns,
+            # Cells crossed by the speed run, less the start: its route length
+            # in the planner's one-per-cell cost.
+            "speed_route_cells": max(len(self._speed_route) - 1, 0),
+            # Distinct cells driven through before the speed run.
+            "cells_explored": len(s.cells | r.cells),
         }
 
     def _fail(self, message):
@@ -152,6 +162,8 @@ class MmsSession:
         for point in path:
             self._pos = point
             stats.distance_cells += step_cells
+            if self.phase == "speed":
+                self._speed_route.update(_touched_cells(point))
             cell = self.cell
             if cell is not None:
                 stats.cells.add(cell)
@@ -164,6 +176,7 @@ class MmsSession:
             self.phase = "return" if self.phase == "search" else "done"
         elif self.phase == "return" and cell == self.maze.start:
             self.phase = "speed"
+            self._speed_route.add(cell)
 
     def _blocked(self, point):
         """Why the mouse cannot stand on this half-cell point, or None if it can."""
@@ -180,6 +193,16 @@ class MmsSession:
             if self.maze.wall(px // 2 - 1, (py - 1) // 2, "e"):
                 return "wall"
         return None
+
+
+def _touched_cells(point):
+    """The cell whose centre this half-cell point is, or the two cells sharing its edge."""
+    px, py = point
+    if px % 2 and py % 2:
+        return [((px - 1) // 2, (py - 1) // 2)]
+    if px % 2 == 0:  # vertical edge
+        return [(px // 2 - 1, (py - 1) // 2), (px // 2, (py - 1) // 2)]
+    return [((px - 1) // 2, py // 2 - 1), ((px - 1) // 2, py // 2)]
 
 
 def _cells(distance):

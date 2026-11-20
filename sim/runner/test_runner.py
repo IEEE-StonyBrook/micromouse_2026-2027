@@ -9,7 +9,8 @@ import tempfile
 import unittest
 
 from maze_file import parse_text
-from runner import compare, compare_planners, maze_setting, run_maze, speed_route_estimate
+from runner import (compare, compare_planners, maze_setting, run_maze, speed_route_estimate,
+                    summarize)
 from test_maze_file import TINY_TEXT
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -80,6 +81,20 @@ class BaselineTest(unittest.TestCase):
                       compare([self.run_result(maze="new.txt")], self.BASE)[0])
 
 
+class SummaryTest(unittest.TestCase):
+    def test_counts_optimal_runs_and_means(self):
+        results = [
+            {"ok": True, "speed_optimal": True, "cells_searched": 10, "cells_explored": 20},
+            {"ok": True, "speed_optimal": False, "cells_searched": 30, "cells_explored": 40},
+            {"ok": False, "error": "crash"},
+        ]
+        s = summarize(results)
+        self.assertEqual((s["optimal"], s["scored"]), (1, 2))
+        self.assertEqual(s["optimal_rate"], 0.5)
+        self.assertEqual(s["mean_cells_searched"], 20)
+        self.assertEqual(s["mean_cells_explored"], 30)
+
+
 class SpeedRouteEstimateTest(unittest.TestCase):
     def test_reads_the_last_speed_route_line(self):
         log = ("[INFO] Speed route: planner=length cells=9 est_run_time_s=7.0000\n"
@@ -129,6 +144,8 @@ class SimBotTest(unittest.TestCase):
         # zigzag diagonally can only shorten it.
         self.assertLessEqual(result["speed_path_cells"], 6)
         self.assertGreaterEqual(result["cells_searched"], 7)
+        self.assertEqual(result["optimum_cells"], 6)
+        self.assertTrue(result["speed_optimal"])
 
     def test_both_planners_solve_tiny_maze(self):
         for planner in ("length", "time"):

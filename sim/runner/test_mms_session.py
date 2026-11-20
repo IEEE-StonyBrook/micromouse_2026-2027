@@ -104,6 +104,17 @@ class PhaseTest(unittest.TestCase):
         self.assertEqual(r["search_moves"], 6)
         self.assertEqual(r["speed_path_cells"], 6)
         self.assertEqual(r["speed_turns"], 6)
+        self.assertEqual(r["speed_route_cells"], 6)
+        # The return run retraces the search route, so nothing new is explored.
+        self.assertEqual(r["cells_explored"], 7)
+
+    def test_cells_explored_counts_search_and_return(self):
+        s = MmsSession(parse_text(OPEN_2X2))
+        drive(s, ["moveForward", "turnRight", "moveForward"])  # (0,1) then goal (1,1)
+        drive(s, ["turnRight", "moveForward", "turnRight", "moveForward"])  # (1,0), start
+        r = s.report()
+        self.assertEqual(r["cells_searched"], 3)
+        self.assertEqual(r["cells_explored"], 4)
 
     def test_diagonal_speed_run_is_measured_in_cells(self):
         s = MmsSession(parse_text(OPEN_2X2))
@@ -116,6 +127,8 @@ class PhaseTest(unittest.TestCase):
         # Two straight half cells plus one diagonal half cell, 0.5 * sqrt(2).
         self.assertEqual(s.report()["speed_path_cells"], 1.707)
         self.assertEqual(s.report()["speed_turns"], 3)
+        # The diagonal cuts through (0,0), (0,1) and (1,1): a two-cell route.
+        self.assertEqual(s.report()["speed_route_cells"], 2)
 
     def test_unfinished_run_is_reported_as_not_reached(self):
         s = MmsSession(parse_text(TINY_TEXT))

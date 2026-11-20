@@ -1,299 +1,349 @@
 {
   "classic/13ye.txt": {
+    "cells_explored": 150,
     "cells_searched": 121,
     "search_moves": 135,
-    "speed_path_cells": 62.021,
-    "speed_turns": 20
+    "speed_path_cells": 62.314,
+    "speed_turns": 18
   },
   "classic/50.txt": {
+    "cells_explored": 151,
     "cells_searched": 125,
     "search_moves": 139,
-    "speed_path_cells": 55.335,
-    "speed_turns": 30
+    "speed_path_cells": 53.042,
+    "speed_turns": 24
   },
   "classic/APEC2012.txt": {
+    "cells_explored": 220,
     "cells_searched": 132,
     "search_moves": 149,
     "speed_path_cells": 100.406,
     "speed_turns": 47
   },
   "classic/APEC2017.txt": {
+    "cells_explored": 240,
     "cells_searched": 116,
     "search_moves": 117,
     "speed_path_cells": 99.577,
     "speed_turns": 43
   },
   "classic/Japan2013ef.txt": {
+    "cells_explored": 221,
     "cells_searched": 118,
     "search_moves": 127,
-    "speed_path_cells": 98.213,
-    "speed_turns": 40
+    "speed_path_cells": 97.971,
+    "speed_turns": 37
   },
   "classic/Kansai2017.txt": {
+    "cells_explored": 149,
     "cells_searched": 90,
     "search_moves": 102,
-    "speed_path_cells": 48.87,
-    "speed_turns": 18
+    "speed_path_cells": 47.406,
+    "speed_turns": 19
   },
   "classic/Porto2017-final.txt": {
+    "cells_explored": 184,
     "cells_searched": 89,
     "search_moves": 88,
-    "speed_path_cells": 71.406,
-    "speed_turns": 44
+    "speed_path_cells": 68.577,
+    "speed_turns": 35
   },
   "classic/TAIWAN2015-FINALS.txt": {
+    "cells_explored": 141,
     "cells_searched": 91,
     "search_moves": 106,
-    "speed_path_cells": 56.284,
-    "speed_turns": 22
+    "speed_path_cells": 60.435,
+    "speed_turns": 20
   },
   "classic/Taiwan-2016-maze.txt": {
+    "cells_explored": 221,
     "cells_searched": 119,
     "search_moves": 132,
     "speed_path_cells": 85.255,
     "speed_turns": 46
   },
   "classic/Taiwan2017.txt": {
+    "cells_explored": 156,
     "cells_searched": 106,
     "search_moves": 123,
-    "speed_path_cells": 63.962,
-    "speed_turns": 34
+    "speed_path_cells": 61.962,
+    "speed_turns": 26
   },
   "classic/UK-NOV-2017.txt": {
+    "cells_explored": 165,
     "cells_searched": 73,
     "search_moves": 80,
-    "speed_path_cells": 58.435,
+    "speed_path_cells": 52.971,
     "speed_turns": 30
   },
   "classic/UK2016-final.txt": {
+    "cells_explored": 142,
     "cells_searched": 105,
     "search_moves": 129,
-    "speed_path_cells": 60.799,
-    "speed_turns": 34
+    "speed_path_cells": 61.385,
+    "speed_turns": 31
   },
   "classic/allamerica2013.txt": {
+    "cells_explored": 165,
     "cells_searched": 107,
     "search_moves": 120,
     "speed_path_cells": 48.243,
     "speed_turns": 17
   },
   "classic/apec1988.txt": {
+    "cells_explored": 188,
     "cells_searched": 85,
     "search_moves": 98,
     "speed_path_cells": 57.213,
     "speed_turns": 37
   },
   "classic/apec2009.txt": {
+    "cells_explored": 229,
     "cells_searched": 152,
     "search_moves": 170,
     "speed_path_cells": 110.962,
     "speed_turns": 53
   },
   "classic/apec2010.txt": {
+    "cells_explored": 235,
     "cells_searched": 113,
     "search_moves": 118,
     "speed_path_cells": 96.284,
     "speed_turns": 50
   },
   "classic/apec2011.txt": {
+    "cells_explored": 180,
     "cells_searched": 130,
     "search_moves": 140,
     "speed_path_cells": 96.234,
     "speed_turns": 53
   },
   "classic/apec2013.txt": {
+    "cells_explored": 204,
     "cells_searched": 201,
     "search_moves": 264,
     "speed_path_cells": 110.962,
     "speed_turns": 54
   },
   "classic/apec2014.txt": {
+    "cells_explored": 209,
     "cells_searched": 106,
     "search_moves": 110,
-    "speed_path_cells": 88.92,
-    "speed_turns": 36
+    "speed_path_cells": 86.92,
+    "speed_turns": 33
   },
   "classic/apec2016.txt": {
+    "cells_explored": 234,
     "cells_searched": 140,
     "search_moves": 145,
-    "speed_path_cells": 120.456,
-    "speed_turns": 42
+    "speed_path_cells": 120.163,
+    "speed_turns": 46
   },
   "classic/apec2018.txt": {
+    "cells_explored": 185,
     "cells_searched": 94,
     "search_moves": 98,
-    "speed_path_cells": 76.577,
-    "speed_turns": 34
+    "speed_path_cells": 75.749,
+    "speed_turns": 30
   },
   "classic/chubu2017.txt": {
+    "cells_explored": 164,
     "cells_searched": 162,
     "search_moves": 199,
     "speed_path_cells": 105.042,
     "speed_turns": 32
   },
   "classic/diag2.txt": {
+    "cells_explored": 136,
     "cells_searched": 133,
     "search_moves": 184,
     "speed_path_cells": 52.82,
     "speed_turns": 22
   },
   "classic/diagonals.txt": {
+    "cells_explored": 147,
     "cells_searched": 135,
     "search_moves": 144,
-    "speed_path_cells": 99.497,
-    "speed_turns": 23
+    "speed_path_cells": 92.175,
+    "speed_turns": 24
   },
   "classic/empty.txt": {
+    "cells_explored": 24,
     "cells_searched": 15,
     "search_moves": 14,
     "speed_path_cells": 10.485,
     "speed_turns": 6
   },
   "classic/japan-2014-maze-finals.txt": {
+    "cells_explored": 214,
     "cells_searched": 110,
     "search_moves": 114,
     "speed_path_cells": 96.971,
     "speed_turns": 27
   },
   "classic/japan-2015-EF.txt": {
+    "cells_explored": 229,
     "cells_searched": 117,
     "search_moves": 122,
     "speed_path_cells": 66.255,
     "speed_turns": 45
   },
   "classic/japan-2016-ef.txt": {
+    "cells_explored": 176,
     "cells_searched": 78,
     "search_moves": 80,
     "speed_path_cells": 62.284,
     "speed_turns": 33
   },
   "classic/japan1988.txt": {
+    "cells_explored": 142,
     "cells_searched": 91,
     "search_moves": 106,
     "speed_path_cells": 50.778,
     "speed_turns": 20
   },
   "classic/japan1997f.txt": {
+    "cells_explored": 183,
     "cells_searched": 101,
     "search_moves": 100,
-    "speed_path_cells": 84.335,
-    "speed_turns": 28
+    "speed_path_cells": 79.406,
+    "speed_turns": 30
   },
   "classic/japan2007ef.txt": {
+    "cells_explored": 187,
     "cells_searched": 133,
     "search_moves": 147,
-    "speed_path_cells": 60.698,
-    "speed_turns": 35
+    "speed_path_cells": 61.042,
+    "speed_turns": 31
   },
   "classic/japan2017ef.txt": {
+    "cells_explored": 225,
     "cells_searched": 106,
     "search_moves": 111,
     "speed_path_cells": 76.74,
     "speed_turns": 58
   },
   "classic/kyushu-2017.txt": {
+    "cells_explored": 193,
     "cells_searched": 167,
     "search_moves": 221,
     "speed_path_cells": 101.87,
     "speed_turns": 47
   },
   "classic/loop.txt": {
+    "cells_explored": 66,
     "cells_searched": 47,
     "search_moves": 46,
-    "speed_path_cells": 40.536,
-    "speed_turns": 18
+    "speed_path_cells": 40.243,
+    "speed_turns": 15
   },
   "classic/robofest-2016-final.txt": {
+    "cells_explored": 93,
     "cells_searched": 74,
     "search_moves": 79,
-    "speed_path_cells": 53.142,
-    "speed_turns": 21
+    "speed_path_cells": 52.607,
+    "speed_turns": 17
   },
   "classic/taiwan-2014-final.txt": {
+    "cells_explored": 143,
     "cells_searched": 91,
     "search_moves": 104,
-    "speed_path_cells": 42.87,
-    "speed_turns": 28
+    "speed_path_cells": 42.092,
+    "speed_turns": 20
   },
   "classic/torture.txt": {
+    "cells_explored": 204,
     "cells_searched": 196,
     "search_moves": 237,
     "speed_path_cells": 127.468,
     "speed_turns": 44
   },
   "classic/uk1992f.txt": {
+    "cells_explored": 99,
     "cells_searched": 74,
     "search_moves": 95,
     "speed_path_cells": 44.899,
     "speed_turns": 17
   },
   "classic/uk2012f.txt": {
+    "cells_explored": 217,
     "cells_searched": 212,
     "search_moves": 266,
-    "speed_path_cells": 60.678,
-    "speed_turns": 30
+    "speed_path_cells": 59.799,
+    "speed_turns": 31
   },
   "classic/uk2014f.txt": {
+    "cells_explored": 218,
     "cells_searched": 116,
     "search_moves": 136,
     "speed_path_cells": 87.698,
     "speed_turns": 50
   },
   "classic/uk2015f.txt": {
+    "cells_explored": 166,
     "cells_searched": 152,
     "search_moves": 171,
-    "speed_path_cells": 58.456,
-    "speed_turns": 28
+    "speed_path_cells": 57.87,
+    "speed_turns": 29
   },
   "classic/us85.txt": {
+    "cells_explored": 185,
     "cells_searched": 60,
     "search_moves": 60,
-    "speed_path_cells": 44.142,
-    "speed_turns": 25
+    "speed_path_cells": 39.849,
+    "speed_turns": 23
   },
   "classic/us93.txt": {
+    "cells_explored": 201,
     "cells_searched": 131,
     "search_moves": 155,
-    "speed_path_cells": 79.234,
-    "speed_turns": 36
+    "speed_path_cells": 76.941,
+    "speed_turns": 33
   },
   "classic/wiggly1.txt": {
+    "cells_explored": 253,
     "cells_searched": 251,
     "search_moves": 250,
     "speed_path_cells": 183.513,
     "speed_turns": 137
   },
   "classic/zigzag.txt": {
+    "cells_explored": 244,
     "cells_searched": 242,
     "search_moves": 244,
     "speed_path_cells": 173.22,
     "speed_turns": 116
   },
   "small/3x3-tiny.num": {
+    "cells_explored": 5,
     "cells_searched": 5,
     "search_moves": 4,
     "speed_path_cells": 3.414,
     "speed_turns": 5
   },
   "small/3x3-tiny.txt": {
+    "cells_explored": 7,
     "cells_searched": 7,
     "search_moves": 6,
     "speed_path_cells": 4.828,
     "speed_turns": 6
   },
   "small/5x5-a.txt": {
+    "cells_explored": 13,
     "cells_searched": 13,
     "search_moves": 12,
     "speed_path_cells": 11.121,
     "speed_turns": 7
   },
   "small/8x8-a.txt": {
+    "cells_explored": 22,
     "cells_searched": 19,
     "search_moves": 18,
     "speed_path_cells": 15.364,
     "speed_turns": 10
   },
   "small/8x8-b.txt": {
+    "cells_explored": 15,
     "cells_searched": 12,
     "search_moves": 13,
     "speed_path_cells": 7.536,

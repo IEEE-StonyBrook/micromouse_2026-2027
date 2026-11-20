@@ -12,6 +12,11 @@ goal without crashing, within the time limit, and then exits cleanly.
 Exits 1 if any maze fails. A speed run longer than the baseline's, or more
 cells searched, prints a warning but does not fail.
 
+Each run is also scored against the maze's true optimum, the shortest
+start-to-goal route with every wall known, in the cells-entered cost the bot's
+default (length) speed-run planner minimises. `--min-optimal` fails the corpus when too few
+speed runs match it.
+
 --planner length|time picks the bot's speed-run route planner. With
 --compare-planners the runner runs the corpus under both planners instead and
 exits 1 unless both pass every maze and the time planner's estimated run time
@@ -30,7 +35,7 @@ import sys
 import tempfile
 import threading
 
-from maze_file import load_maze
+from maze_file import load_maze, shortest_route_cells
 from mms_session import MmsSession
 
 DEFAULT_TIMEOUT_S = 60
@@ -39,10 +44,12 @@ PLANNERS = ("length", "time")
 ESTIMATE_TOLERANCE_S = 1e-3
 SPEED_ROUTE = re.compile(r"Speed route: planner=\S+ cells=\d+ est_run_time_s=([0-9.]+)")
 # Fields kept in the baseline; lower is better for every one of them.
-BASELINE_FIELDS = ["cells_searched", "search_moves", "speed_path_cells", "speed_turns"]
-CSV_FIELDS = ["maze", "ok", "error", "search_reached", "cells_searched", "search_moves",
-              "search_turns", "return_reached", "return_moves", "speed_reached",
-              "speed_path_cells", "speed_turns", "est_run_time_s", "commands"]
+BASELINE_FIELDS = ["cells_searched", "cells_explored", "search_moves", "speed_path_cells",
+                   "speed_turns"]
+CSV_FIELDS = ["maze", "ok", "error", "search_reached", "cells_searched", "cells_explored",
+              "search_moves", "search_turns", "return_reached", "return_moves", "speed_reached",
+              "speed_path_cells", "speed_turns", "speed_route_cells", "optimum_cells",
+              "speed_optimal", "est_run_time_s", "commands"]
 
 
 def speed_route_estimate(log):
@@ -109,6 +116,9 @@ def run_maze(bot, maze, timeout_s=DEFAULT_TIMEOUT_S):
     result = session.report()
     result["est_run_time_s"] = speed_route_estimate(log_text)
     result["commands"] = session.commands
+    result["optimum_cells"] = shortest_route_cells(maze)
+    result["speed_optimal"] = (result["speed_reached"]
+                               and result["speed_route_cells"] == result["optimum_cells"])
     error = None
     if timed_out.is_set():
         error = "timeout after %ss in the %s phase" % (timeout_s, session.phase)
@@ -170,6 +180,20 @@ def compare(results, baseline):
                 warnings.append("%s: %s %s, baseline %s"
                                 % (r["maze"], field, r[field], base[field]))
     return warnings
+
+
+def summarize(results):
+    """Corpus totals over the mazes that passed: optimal speed runs and mean cells."""
+    passed = [r for r in results if r["ok"]]
+    n = len(passed)
+    optimal = sum(1 for r in passed if r["speed_optimal"])
+    return {
+        "scored": n,
+        "optimal": optimal,
+        "optimal_rate": optimal / n if n else 0.0,
+        "mean_cells_searched": sum(r["cells_searched"] for r in passed) / n if n else 0.0,
+        "mean_cells_explored": sum(r["cells_explored"] for r in passed) / n if n else 0.0,
+    }
 
 
 def compare_planners(length_results, time_results):
@@ -239,6 +263,8 @@ def main(argv=None):
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_S,
                         help="seconds allowed per maze (default %(default)s)")
     parser.add_argument("--jobs", type=int, default=os.cpu_count() or 1)
+    parser.add_argument("--min-optimal", type=float, metavar="FRACTION",
+                        help="fail unless this fraction of passing mazes get an optimal speed run")
     parser.add_argument("--planner", choices=PLANNERS,
                         help="speed-run route planner (default: the bot's, length)")
     parser.add_argument("--compare-planners", action="store_true",
@@ -255,12 +281,17 @@ def main(argv=None):
         print("no mazes found under %s" % args.mazes, file=sys.stderr)
         return 1
 
-    print("%-40s %-4s %8s %8s %8s %6s" % ("maze", "ok", "searched", "moves", "speed", "turns"))
+    print("%-40s %-4s %8s %8s %8s %8s %6s %8s" % (
+        "maze", "ok", "searched", "explored", "moves", "speed", "turns", "route"))
     for r in results:
-        print("%-40s %-4s %8s %8s %8s %6s" % (
+        route = "-"
+        if r.get("speed_reached"):
+            route = "%s/%s%s" % (r["speed_route_cells"], r["optimum_cells"],
+                                 "" if r["speed_optimal"] else "*")
+        print("%-40s %-4s %8s %8s %8s %8s %6s %8s" % (
             r["maze"], "ok" if r["ok"] else "FAIL", r.get("cells_searched", "-"),
-            r.get("search_moves", "-"), r.get("speed_path_cells", "-"),
-            r.get("speed_turns", "-")))
+            r.get("cells_explored", "-"), r.get("search_moves", "-"),
+            r.get("speed_path_cells", "-"), r.get("speed_turns", "-"), route))
     failures = [r for r in results if not r["ok"]]
     for r in failures:
         print("::error::%s: %s" % (r["maze"], r["error"]))
@@ -287,7 +318,15 @@ def main(argv=None):
             writer.writeheader()
             writer.writerows(results)
 
+    summary = summarize(results)
+    print("speed run optimal on %d/%d mazes (%.1f%%); mean cells searched %.1f, explored %.1f"
+          % (summary["optimal"], summary["scored"], 100 * summary["optimal_rate"],
+             summary["mean_cells_searched"], summary["mean_cells_explored"]))
     print("%d/%d mazes passed" % (len(results) - len(failures), len(results)))
+    if args.min_optimal is not None and summary["optimal_rate"] < args.min_optimal:
+        print("::error::speed run optimal on %.1f%% of mazes, below %.1f%%"
+              % (100 * summary["optimal_rate"], 100 * args.min_optimal))
+        return 1
     return 1 if failures else 0
 
 

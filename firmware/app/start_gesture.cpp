@@ -3,14 +3,13 @@
 #include <cstdio>
 #include <cstring>
 
-#include "pico/stdlib.h"
-
 #include "app/bluetooth.h"
 #include "app/bootsel_button.h"
 #include "common/log.h"
 #include "config/sensors.h"
 #include "drivers/tof.h"
 #include "hal/console.h"
+#include "hal/time.h"
 
 namespace
 {
@@ -150,7 +149,7 @@ StartTrigger waitForStartGesture(Bluetooth* bt, ToF* front_tof, uint32_t low_mm,
             int16_t        raw_mm  = 0;
             const uint32_t front_d = readToFDistance(front_tof, high_mm, raw_mm);
 
-            uint32_t now_ms = to_ms_since_boot(get_absolute_time());
+            uint32_t now_ms = hal::time::nowMs();
             if (now_ms - last_report_ms >= 250)
             {
                 char report[160];
@@ -167,7 +166,7 @@ StartTrigger waitForStartGesture(Bluetooth* bt, ToF* front_tof, uint32_t low_mm,
                 return StartTrigger::TOF_WAVE;
         }
 
-        sleep_ms(20);
+        hal::time::sleepMs(20);
     }
 }
 
@@ -250,7 +249,7 @@ StartTrigger waitForCompetitionGesture(Bluetooth* bt, ToF* front_tof, ToF* right
         const uint32_t right_d = readToFDistance(right_tof, side_high, raw_right, TOF_RIGHT_SCALE);
         const uint32_t left_d  = readToFDistance(left_tof, side_high, raw_left, TOF_LEFT_SCALE);
 
-        uint32_t now_ms = to_ms_since_boot(get_absolute_time());
+        uint32_t now_ms = hal::time::nowMs();
         if (now_ms - last_report_ms >= 500)
         {
             char report[220];
@@ -283,6 +282,6 @@ StartTrigger waitForCompetitionGesture(Bluetooth* bt, ToF* front_tof, ToF* right
         if (left_fired)
             return StartTrigger::LEFT_WAVE;
 
-        sleep_ms(20);
+        hal::time::sleepMs(20);
     }
 }

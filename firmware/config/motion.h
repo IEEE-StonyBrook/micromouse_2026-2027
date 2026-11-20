@@ -5,26 +5,34 @@
 #ifndef CONFIG_MOTION_H
 #define CONFIG_MOTION_H
 
-// ===================== Control Loop ===================== //
-// Forward and rotation controllers run at 500 Hz, matching mazerunner-core /
-// motorlab. Jurababa's rotation feedback still comes from the 100 Hz BNO085
-// RVC stream; IMU::robot_rot_change() distributes the latest packet-rate yaw
-// delta into an equivalent per-500 Hz tick change so the controller keeps the
-// UKMARS single-rate shape without switching away from the IMU.
-#define LOOP_FREQUENCY_HZ 500.0f
-#define LOOP_INTERVAL_S   (1.0f / LOOP_FREQUENCY_HZ)
+#include "config/board.h"
 
-// 8-tap moving average over per-tick encoder deltas, applied in
-// Drivetrain::update() and DriverLab::sampleEncoders() to mirror
-// ukmars/motorlab/src/encoders.h:108. Adds ~16 ms phase lag at 500 Hz
-// in exchange for quantization rejection on the D-term and a clean plot
-// trace. Forward PD gains are tuned against this smoothed input.
+// ===================== Control Loop ===================== //
+// Forward and rotation controllers run at LOOP_FREQUENCY_HZ, set per platform
+// in the board config (500 Hz on the Pico, 1 kHz on the STM32), matching
+// mazerunner-core / motorlab's single-rate shape. Jurababa's rotation feedback
+// still comes from the 100 Hz BNO085 RVC stream; IMU::robot_rot_change()
+// distributes the latest packet-rate yaw delta into an equivalent per-tick
+// change so the controller keeps that shape without switching away from the IMU.
+#define LOOP_INTERVAL_S (1.0f / LOOP_FREQUENCY_HZ)
+
+// Whole loop ticks in a duration (seconds), rounded to nearest. Anything that
+// counts ticks is written as a time and converted here, so a different loop
+// rate keeps the same timing. A compile-time constant when its argument is.
+#define LOOP_TICKS(seconds) (static_cast<int>((seconds) * LOOP_FREQUENCY_HZ + 0.5f))
+
+// 16 ms moving average over per-tick encoder deltas (8 taps at 500 Hz),
+// applied in Drivetrain::update() and DriverLab::sampleEncoders() to mirror
+// ukmars/motorlab/src/encoders.h:108. Adds ~7 ms group delay in exchange for
+// quantization rejection on the D-term and a clean plot trace. Forward PD
+// gains are tuned against this smoothed input.
 //
-// CAUTION (per Peter Harrison's encoders.h header): changing this length
+// CAUTION (per Peter Harrison's encoders.h header): changing this window
 // adds delay to the feedback loop and forces re-tuning of the forward
 // PD controller. Rotation PD uses the IMU, except during smooth-turn arcs
 // (see SMOOTH_TURN_ENCODER_HOLDOVER_MS), where it reads this averaged yaw.
-#define ENCODER_AVERAGER_LENGTH 8
+#define ENCODER_AVERAGER_WINDOW_S 0.016f
+#define ENCODER_AVERAGER_LENGTH   LOOP_TICKS(ENCODER_AVERAGER_WINDOW_S)
 
 // ================ Forward Speed Limits ================= //
 #define ROBOT_MAX_SEARCH_SPEED_MMPS  400.0f  // Search mode cruise speed

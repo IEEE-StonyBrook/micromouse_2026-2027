@@ -68,19 +68,23 @@ What each layer is allowed to know:
 | `maze/` | cells, directions, walls, coordinates, mouse pose | motors, sensors |
 | `navigation/` | flood fill, A*, goals, cell paths, L/F/R conversion | physical sensors |
 | `hal/` | platform-neutral interfaces (time, critical section, reset cause, peripheral handles, console); backends in `hal/pico/`, `hal/stm32/` and `hal/host/` | robot logic |
-| `app/` | wiring the above together, CLI, Bluetooth, the control timer | — |
+| `app/` | wiring the above together, CLI, Bluetooth, the control timer; board-specific halves (Bluetooth UART, BOOTSEL, LEDs) in `app/pico/` behind headers in `app/` | — |
 
-Only `hal/pico/`, the driver `.cpp` files, `app/`, `driver_lab/*.cpp` and
+Only `hal/pico/`, the driver `.cpp` files, `app/pico/`, `driver_lab/*.cpp` and
 `main_pico.cpp` may include the Pico SDK, and only `hal/stm32/` and
 `main_stm32.cpp` may include libopencm3. `python3 tools/check_sdk_free.py`
-enforces this, and `make -C tests` compiles the platform-neutral code against
-`hal/host`.
+enforces this, and `make -C tests` compiles the platform-neutral code,
+`app/*.cpp` included, against `hal/host`. App code reads the clock and sleeps
+through `hal::time`, never the SDK.
 
 `make -C tests` also builds and runs `tests/host_tests`, the doctest unit tests
 (`tests/*_test.cpp`) for Profile, PID, Drivetrain, Motion, the maze parser,
 the console HAL, the LSM6DSR driver (against a fake SPI register map) and the
-STM32 bring-up logic. Each STM32 driver keeps its arithmetic and state
-machines in libopencm3-free headers in `hal/stm32/` (`clock_plan.h`,
+STM32 bring-up logic. It runs them twice: at the Pico's 500 Hz, then rebuilt at
+the STM32's 1 kHz (`-DHOST_LOOP_FREQUENCY_HZ=1000.0f`), where
+`rate_trajectory_test.cpp` checks that a profile move and a closed-loop
+straight match the 500 Hz run. Each STM32 driver keeps its arithmetic and
+state machines in libopencm3-free headers in `hal/stm32/` (`clock_plan.h`,
 `clock_startup.h`, `counter_extender.h`, `console_rings.h`) that the host
 tests include; only the thin register glue is untested off target.
 `tests/fakes/` stands in for the Motor, Encoder and IMU drivers on the host and
@@ -99,7 +103,9 @@ Normal Mode starts automatically.** Keep that behaviour.
 single-core shape); Core 1 is unused:
 
 - A repeating hardware timer in `main_pico.cpp` calls `Motion::update()` at
-  `LOOP_FREQUENCY_HZ` (500 Hz): encoders, forward and rotation PD, motors.
+  `LOOP_FREQUENCY_HZ`: encoders, forward and rotation PD, motors. The rate is
+  per platform, set in `config/board_pico.h` (500 Hz) or `config/board_stm32.h`
+  (1 kHz); express any tick count as a time with `LOOP_TICKS(seconds)`.
 - The main loop (`cli.loop()`) handles serial and Bluetooth I/O, polls the
   ToFs at 50 Hz, and runs path planning, maze algorithms and high-level decisions.
 

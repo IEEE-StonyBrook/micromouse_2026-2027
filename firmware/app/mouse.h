@@ -113,6 +113,10 @@ class Mouse
     void update_map();
     bool search_to(const std::vector<std::array<int, 2>>& goals);
     bool search_maze();
+    // On the run back to the start, keep exploring until the best start-to-goal
+    // route is proven (maze/route_proof.h) or a cap is spent, then go home by
+    // the shortest known route. Off by default: the Pico's search is unchanged.
+    void set_route_proof(bool enabled) { route_proof_ = enabled; }
     bool cheese_hunt(const std::array<int, 2>& start_cell, BeaconIr* beacon_ir);
     bool turn_to_face(const std::string& heading);
     void log_action_status(const std::string& action, Cell* cell, const std::string& position_text);
@@ -206,6 +210,7 @@ class Mouse
     State         state_             = State::FRESH_START;
     bool          m_handStart        = false;
     float         cruise_speed_mmps_ = ROBOT_MAX_SEARCH_SPEED_MMPS;
+    bool          route_proof_       = false;
 
     std::array<int, 2>              start_cell_ = {0, 0};
     std::vector<std::array<int, 2>> goal_cells_ = {};

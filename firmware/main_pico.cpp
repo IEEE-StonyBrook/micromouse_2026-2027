@@ -587,8 +587,10 @@ static void runMouseAppMode(Battery* battery, SensorMode sensor_mode, bool compe
         static CoreLoopCtx ctx{&motion, &left_tof, &front_tof, &right_tof};
 
         static repeating_timer_t systick_timer;
+        // Negative period => fire on an absolute schedule, so jitter never
+        // accumulates into drift.
         add_repeating_timer_us(
-            -2000 /* 500 Hz, negative => fire on absolute schedule */,
+            -static_cast<int64_t>(LOOP_INTERVAL_S * 1.0e6f),
             +[](repeating_timer_t* t) -> bool
             {
                 auto* c = static_cast<CoreLoopCtx*>(t->user_data);
@@ -597,7 +599,8 @@ static void runMouseAppMode(Battery* battery, SensorMode sensor_mode, bool compe
             },
             &ctx, &systick_timer);
 
-        printf("Motion @ 500 Hz on Core 0 (single-core UKMARS shape).\n");
+        printf("Motion @ %.0f Hz on Core 0 (single-core UKMARS shape).\n",
+               static_cast<double>(LOOP_FREQUENCY_HZ));
     }
 
     Cli::Deps deps;

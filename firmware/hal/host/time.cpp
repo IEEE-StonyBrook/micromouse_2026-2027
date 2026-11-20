@@ -18,6 +18,11 @@ uint32_t nowMs()
         std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count());
 }
 
+void sleepMs(uint32_t duration_ms)
+{
+    std::this_thread::sleep_for(std::chrono::milliseconds(duration_ms));
+}
+
 uint64_t nowUs()
 {
     const auto elapsed = std::chrono::steady_clock::now() - kBoot;
@@ -25,8 +30,8 @@ uint64_t nowUs()
         std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count());
 }
 
-void sleepMs(uint32_t duration_ms)
+void sleepUntilUs(uint64_t deadline_us)
 {
-    std::this_thread::sleep_for(std::chrono::milliseconds(duration_ms));
+    std::this_thread::sleep_until(kBoot + std::chrono::microseconds(deadline_us));
 }
 } // namespace hal::time
