@@ -855,7 +855,7 @@ void CommandLineInterface::handle_search_command(const Args& args)
     printFormat("Search to %d,%d\n", x, y);
     // 20 ms samples: the 1500-sample buffer covers ~30 s, a whole bench search.
     // TRACE prints it.
-    deps_.motion->start_trace(10);
+    deps_.motion->start_trace(LOOP_TICKS(0.020f));
     std::vector<std::array<int, 2>> goals = {{x, y}};
     const bool                      ok    = deps_.mouse->search_to(goals);
     printFormat(ok ? "Search done.\n" : "Search failed.\n");
@@ -2138,7 +2138,7 @@ void CommandLineInterface::run_function(int cmd)
                 deps_.mouse->setPhaseColor('y');
             printFormat("Searching maze...\n");
             if (deps_.motion != nullptr)
-                deps_.motion->start_trace(10); // 20 ms: TRACE after the run
+                deps_.motion->start_trace(LOOP_TICKS(0.020f)); // 20 ms: TRACE after the run
             printFormat(deps_.mouse->search_maze() ? "Search done.\n" : "Search failed.\n");
             break;
 

@@ -1,9 +1,15 @@
 // Loop rate: set per platform in config/board.h. make -C tests runs the
 // whole suite twice, at the Pico's 500 Hz and, built with
 // -DHOST_LOOP_FREQUENCY_HZ=1000.0f, at the STM32's 1 kHz.
+#include <memory>
+
 #include "config/motion.h"
+#include "config/tuning.h"
+#include "control/drivetrain.h"
+#include "control/motion.h"
 #include "control/pid.h"
 #include "doctest/doctest.h"
+#include "fakes/fake_robot.h"
 
 TEST_CASE("the loop rate is the one this build asked for")
 {
@@ -40,4 +46,22 @@ TEST_CASE("tick counts derive from a time, not a rate")
     CHECK(ENCODER_AVERAGER_LENGTH == 8);
 #endif
     CHECK(LOOP_TICKS(0.1f) == static_cast<int>(LOOP_FREQUENCY_HZ / 10.0f));
+}
+
+TEST_CASE("motion trace samples every 4 ms by default at any rate")
+{
+    struct Rig
+    {
+        fake::Robot robot{MOTOR_KM, MOTOR_TM};
+        Drivetrain  dt{&robot.left_motor, &robot.right_motor, &robot.left_encoder,
+                       &robot.right_encoder};
+        Motion      motion{&dt, &robot.imu};
+    };
+    auto r = std::make_unique<Rig>();                    // Motion's trace buffer is ~100 KB
+    r->motion.start_move(180.0f, 300.0f, 0.0f, 2000.0f); // traces only record a move
+    r->motion.start_trace();
+    CHECK(r->motion.traceDtMs() == 4);
+    for (int i = 0; i < LOOP_TICKS(0.040f); i++)
+        r->motion.update();
+    CHECK(r->motion.traceCount() == 10); // 40 ms of 4 ms samples
 }
