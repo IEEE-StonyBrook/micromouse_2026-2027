@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Fail if platform-neutral firmware code includes a Pico SDK header.
+"""Fail if platform-neutral firmware code includes a Pico SDK or libopencm3 header.
 
 Every file in control/, maze/, navigation/, common/, hal/ and hal/host/, plus
 the driver and DriverLab headers, must compile without the Pico SDK so they
-can build against hal/host. Platform code lives in hal/pico/ and the driver
-.cpp files.
+can build against hal/host. Platform code lives in hal/pico/, hal/stm32/,
+the driver .cpp files and the main_*.cpp entry points.
 
 Includes are followed transitively through files in firmware/ and
 third_party/, so a header that pulls the SDK in through a third-party header
@@ -27,7 +27,7 @@ WHOLE_DIRS = ["control", "maze", "navigation", "common", "hal", "hal/host"]
 # Only the headers in these directories must be SDK-free.
 HEADER_DIRS = ["drivers", "driver_lab"]
 
-SDK_PREFIXES = ("pico/", "hardware/", "boards/", "tusb")
+SDK_PREFIXES = ("pico/", "hardware/", "boards/", "tusb", "libopencm3/", "libopencmsis/")
 SDK_FILES = {"pico.h"}
 
 INCLUDE_RE = re.compile(r'^\s*#\s*include\s*[<"]([^>"]+)[>"]', re.MULTILINE)
@@ -80,11 +80,11 @@ def main():
         if chain:
             violations.append(" -> ".join([str(path.relative_to(REPO))] + chain))
     if violations:
-        print("Pico SDK includes in platform-neutral code:")
+        print("Platform SDK includes in platform-neutral code:")
         for v in violations:
             print(f"  {v}")
         return 1
-    print(f"PASS: {len(targets())} files free of Pico SDK includes")
+    print(f"PASS: {len(targets())} files free of platform SDK includes")
     return 0
 
 
