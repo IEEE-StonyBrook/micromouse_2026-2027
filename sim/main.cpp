@@ -8,12 +8,16 @@
  *      way until the best start-to-goal route is proven
  *   3. Speed Run: diagonalized A* for optimal time
  *
- * Usage: Micromouse.out ["<size> <goals>"], the same text as the firmware's
- * MAZE command, e.g. "16 7,7..8,8". Without it the bot assumes a 16x16 maze
- * with goal (2, 2). mms cannot report goal cells, so the caller passes them.
+ * Usage: Micromouse.out [--planner length|time] ["<size> <goals>"]. The
+ * setting is the same text as the firmware's MAZE command, e.g. "16 7,7..8,8".
+ * Without it the bot assumes a 16x16 maze with goal (2, 2). mms cannot report
+ * goal cells, so the caller passes them. --planner picks how the speed run
+ * chooses its route: fewest cells (length, the default) or least estimated
+ * run time (time).
  */
 
 #include <array>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -32,16 +36,31 @@ int main(int argc, char** argv)
     MazeSetting setting;
     setting.size  = MAZE_SIZE;
     setting.goals = {{2, 2}};
-    if (argc > 1)
+    for (int i = 1; i < argc; ++i)
     {
-        std::string error;
-        if (!parseMazeSetting(argv[1], MAZE_SIZE, setting, error))
+        if (std::strcmp(argv[i], "--planner") == 0)
         {
-            LOG_ERROR("Bad maze setting \"" + std::string(argv[1]) + "\": " + error);
+            const std::string name = i + 1 < argc ? argv[++i] : "";
+            if (name == "length")
+                PathUtils::set_route_planner(RoutePlanner::PathLength);
+            else if (name == "time")
+                PathUtils::set_route_planner(RoutePlanner::RunTime);
+            else
+            {
+                LOG_ERROR("--planner takes length or time, not \"" + name + "\"");
+                return 2;
+            }
+            continue;
+        }
+        std::string error;
+        if (!parseMazeSetting(argv[i], MAZE_SIZE, setting, error))
+        {
+            LOG_ERROR("Bad maze setting \"" + std::string(argv[i]) + "\": " + error);
             return 2;
         }
     }
     LOG_INFO("Maze " + mazeSettingText(setting));
+    LOG_INFO(std::string("Route planner: ") + routePlannerName(PathUtils::routePlanner()));
 
     std::array<int, 2>                     start = {0, 0};
     const std::vector<std::array<int, 2>>& goals = setting.goals;

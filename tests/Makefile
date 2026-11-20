@@ -1,33 +1,38 @@
-# Host-side checks for firmware code that needs no Pico SDK.
-# Run with `make -C tests`. Ticket #26 replaces this with the host test target.
+# Host tests: the platform-neutral firmware, built against hal/host with no
+# Pico SDK, plus the doctest unit tests that run on it. Run with `make -C tests`.
 CXX      ?= g++
-CXXFLAGS := -std=c++17 -Wall -Wextra -Werror -I../firmware
+CXXFLAGS := -std=c++17 -Wall -Wextra -Werror -I../firmware -isystem ../third_party -I.
+OUT      := build-host
+LIB      := $(OUT)/libfirmware_host.a
+
+# One binary holds every test case; main.cpp supplies doctest's main().
+TEST_SRCS     := $(wildcard *_test.cpp)
+FIRMWARE_SRCS := ../firmware/maze/maze_setting.cpp ../firmware/hal/console.cpp \
+                 ../firmware/maze/maze.cpp ../firmware/maze/maze_mouse.cpp \
+                 ../firmware/maze/route_proof.cpp \
+                 ../firmware/navigation/path_converter.cpp \
+                 ../firmware/navigation/route_planner.cpp ../firmware/navigation/run_time.cpp
+FAKE_SRCS     := $(wildcard fakes/*.cpp)
 
 .PHONY: test
-test: encoder_history_test maze_setting_test route_proof_test
-	./encoder_history_test
-	./maze_setting_test
-	./route_proof_test
+test:
 	CXX="$(CXX)" sh host_compile.sh
+	$(MAKE) host_tests
+	./host_tests
 	@if $(CXX) $(CXXFLAGS) -fsyntax-only range_assert_fires.cpp 2>&1 | grep -q "encoder history"; \
 	then echo "PASS: range static_assert fires past the history range"; \
 	else echo "FAIL: range static_assert did not fire"; exit 1; fi
 
-encoder_history_test: encoder_history_test.cpp ../firmware/control/encoder_history.h \
-		../firmware/config/geometry.h ../firmware/config/motion.h
-	$(CXX) $(CXXFLAGS) $< -o $@
+# doctest's main is slow to compile and never changes, so it gets its own object
+# outside build-host, which host_compile.sh empties on every run.
+build-tests/doctest_main.o: main.cpp
+	mkdir -p build-tests
+	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-maze_setting_test: maze_setting_test.cpp ../firmware/maze/maze_setting.cpp \
-		../firmware/maze/maze_setting.h
-	$(CXX) $(CXXFLAGS) maze_setting_test.cpp ../firmware/maze/maze_setting.cpp -o $@
-
-ROUTE_PROOF_SRCS := ../firmware/maze/route_proof.cpp ../firmware/maze/maze.cpp \
-		../firmware/maze/maze_mouse.cpp
-route_proof_test: route_proof_test.cpp $(ROUTE_PROOF_SRCS) ../firmware/maze/route_proof.h \
-		../firmware/maze/maze.h ../firmware/maze/maze_mouse.h
-	$(CXX) $(CXXFLAGS) route_proof_test.cpp $(ROUTE_PROOF_SRCS) -o $@
+host_tests: build-tests/doctest_main.o $(TEST_SRCS) $(FAKE_SRCS) $(FIRMWARE_SRCS) $(LIB)
+	$(CXX) $(CXXFLAGS) build-tests/doctest_main.o $(TEST_SRCS) $(FAKE_SRCS) $(FIRMWARE_SRCS) $(LIB) -o $@
 
 .PHONY: clean
 clean:
-	rm -f encoder_history_test maze_setting_test route_proof_test
-	rm -rf build-host
+	rm -f host_tests
+	rm -rf $(OUT) build-tests

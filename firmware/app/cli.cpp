@@ -29,6 +29,7 @@
 #include "drivers/beacon_ir.h"
 #include "drivers/motor.h"
 #include "drivers/tof.h"
+#include "hal/console.h"
 #include "maze/maze.h"
 #include "maze/maze_mouse.h"
 #include "maze/maze_setting.h"
@@ -330,7 +331,7 @@ void CommandLineInterface::print(const char* text)
     if (text == nullptr)
         return;
 
-    std::fputs(text, stdout);
+    hal::console::write(text, std::strlen(text));
     if (deps_.bluetooth != nullptr)
     {
         deps_.bluetooth->write(text);
@@ -550,8 +551,8 @@ bool CommandLineInterface::process_serial_data()
 
     while (true)
     {
-        int c = getchar_timeout_us(0);
-        if (c == PICO_ERROR_TIMEOUT || c < 0)
+        int c = hal::console::getcNonBlocking();
+        if (c < 0)
             break;
 
         char ch = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
@@ -776,6 +777,11 @@ void CommandLineInterface::run_long_cmd(const Args& args)
         handle_style_command(args);
         return;
     }
+    if (std::strcmp(args.argv[0], "PLANNER") == 0)
+    {
+        handle_planner_command(args);
+        return;
+    }
     if (std::strcmp(args.argv[0], "PATH") == 0)
     {
         handle_path_command(args);
@@ -956,7 +962,7 @@ void CommandLineInterface::runCompetitionMode()
                 if (bt->hasCommand() && bt->command() == Bluetooth::Command::HALT)
                     return false;
             }
-            int c = getchar_timeout_us(0);
+            int c = hal::console::getcNonBlocking();
             if (c == 'X' || c == 'x')
                 return false;
 
@@ -1161,6 +1167,21 @@ void CommandLineInterface::handle_style_command(const Args& args)
     }
 
     printFormat("STYLE expects STATIONARY or SMOOTH.\n");
+}
+
+void CommandLineInterface::handle_planner_command(const Args& args)
+{
+    if (args.argc >= 2 && std::strcmp(args.argv[1], "LENGTH") == 0)
+        PathUtils::set_route_planner(RoutePlanner::PathLength);
+    else if (args.argc >= 2 && std::strcmp(args.argv[1], "TIME") == 0)
+        PathUtils::set_route_planner(RoutePlanner::RunTime);
+    else if (args.argc >= 2)
+    {
+        printFormat("PLANNER expects LENGTH or TIME.\n");
+        return;
+    }
+    printFormat("PLANNER: %s\n",
+                PathUtils::routePlanner() == RoutePlanner::RunTime ? "TIME" : "LENGTH");
 }
 
 void CommandLineInterface::append_path_forward_cells(std::vector<PathSegment>& segments, int cells)
@@ -2077,7 +2098,7 @@ void CommandLineInterface::pollHaltOnly()
     // reported while process_serial_data() is not being polled.
     Motor::reportBatteryFallback();
 
-    int c = getchar_timeout_us(0);
+    int c = hal::console::getcNonBlocking();
     if (c >= 0)
     {
         char ch = static_cast<char>(c);
@@ -2425,7 +2446,7 @@ bool CommandLineInterface::waitForLineStartButton()
             if (bt->hasCommand() && bt->command() == Bluetooth::Command::HALT)
                 return false;
         }
-        int c = getchar_timeout_us(0);
+        int c = hal::console::getcNonBlocking();
         if (c == 'X' || c == 'x')
             return false;
 
@@ -2677,7 +2698,7 @@ void CommandLineInterface::handle_calibrate_encoders_command()
     halted_           = false;
     while (true)
     {
-        if (getchar_timeout_us(0) >= 0)
+        if (hal::console::getcNonBlocking() >= 0)
             break;
         pollHaltOnly(); // BT HALT / BOOTSEL also end the stream
         if (halted_)
@@ -2893,6 +2914,7 @@ void CommandLineInterface::help_debug()
 {
     printFormat("Jurababa debug extensions:\n");
     printFormat("STYLE [STATIONARY|SMOOTH] : select path execution style\n");
+    printFormat("PLANNER [LENGTH|TIME] : speed-run route by fewest cells or least est. time\n");
     printFormat(
         "PATH seq [spd acc omg alp] [SMOOTH] [RAW] : manual path, RAW disables heading hold\n");
     printFormat("SMOOTH [SET <name> <val>|DEFAULTS|RUN <L|R>] : tune/measure arc turns\n");

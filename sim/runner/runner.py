@@ -14,8 +14,13 @@ cells searched, prints a warning but does not fail.
 
 Each run is also scored against the maze's true optimum, the shortest
 start-to-goal route with every wall known, in the cells-entered cost the bot's
-speed-run planner minimises. `--min-optimal` fails the corpus when too few
+default (length) speed-run planner minimises. `--min-optimal` fails the corpus when too few
 speed runs match it.
+
+--planner length|time picks the bot's speed-run route planner. With
+--compare-planners the runner runs the corpus under both planners instead and
+exits 1 unless both pass every maze and the time planner's estimated run time
+is never above the length planner's.
 """
 
 import argparse
@@ -23,6 +28,8 @@ import concurrent.futures
 import csv
 import json
 import os
+import re
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -32,13 +39,23 @@ from maze_file import load_maze, shortest_route_cells
 from mms_session import MmsSession
 
 DEFAULT_TIMEOUT_S = 60
+PLANNERS = ("length", "time")
+# The bot logs its estimates to 4 decimal places.
+ESTIMATE_TOLERANCE_S = 1e-3
+SPEED_ROUTE = re.compile(r"Speed route: planner=\S+ cells=\d+ est_run_time_s=([0-9.]+)")
 # Fields kept in the baseline; lower is better for every one of them.
 BASELINE_FIELDS = ["cells_searched", "cells_explored", "search_moves", "speed_path_cells",
                    "speed_turns"]
 CSV_FIELDS = ["maze", "ok", "error", "search_reached", "cells_searched", "cells_explored",
               "search_moves", "search_turns", "return_reached", "return_moves", "speed_reached",
               "speed_path_cells", "speed_turns", "speed_route_cells", "optimum_cells",
-              "speed_optimal", "commands"]
+              "speed_optimal", "est_run_time_s", "commands"]
+
+
+def speed_route_estimate(log):
+    """The estimated run time (s) of the bot's last planned speed route, or None."""
+    found = SPEED_ROUTE.findall(log)
+    return float(found[-1]) if found else None
 
 
 def maze_setting(maze):
@@ -93,9 +110,11 @@ def run_maze(bot, maze, timeout_s=DEFAULT_TIMEOUT_S):
                     pass
             returncode = proc.wait()
         log.seek(0)
-        log_tail = log.read()[-2000:]
+        log_text = log.read()
+        log_tail = log_text[-2000:]
 
     result = session.report()
+    result["est_run_time_s"] = speed_route_estimate(log_text)
     result["commands"] = session.commands
     result["optimum_cells"] = shortest_route_cells(maze)
     result["speed_optimal"] = (result["speed_reached"]
@@ -130,6 +149,7 @@ def find_mazes(root):
 
 
 def run_corpus(bot, root, timeout_s, jobs):
+    """Run bot (an argv list) on every maze under root."""
     paths = find_mazes(root)
 
     def one(path):
@@ -176,6 +196,58 @@ def summarize(results):
     }
 
 
+def compare_planners(length_results, time_results):
+    """Pair each maze's runs under both planners.
+
+    Returns (rows, errors): a row per maze with both estimates and the time
+    planner's fractional improvement, and an error for every failed run,
+    missing estimate, or time-planner route estimated slower than the
+    length-planner route.
+    """
+    by_maze = {r["maze"]: r for r in time_results}
+    rows, errors = [], []
+    for length in length_results:
+        maze = length["maze"]
+        timed = by_maze.get(maze)
+        bad = False
+        for name, r in (("length", length), ("time", timed)):
+            if r is None or not r["ok"]:
+                errors.append("%s: %s planner run failed: %s"
+                              % (maze, name, "missing" if r is None else r["error"]))
+                bad = True
+            elif r.get("est_run_time_s") is None:
+                errors.append("%s: %s planner logged no run time estimate" % (maze, name))
+                bad = True
+        if bad:
+            continue
+        t_length, t_time = length["est_run_time_s"], timed["est_run_time_s"]
+        if t_time > t_length + ESTIMATE_TOLERANCE_S:
+            errors.append("%s: time planner route is slower: %.4f s vs %.4f s"
+                          % (maze, t_time, t_length))
+        rows.append({"maze": maze, "length_s": t_length, "time_s": t_time,
+                     "improvement": (t_length - t_time) / t_length if t_length else 0.0})
+    return rows, errors
+
+
+def run_planner_comparison(bot, root, timeout_s, jobs):
+    results = {p: run_corpus(bot + ["--planner", p], root, timeout_s, jobs) for p in PLANNERS}
+    rows, errors = compare_planners(results["length"], results["time"])
+    print("%-40s %10s %10s %8s" % ("maze", "length_s", "time_s", "gain"))
+    for row in rows:
+        print("%-40s %10.3f %10.3f %7.1f%%" % (row["maze"], row["length_s"], row["time_s"],
+                                               100 * row["improvement"]))
+    if rows:
+        gains = [row["improvement"] for row in rows]
+        print("mean estimated run time improvement %.2f%% (max %.2f%%), "
+              "%d/%d mazes faster, total %.1f s -> %.1f s"
+              % (100 * statistics.mean(gains), 100 * max(gains),
+                 sum(g > 0 for g in gains), len(rows),
+                 sum(row["length_s"] for row in rows), sum(row["time_s"] for row in rows)))
+    for error in errors:
+        print("::error::" + error)
+    return rows, errors
+
+
 def main(argv=None):
     here = os.path.dirname(os.path.abspath(__file__))
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
@@ -193,9 +265,18 @@ def main(argv=None):
     parser.add_argument("--jobs", type=int, default=os.cpu_count() or 1)
     parser.add_argument("--min-optimal", type=float, metavar="FRACTION",
                         help="fail unless this fraction of passing mazes get an optimal speed run")
+    parser.add_argument("--planner", choices=PLANNERS,
+                        help="speed-run route planner (default: the bot's, length)")
+    parser.add_argument("--compare-planners", action="store_true",
+                        help="run both planners and check time never loses to length")
     args = parser.parse_args(argv)
 
-    results = run_corpus([args.bot], args.mazes, args.timeout, args.jobs)
+    if args.compare_planners:
+        rows, errors = run_planner_comparison([args.bot], args.mazes, args.timeout, args.jobs)
+        return 1 if errors or not rows else 0
+
+    bot = [args.bot] + (["--planner", args.planner] if args.planner else [])
+    results = run_corpus(bot, args.mazes, args.timeout, args.jobs)
     if not results:
         print("no mazes found under %s" % args.mazes, file=sys.stderr)
         return 1

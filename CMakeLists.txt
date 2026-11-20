@@ -19,6 +19,18 @@ if (EXISTS ${picoVscode})
     include(${picoVscode})
 endif()
 # ====================================================================================
+
+# Target platform. Each platform needs its own build directory, because the
+# compiler is fixed when a directory is first configured.
+set(JURABABA_PLATFORM pico CACHE STRING "Target platform: pico or stm32")
+set_property(CACHE JURABABA_PLATFORM PROPERTY STRINGS pico stm32)
+if(JURABABA_PLATFORM STREQUAL "stm32")
+    include(${CMAKE_CURRENT_LIST_DIR}/cmake/stm32/platform.cmake)
+    return()
+elseif(NOT JURABABA_PLATFORM STREQUAL "pico")
+    message(FATAL_ERROR "JURABABA_PLATFORM must be pico or stm32, not '${JURABABA_PLATFORM}'")
+endif()
+
 set(PICO_BOARD pico CACHE STRING "Board type")
 
 # Pull in Raspberry Pi Pico SDK (must be before project)
@@ -60,6 +72,8 @@ set(NAVIGATION_SOURCES
     firmware/navigation/flood_fill.cpp
     firmware/navigation/path_converter.cpp
     firmware/navigation/path_utils.cpp
+    firmware/navigation/route_planner.cpp
+    firmware/navigation/run_time.cpp
     firmware/navigation/diagonalizer.cpp
 )
 
@@ -82,6 +96,8 @@ set(DRIVER_LAB_SOURCES
 
 # Platform-neutral interfaces live in firmware/hal/; these are the Pico backends.
 set(HAL_SOURCES
+    firmware/hal/console.cpp
+    firmware/hal/pico/console.cpp
     firmware/hal/pico/critical_section.cpp
     firmware/hal/pico/system.cpp
     firmware/hal/pico/time.cpp

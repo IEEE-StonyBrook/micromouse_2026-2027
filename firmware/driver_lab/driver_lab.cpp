@@ -9,11 +9,11 @@
 #include "drivers/line_sensor.h"
 #include "drivers/motor.h"
 #include "drivers/tof.h"
+#include "hal/console.h"
 
 #include "hardware/gpio.h"
 #include "hardware/i2c.h"
 #include "hardware/pwm.h"
-#include "hardware/uart.h"
 #include "pico/stdlib.h"
 
 #include <algorithm>
@@ -122,13 +122,8 @@ const char* yesNo(bool value)
 bool keyPressed()
 {
     bool pressed = false;
-    while (getchar_timeout_us(0) != PICO_ERROR_TIMEOUT)
+    while (hal::console::getcNonBlocking() >= 0)
         pressed = true;
-    while (uart_is_readable(uart0))
-    {
-        uart_getc(uart0);
-        pressed = true;
-    }
     return pressed;
 }
 
@@ -1656,16 +1651,8 @@ int DriverLab::readSerialLine()
 {
     while (true)
     {
-        int  c         = getchar_timeout_us(0); // USB
-        bool from_uart = false;
-
-        if (c == PICO_ERROR_TIMEOUT && uart_is_readable(uart0))
-        {
-            c         = uart_getc(uart0);
-            from_uart = true;
-        }
-
-        if (c == PICO_ERROR_TIMEOUT)
+        const int c = hal::console::getcNonBlocking(); // USB, then HC-05 UART
+        if (c < 0)
             return 0;
 
         char ch = static_cast<char>(c);
@@ -1696,7 +1683,7 @@ int DriverLab::readSerialLine()
         {
             ch = static_cast<char>(toupper(ch));
             if (echo_enabled_)
-                putchar(ch);
+                hal::console::write(&ch, 1);
             if (input_index_ < DRIVERLAB_INPUT_BUFFER_SIZE - 1)
             {
                 input_buffer_[input_index_++] = ch;
@@ -2852,10 +2839,8 @@ void DriverLab::cmdDirTest(const DriverLabArgs& args)
     printf("Watch motors - they should alternate direction every 2 seconds\n");
     printf("Press any key to stop\n\n");
 
-    while (getchar_timeout_us(0) != PICO_ERROR_TIMEOUT)
+    while (hal::console::getcNonBlocking() >= 0)
         ;
-    while (uart_is_readable(uart0))
-        uart_getc(uart0);
 
     const uint     left_slice    = pwm_gpio_to_slice_num(PIN_MOTOR_L_PWM);
     const uint     left_channel  = pwm_gpio_to_channel(PIN_MOTOR_L_PWM);
@@ -2866,8 +2851,7 @@ void DriverLab::cmdDirTest(const DriverLabArgs& args)
     int cycle = 0;
     while (true)
     {
-        const int c = getchar_timeout_us(0);
-        if (c != PICO_ERROR_TIMEOUT)
+        if (hal::console::getcNonBlocking() >= 0)
         {
             printf("\nStopped by user\n");
             break;

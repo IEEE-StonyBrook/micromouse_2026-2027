@@ -1,24 +1,12 @@
-// Host test for the search-stop proof. Build and run: make -C tests
+// Host test for the search-stop proof.
 #include <algorithm>
 #include <array>
-#include <cstdio>
 #include <vector>
 
+#include "doctest/doctest.h"
 #include "maze/maze.h"
 #include "maze/maze_mouse.h"
 #include "maze/route_proof.h"
-
-static int failures = 0;
-
-#define CHECK(cond)                                                                                \
-    do                                                                                             \
-    {                                                                                              \
-        if (!(cond))                                                                               \
-        {                                                                                          \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);                            \
-            ++failures;                                                                            \
-        }                                                                                          \
-    } while (0)
 
 using Coord = std::array<int, 2>;
 
@@ -50,7 +38,7 @@ static bool contains(const std::vector<Coord>& cells, int x, int y)
 //   +   +   +   +      (the wall under (1,1) is closed)
 //   | S   ?   G |
 //   +---+---+---+
-static void unexploredCellWithKnownExitsIsNotProof()
+TEST_CASE("route proof: an unentered cell with known exits is not proof")
 {
     Maze      maze(2, 3);
     MazeMouse mm({0, 0}, "n", {{2, 0}}, &maze);
@@ -82,7 +70,7 @@ static void unexploredCellWithKnownExitsIsNotProof()
 
 // Only the start explored: unknown walls closed give no route at all, while
 // unknown walls open give a 4-cell corner-to-corner staircase.
-static void freshMazeIsUnproven()
+TEST_CASE("route proof: a fresh maze is unproven")
 {
     Maze      maze(3, 3);
     MazeMouse mm({0, 0}, "n", {{2, 2}}, &maze);
@@ -107,7 +95,7 @@ static void freshMazeIsUnproven()
 // Of the tied best routes, the one with the fewest unexplored cells is the
 // one worth checking: here east along the bottom, then north, leaving only
 // the goal itself.
-static void fewestUnexploredRouteIsChosen()
+TEST_CASE("route proof: the tied route with the fewest unexplored cells is chosen")
 {
     Maze      maze(3, 3);
     MazeMouse mm({0, 0}, "n", {{2, 2}}, &maze);
@@ -122,7 +110,7 @@ static void fewestUnexploredRouteIsChosen()
 }
 
 // Any goal cell of a block ends the route.
-static void nearestGoalCellCounts()
+TEST_CASE("route proof: any goal cell of a block ends the route")
 {
     Maze      maze(2, 3);
     MazeMouse mm({0, 0}, "n", {{2, 0}, {2, 1}}, &maze);
@@ -141,7 +129,7 @@ static void nearestGoalCellCounts()
 // A cell whose four sides were all seen from its neighbours has nothing left
 // to sense, so it counts as explored without a visit, and the proof that
 // failed for the unentered cell above now holds.
-static void fullyWalledCellNeedsNoVisit()
+TEST_CASE("route proof: a fully walled cell needs no visit")
 {
     Maze      maze(2, 3);
     MazeMouse mm({0, 0}, "n", {{2, 0}}, &maze);
@@ -166,7 +154,7 @@ static void fullyWalledCellNeedsNoVisit()
     CHECK(markKnownCellsExplored(mm) == 0);
 }
 
-static void capsStopTheProof()
+TEST_CASE("route proof: caps stop the proof")
 {
     const RouteProofCaps caps{/*max_legs=*/10, /*max_ms=*/1000};
     RouteBounds          open{/*known_cells=*/6, /*optimistic_cells=*/4};
@@ -179,17 +167,4 @@ static void capsStopTheProof()
     CHECK(!keepProving(open, 0, 1000, caps));
     // No optimistic route at all means nothing left to explore.
     CHECK(!keepProving(RouteBounds{}, 0, 0, caps));
-}
-
-int main()
-{
-    unexploredCellWithKnownExitsIsNotProof();
-    freshMazeIsUnproven();
-    fewestUnexploredRouteIsChosen();
-    nearestGoalCellCounts();
-    fullyWalledCellNeedsNoVisit();
-    capsStopTheProof();
-    if (failures == 0)
-        std::printf("PASS: route proof\n");
-    return failures == 0 ? 0 : 1;
 }

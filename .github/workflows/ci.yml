@@ -86,6 +86,48 @@ jobs:
       - name: No Pico SDK includes in platform-neutral code
         run: python3 tools/check_sdk_free.py
 
+  stm32-firmware:
+    name: STM32 firmware
+    runs-on: ubuntu-24.04
+    env:
+      ARM_TOOLCHAIN_VERSION: 14.2.rel1
+      ARM_TOOLCHAIN_PATH: ${{ github.workspace }}/arm-toolchain
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache the Arm toolchain
+        id: toolchain-cache
+        uses: actions/cache@v4
+        with:
+          path: arm-toolchain
+          key: arm-gnu-toolchain-${{ env.ARM_TOOLCHAIN_VERSION }}-x86_64-arm-none-eabi
+
+      - name: Download the Arm toolchain
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        run: |
+          url="https://developer.arm.com/-/media/Files/downloads/gnu/${ARM_TOOLCHAIN_VERSION}/binrel/arm-gnu-toolchain-${ARM_TOOLCHAIN_VERSION}-x86_64-arm-none-eabi.tar.xz"
+          mkdir -p "$ARM_TOOLCHAIN_PATH"
+          curl -fsSL "$url" | tar -xJ --strip-components=1 -C "$ARM_TOOLCHAIN_PATH"
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ninja-build
+
+      - name: Configure
+        run: cmake -S . -B build-stm32 -G Ninja -DJURABABA_PLATFORM=stm32
+
+      # The build also runs tools/check_stm32_layout.py on the ELF.
+      - name: Build
+        run: ninja -C build-stm32
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jurababa-stm32
+          path: |
+            build-stm32/Jurababa_stm32.elf
+            build-stm32/Jurababa_stm32.hex
+            build-stm32/Jurababa_stm32.map
+          if-no-files-found: error
+
   maze-corpus:
     name: Sim bot maze corpus
     runs-on: ubuntu-24.04
@@ -103,6 +145,9 @@ jobs:
           python3 sim/runner/runner.py
           --baseline sim/mazes/baseline.json --min-optimal 0.9
           --json maze-results.json --csv maze-results.csv
+
+      - name: Compare the time and length route planners
+        run: python3 sim/runner/runner.py --compare-planners
 
       - uses: actions/upload-artifact@v4
         if: always()

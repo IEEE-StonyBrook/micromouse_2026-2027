@@ -42,3 +42,17 @@ After a planner change that is meant to change the numbers:
 make -C sim
 python3 sim/runner/runner.py --write-baseline sim/mazes/baseline.json
 ```
+
+## Comparing route planners
+
+The speed run picks its route by fewest cells (`--planner length`, the
+default) or by least estimated run time (`--planner time`): merged straights
+as rest-to-rest trapezoidal moves at the fast-run speed and acceleration, and
+90 degree spins at the spin-turn limits, all from `config/motion.h`. The
+comparison mode runs the corpus under both and fails unless both pass every
+maze and the time planner's route is never estimated slower:
+
+```bash
+make -C sim
+python3 sim/runner/runner.py --compare-planners
+```
