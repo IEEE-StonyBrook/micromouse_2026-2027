@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Physics Sim Viewer</title>
+  <link rel="stylesheet" href="vendor/uPlot.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <h1>Jurababa physics sim</h1>
+    <nav id="presets" class="presets" aria-label="Story presets"></nav>
+    <span id="source" class="source" title="Where the shown runs came from"></span>
+    <button id="theme" class="ghost" type="button" aria-label="Toggle light or dark theme">Light</button>
+  </header>
+  <p id="caption" class="caption">Pick a story above, or set the knobs and press Run.</p>
+
+  <main class="layout">
+    <aside class="knobs" aria-label="Sim knobs">
+      <label class="row">Scenario
+        <select id="scenario">
+          <option value="straight10">Straight 10</option>
+          <option value="ip90">In-place 90°</option>
+          <option value="ss90">Smooth 90°</option>
+        </select>
+      </label>
+      <div id="knobList"></div>
+      <fieldset class="seam">
+        <legend><label><input type="checkbox" id="seamOn"> Floor seam</label></legend>
+        <label class="row">at (mm) <input type="number" id="seamAt" value="900" min="0" max="2000" step="10"></label>
+        <label class="row">encoder over-read (mm) <input type="number" id="seamEncoder" value="20" min="0" max="50" step="1"></label>
+        <label class="row">grip on the step <input type="number" id="seamTraction" value="1" min="0" max="1" step="0.1"></label>
+      </fieldset>
+      <div class="buttons">
+        <button id="run" type="button" class="primary">Run</button>
+        <button id="reset" type="button" class="ghost">Defaults</button>
+      </div>
+      <div class="buttons">
+        <button id="pin" type="button">Pin as A</button>
+        <button id="unpin" type="button" class="ghost" disabled>Unpin</button>
+      </div>
+      <p id="status" class="status" role="status"></p>
+    </aside>
+
+    <section class="stage">
+      <div class="canvasWrap"><canvas id="floor" aria-label="Top-down view of the mouse on the maze floor"></canvas>
+        <div class="key" id="floorKey"></div>
+      </div>
+      <div id="cards" class="cards"></div>
+    </section>
+
+    <section id="charts" class="charts" aria-label="Time traces"></section>
+  </main>
+
+  <footer class="transport">
+    <button id="play" type="button" class="primary" aria-label="Play">▶ Play</button>
+    <input id="scrub" type="range" min="0" max="1000" value="0" step="1" aria-label="Playhead">
+    <span id="clock" class="clock">0.000 s</span>
+    <label class="check"><input type="checkbox" id="follow"> Follow mouse</label>
+    <label class="check"><input type="checkbox" id="advanced"> Advanced charts</label>
+    <label class="speed">Speed
+      <select id="speed">
+        <option value="0.25">0.25×</option>
+        <option value="0.5">0.5×</option>
+        <option value="1" selected>1×</option>
+        <option value="2">2×</option>
+        <option value="4">4×</option>
+      </select>
+    </label>
+  </footer>
+
+  <script src="vendor/uPlot.iife.min.js"></script>
+  <script src="presets.js" onerror="window.PHYSIM_PRESETS = null"></script>
+  <script src="app.js"></script>
+</body>
+</html>
