@@ -63,16 +63,24 @@ TEST_CASE("motion records the run log every 8 ms by default at any rate")
     auto r = std::make_unique<Rig>(); // the run log is ~56 KB
     r->motion.set_run_log(&r->log);
     r->motion.start_move(180.0f, 300.0f, 0.0f, 2000.0f);
-    r->log.start();
-    CHECK(r->log.dtMs() == 8);
+    r->motion.start_trace(); // latched: the next tick starts the log
+    CHECK_FALSE(r->log.active());
     for (int i = 0; i < LOOP_TICKS(0.080f); i++)
         r->motion.update();
+    CHECK(r->log.dtMs() == 8);
     CHECK(r->log.count() == 10); // 80 ms of 8 ms samples
     const RunLog::Sample last = r->log.sample(9);
     CHECK((last.events & RunLog::FORWARD_ACTIVE) != 0);
     CHECK((last.events & RunLog::ROTATION_ACTIVE) == 0);
     CHECK(last.fwd_mmps > 0.0f); // accelerating at 2000 mm/s^2
     CHECK(last.pos_mm > 0.0f);
+
+    r->motion.stop_trace();
+    r->motion.update();
+    CHECK_FALSE(r->log.active());
+    for (int i = 0; i < LOOP_TICKS(0.080f); i++)
+        r->motion.update();
+    CHECK(r->log.count() == 10); // frozen for the dump
 }
 
 TEST_CASE("motion without a run log records nothing")

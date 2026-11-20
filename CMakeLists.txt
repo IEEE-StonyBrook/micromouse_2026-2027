@@ -53,6 +53,7 @@ set(DRIVER_SOURCES
 )
 
 set(CONTROL_SOURCES
+    firmware/control/crash_detector.cpp
     firmware/control/pid.cpp
     firmware/control/profile.cpp
     firmware/control/drivetrain.cpp
@@ -104,6 +105,7 @@ set(HAL_SOURCES
     firmware/hal/console.cpp
     firmware/hal/pico/console.cpp
     firmware/hal/pico/critical_section.cpp
+    firmware/hal/pico/irq.cpp
     firmware/hal/pico/system.cpp
     firmware/hal/pico/time.cpp
 )

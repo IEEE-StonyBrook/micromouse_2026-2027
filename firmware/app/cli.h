@@ -119,6 +119,10 @@ class CommandLineInterface
     void handle_line_command(const Args& args);
     void handle_smooth_command(const Args& args);
     void handle_maze_command(const Args& args);
+    void handle_crash_command(const Args& args);
+    // Reports a new crash watchdog trip once: prints the cause, shows the
+    // LED cause code and halts any blocking run. Main loop only.
+    void reportCrash();
     void printSmoothTuning();
     bool run_smooth_turn_trial(bool turn_left);
     bool waitForLineStartButton();
@@ -187,6 +191,8 @@ class CommandLineInterface
 
     int  last_function_ = -1;
     bool halted_        = false;
+    // Crash watchdog trips already reported (CrashDetector::tripCount()).
+    uint32_t crash_trips_reported_ = 0;
 
     // LINE telemetry pacing — counts control ticks while LineFollower is in
     // FollowingLine state, prints a one-line PATH-style telemetry every

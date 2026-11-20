@@ -5,12 +5,13 @@
 
 #include "common/tof_wall_utils.h"
 #include "config/motion.h"
+#include "control/crash_detector.h"
 #include "control/pid.h"
 #include "control/profile.h"
+#include "control/run_log.h"
 
 class Drivetrain;
 class IMU;
-class RunLog;
 
 /**
  * @brief High-level motion controller (mazerunner-core Motion style)
@@ -20,6 +21,14 @@ class RunLog;
  *
  * `angle()` and `omega()` intentionally match mazerunner-core profile semantics.
  * Physical yaw remains available separately through `yaw_deg()` / `yaw_rate_degps()`.
+ *
+ * Threading: update() runs in the control-timer interrupt; everything else is
+ * main-loop code. Mutators queue a Command that update() applies first, in
+ * issue order (FIFO, never last-wins), so the tick never sees half a command.
+ * Profile and setting reads return the live state with the queue applied, so
+ * a read straight after a command already reflects it. Diagnostics computed by
+ * the tick (heading-hold error, steering stats, the trace) catch up on the
+ * next tick; encoder reads report 0 while a drivetrain reset is queued.
  */
 class Motion
 {
@@ -191,17 +200,131 @@ class Motion
     // scheduler pinned to LOOP_FREQUENCY_HZ.
     void update();
 
+    // === Crash watchdog ===
+    // update() feeds the detector every tick. On a trip it cuts the motors
+    // itself (Drivetrain::stop(), then the cut hook) and holds them cut,
+    // with the move frozen, until clear_crash(). The main loop reports it.
+    // Reads the motor currents in amps; false if no reading this tick.
+    using CurrentReader = bool (*)(void* context, float* left_amps, float* right_amps);
+    CrashDetector& crashDetector() { return crash_; }
+    // Wire these at start-up, before the control tick runs.
+    void set_motor_current_reader(CurrentReader reader, void* context);
+    // Called from the control tick on the trip, after the PWM is cut: where a
+    // board puts its drivers to sleep (STM32 DRV8874 nSLEEP). Null = none.
+    void set_crash_cut_hook(void (*hook)()) { crash_cut_hook_ = hook; }
+    // Main loop only: drops the frozen move, so clearing never resumes it,
+    // then releases the latch on the next tick.
+    void clear_crash();
+
     // === Run log (diagnostics) ===
     // Records one sample into `log` whenever it is active and a sample is
-    // due. nullptr (the default) records nothing.
+    // due. nullptr (the default) records nothing. Wire it at start-up.
     void set_run_log(RunLog* log) { run_log_ = log; }
+    // Main loop: empty the log and record one sample per `period_ms`, or
+    // freeze it for reading; both take effect in order with the queued moves.
+    void start_trace(uint16_t period_ms = RunLog::DEFAULT_PERIOD_MS);
+    void stop_trace();
+
+    /// Times a burst of main-loop commands overflowed the latch and was
+    /// applied from the main loop with interrupts masked (diagnostics).
+    uint32_t latchOverflows() const { return latch_overflows_; }
 
   private:
+    /**
+     * @brief One main-loop request to change control-tick state.
+     *
+     * Every public mutator queues one of these instead of writing the
+     * profiles, controllers or drivetrain itself; update() applies the queue
+     * first thing, in issue order, so the tick never sees half a command.
+     */
+    struct Command
+    {
+        enum class Op : uint8_t
+        {
+            ResetDriveSystem,
+            ResetDriveControl,
+            BeginSequence,
+            EndSequence,
+            StartMove, // a distance_mm, b top_mmps, c final_mmps, d accel_mmps2
+            StartTurn, // a deg, b top_degps, c final_degps, d accel_degps2
+            SmoothArc, // StartTurn, and the rotation PD reads encoder yaw
+            SpinTurn,  // a deg, b omega_degps, c alpha_degps2, from rest
+            ResetRotation,
+            StopAt,      // a position_mm
+            StopAfter,   // a distance_mm
+            StopForward, // a accel_mmps2
+            SetPosition, // a position_mm
+            AdjustPosition,
+            SetTargetVelocity,
+            SetFinalVelocity,
+            ExtendMove,
+            ForwardSettled, // forward controller history cleared
+            ForwardAbort,   // forward profile and controller cleared, motors off
+            SetHeadingHold, // a target_yaw_deg (already wrapped)
+            ClearHeadingHold,
+            SetSteeringMode, // a mode
+            SetLineSteering, // a adjustment_degps, b valid
+            ClearLineSteering,
+            Stop,
+            DisableDrive,
+            EmergencyStop,
+            StartTrace, // a period_ms
+            StopTrace,
+            ResetWallSteeringStats,
+        };
+        Op    op;
+        float a, b, c, d;
+    };
+
+    /**
+     * @brief The state commands set, as references, so one function applies a
+     * command both to the live members (in the tick) and to copies (for
+     * main-loop reads that must already see queued commands).
+     */
+    struct Commanded
+    {
+        Profile&                fwd;
+        Profile&                rot;
+        tof_wall::SteeringMode& steering_mode;
+        bool&                   heading_hold_enabled;
+        float&                  heading_hold_target_yaw_deg;
+        float&                  line_steering_adjustment_degps;
+        bool&                   line_steering_valid;
+        bool&                   motion_sequence_active;
+    };
+
+    /// The live state with every queued command applied, read atomically.
+    struct View
+    {
+        Profile                fwd;
+        Profile                rot;
+        tof_wall::SteeringMode steering_mode;
+        bool                   heading_hold_enabled;
+        float                  heading_hold_target_yaw_deg;
+        float                  line_steering_adjustment_degps;
+        bool                   line_steering_valid;
+        bool                   motion_sequence_active;
+    };
+
+    static constexpr uint8_t LATCH_CAPACITY = 16;
+
+    // Out of line: inlined into every mutator and getter they cost ~50 KB of flash.
+    [[gnu::noinline]] void issue(Command::Op op, float a = 0.0f, float b = 0.0f, float c = 0.0f,
+                                 float d = 0.0f);
+    void                   applyPendingCommands();
+    // Caller holds hal::irq::Lock. Encoder reads report 0 until the tick resets them.
+    bool                          drivetrainResetQueued() const;
+    [[gnu::noinline]] void        applyCommand(const Command& command);
+    [[gnu::noinline]] static void applyCommanded(const Command& command, const Commanded& state);
+    [[gnu::noinline]] View        view() const;
+
     void  runPositionControl();
     float wallSteeringAdjustment(float fwd_velocity_mmps, float rot_velocity_degps);
     float headingHoldAdjustment(float fwd_velocity_mmps, float rot_velocity_degps);
     void  resetControlHistory();
+    void  clearWallSteeringStats();
     void  recordWallSteeringStats(float adjustment_degps, tof_wall::SteeringSource source);
+    void  checkCrash();
 
     // Hardware
     Drivetrain* drivetrain_;
@@ -263,9 +386,20 @@ class Motion
 
     RunLog* run_log_ = nullptr;
 
+    // Main-loop commands waiting for the next tick, oldest first. Written by
+    // the main loop and drained by update(), both under hal::irq::Lock.
+    Command  latch_[LATCH_CAPACITY] = {};
+    uint8_t  latch_count_           = 0;
+    uint32_t latch_overflows_       = 0;
+
     // Non-zero while the rotation PD reads encoder yaw: UINT16_MAX during a
     // smooth-turn arc, then a holdover countdown in ticks once it ends.
     uint16_t encoder_rotation_ticks_ = 0;
+
+    CrashDetector crash_;
+    CurrentReader current_reader_  = nullptr;
+    void*         current_context_ = nullptr;
+    void (*crash_cut_hook_)()      = nullptr;
 };
 
 #endif

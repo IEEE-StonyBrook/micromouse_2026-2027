@@ -92,6 +92,9 @@ jobs:
       - name: No logging or heap in ISR context
         run: python3 tools/check_isr_logging.py
 
+      - name: Main loop changes Motion tick state only through the latch
+        run: python3 tools/check_motion_latch.py
+
       - name: No Pico SDK includes in platform-neutral code
         run: python3 tools/check_sdk_free.py
 

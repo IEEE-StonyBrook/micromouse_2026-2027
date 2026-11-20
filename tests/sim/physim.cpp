@@ -95,6 +95,14 @@ float Robot::volts(bool left) const
     return (left ? left_ : right_).volts;
 }
 
+float Robot::amps(bool left) const
+{
+    const Wheel& w    = left ? left_ : right_;
+    const float  r_m  = p_.wheel_radius_mm / 1000.0f;
+    const float  ke_g = p_.back_emf_vs_per_rad * p_.gear_ratio;
+    return (w.volts - ke_g * w.tyre_mps / r_m) / p_.winding_ohm;
+}
+
 float Robot::encoderMm(bool left) const
 {
     const Wheel& w   = left ? left_ : right_;
@@ -153,6 +161,8 @@ void Robot::substep(float h)
         const float drive_n = ke_g * amps / r_m;
         const float t_n     = (w == &left_) ? t_l : t_r;
         w->tyre_mps += (drive_n - t_n) / p_.rotating_mass_kg * h;
+        if (w == pinned_)
+            w->tyre_mps = 0.0f;
         w->tyre_m += w->tyre_mps * h;
     }
     left_.ground_m += ground_l * h;
@@ -228,10 +238,12 @@ void Robot::updateSensors(float dt)
 void Robot::step()
 {
     const float dt = LOOP_INTERVAL_S;
-    left_.volts    = fake::motorDuty(left_motor) * p_.battery_v;
-    right_.volts   = fake::motorDuty(right_motor) * p_.battery_v;
-    const int   n  = static_cast<int>(std::ceil(dt / kMaxSubstepS));
-    const float h  = dt / static_cast<float>(n);
+    if (p_.pinned_wheel.enabled && time_s_ >= p_.pinned_wheel.at_s)
+        pinned_ = p_.pinned_wheel.left ? &left_ : &right_;
+    left_.volts   = fake::motorDuty(left_motor) * p_.battery_v;
+    right_.volts  = fake::motorDuty(right_motor) * p_.battery_v;
+    const int   n = static_cast<int>(std::ceil(dt / kMaxSubstepS));
+    const float h = dt / static_cast<float>(n);
     for (int i = 0; i < n; i++)
         substep(h);
     updateSensors(dt);
@@ -254,6 +266,15 @@ bool parseScenario(const char* name, Scenario* out)
 namespace
 {
 // Motion holds a ~100 KB trace buffer, so the rig lives on the heap.
+// Motion's current reader: the plant's winding currents, as IPROPI would give.
+bool readPlantAmps(void* robot, float* left_amps, float* right_amps)
+{
+    const Robot* r = static_cast<const Robot*>(robot);
+    *left_amps     = r->amps(true);
+    *right_amps    = r->amps(false);
+    return true;
+}
+
 struct Rig
 {
     Robot                                     robot;
@@ -267,13 +288,26 @@ struct Rig
           dt(&robot.left_motor, &robot.right_motor, &robot.left_encoder, &robot.right_encoder),
           motion(&dt, &robot.imu), on_sample(cb)
     {
-        result.finished = true;
+        result.finished              = true;
+        result.crash_cause           = CrashCause::kNone;
+        result.crash_trip_s          = -1.0f;
+        result.peak_volts_after_trip = 0.0f;
     }
 
     void tick()
     {
+        const bool was_tripped = motion.crashDetector().tripped();
         motion.update();
         robot.step();
+        if (was_tripped)
+            result.peak_volts_after_trip =
+                std::max({result.peak_volts_after_trip, std::fabs(robot.volts(true)),
+                          std::fabs(robot.volts(false))});
+        else if (motion.crashDetector().tripped())
+        {
+            result.crash_trip_s = robot.timeS();
+            result.crash_cause  = motion.crashDetector().cause();
+        }
         result.peak_pitch_rate_degps =
             std::max(result.peak_pitch_rate_degps, std::fabs(robot.pitchRateDegps()));
         result.peak_accel_z_mps2 =
@@ -291,7 +325,8 @@ struct Rig
     {
         const int guard = LOOP_TICKS(kGuardS);
         int       ticks = 0;
-        while (!done() && ticks++ < guard)
+        // A trip freezes the move for good; stop waiting on it.
+        while (!done() && !motion.crashDetector().tripped() && ticks++ < guard)
             tick();
         if (!done())
             result.finished = false;
@@ -317,6 +352,11 @@ Result run(Scenario scenario, const Params& params, const RunOptions& options,
            const std::function<void(const Sample&)>& on_sample)
 {
     auto r = std::make_unique<Rig>(params, on_sample);
+    r->motion.crashDetector().set_enabled(options.crash_watchdog);
+    r->motion.crashDetector().set_inhibit(options.crash_inhibit);
+    if (options.sense_current)
+        r->motion.set_motor_current_reader(readPlantAmps, &r->robot);
+    r->motion.set_crash_cut_hook(options.on_crash_cut);
     switch (scenario)
     {
         case Scenario::kStraight10:

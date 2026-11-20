@@ -1,33 +1,47 @@
 // STM32F405 bring-up entry point: blinks the Feather's red LED at 1 Hz, or
 // the clock-fault pattern (three quick flashes every 2 s) when the 12 MHz
-// crystal failed to start and the core runs from the HSI instead.
+// crystal failed to start and the core runs from the HSI instead. A flash
+// store fault shows instead of the 1 Hz blink until the next good save: two
+// flashes when a damaged slot was skipped, four when no settings loaded.
+//
+// At boot the board reads its chip UID and loads the profile it saved under
+// it from the flash store (sectors 1-2). An unknown board prints the presets
+// and refuses to arm until one is picked.
 //
 // A bring-up shell runs on the USART3 console (Feather TX/RX, 1 Mbaud, 8N1):
 // it echoes what it receives and answers these lines:
-//   stats  tick timing, encoders, IMU, console drop counters, memory use
-//   flood  queues 64 KB at once, to show the TX ring dropping and counting
-//   logfill  fills the run log (in CCM) with a full ring of synthetic samples
-//   log      dumps the run log as TRACE CSV rows
+//   stats        tick timing, encoders, IMU, console drop counters, memory use
+//   flood        queues 64 KB at once, to show the TX ring dropping and counting
+//   profile      this board's UID and profile, or the presets to pick from
+//   profile <n>  saves preset n as this board's profile (erases a flash sector)
+//   arm          says whether this board may arm; nothing moves in bring-up
+//   logfill      fills the run log (in CCM) with a full ring of synthetic samples
+//   log          dumps the run log as TRACE CSV rows
 // Memory use and tick timing are also left in `memory_usage` and `tick_stats`
 // for a debugger to read.
 
 #include <cinttypes>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 #include <libopencm3/stm32/gpio.h>
 
+#include "common/board_identity.h"
+#include "common/flash_store.h"
 #include "config/board_feather.h"
 #include "control/run_log.h"
 #include "drivers/lsm6dsr.h"
 #include "hal/console.h"
 #include "hal/stm32/clock.h"
 #include "hal/stm32/console.h"
+#include "hal/stm32/flash.h"
 #include "hal/stm32/gpio.h"
 #include "hal/stm32/memory.h"
 #include "hal/stm32/quad_counter.h"
 #include "hal/stm32/spi.h"
 #include "hal/stm32/tick.h"
+#include "hal/stm32/uid.h"
 #include "hal/time.h"
 
 namespace
@@ -40,6 +54,21 @@ hal::stm32::QuadCounter encoder_right;
 hal::stm32::SpiBus      imu_spi;
 Lsm6dsr                 imu(imu_spi, board::IMU_YAW_SIGN);
 volatile bool           imu_ready = false;
+
+/// The bring-up firmware never arms and drives no motors, fan or IR
+/// emitters, so nothing can block a save yet. The tickets that add those
+/// outputs must force them off here and report any that stay on.
+class BringupSaveGuard final : public SaveGuard
+{
+  public:
+    SaveBlocker prepareForSave() override { return saveBlocker({false, false, false, false}); }
+};
+
+hal::stm32::StoreFlash store_flash;
+BringupSaveGuard       save_guard;
+hal::stm32::ChipUid    chip_uid;
+BoardIdentity*         identity          = nullptr;
+uint8_t                store_led_flashes = 0;
 
 // The always-on 1 kHz tick: widen the encoder counts before anything reads them.
 void onTick()
@@ -137,6 +166,48 @@ void dumpRunLog()
     std::printf("TRACE end\n");
 }
 
+void printProfile()
+{
+    std::printf("board UID %08" PRIX32 "-%08" PRIX32 "-%08" PRIX32 "\n", chip_uid.words[0],
+                chip_uid.words[1], chip_uid.words[2]);
+    if (identity->identified())
+    {
+        const board::BoardProfile& p = identity->profile();
+        std::printf("profile %s: %s, IR set %u, battery divider %.3f\n", p.name,
+                    p.has_fan ? "fan" : "no fan", static_cast<unsigned>(p.ir_set),
+                    static_cast<double>(p.battery_divider));
+        return;
+    }
+    std::printf("unknown board: arming refused until a profile is saved. Pick one:\n");
+    for (std::size_t i = 0; i < board::PROFILE_PRESET_COUNT; ++i)
+        std::printf("  profile %u  %s\n", static_cast<unsigned>(i), board::PROFILE_PRESETS[i].name);
+}
+
+void pickProfile(const char* arg)
+{
+    char*               end   = nullptr;
+    const unsigned long index = std::strtoul(arg, &end, 10);
+    if (end == arg || *end != '\0')
+    {
+        std::printf("usage: profile <n>\n");
+        return;
+    }
+    // The erase stalls every interrupt that runs from flash, the 1 kHz tick
+    // included, for up to 500 ms; the tick's max period in stats shows it.
+    static const char* const STATUS_NAMES[]  = {"saved", "refused", "too large", "flash error"};
+    static const char* const BLOCKER_NAMES[] = {"no such preset", "armed", "motors awake", "fan on",
+                                                "emitters on"};
+    const SaveResult         result          = identity->pick(index);
+    if (result.status == SaveStatus::kRefused)
+        std::printf("profile not saved: %s\n", BLOCKER_NAMES[static_cast<int>(result.blocker)]);
+    else
+        std::printf("profile %s (record %" PRIu32 ")\n",
+                    STATUS_NAMES[static_cast<int>(result.status)], result.seq);
+    if (result.status == SaveStatus::kOk)
+        store_led_flashes = 0;
+    printProfile();
+}
+
 void runLine()
 {
     line[line_len] = '\0';
@@ -144,13 +215,40 @@ void runLine()
         printStats();
     else if (std::strcmp(line, "flood") == 0)
         flood();
+    else if (std::strcmp(line, "profile") == 0)
+        printProfile();
+    else if (std::strncmp(line, "profile ", 8) == 0)
+        pickProfile(line + 8);
+    else if (std::strcmp(line, "arm") == 0)
+        std::printf(identity->armAllowed() ? "arm: allowed\n"
+                                           : "arm: refused, unknown board (see profile)\n");
     else if (std::strcmp(line, "logfill") == 0)
         fillRunLog();
     else if (std::strcmp(line, "log") == 0)
         dumpRunLog();
     else if (line_len > 0)
-        std::printf("unknown: %s (try stats, flood, logfill, log)\n", line);
+        std::printf("unknown: %s (try stats, flood, profile, arm, logfill, log)\n", line);
     line_len = 0;
+}
+
+/// Reads the UID and loads this board's profile; prints who it is.
+void identifyBoard()
+{
+    chip_uid = hal::stm32::chipUid();
+    if (!store_flash.init())
+        std::printf("flash store: linker region is not whole equal sectors\n");
+    // Built here, once the UID is known: every record carries its hash.
+    static FlashStore    flash_store(store_flash, save_guard, SETTINGS_VERSION,
+                                     uidHash(chip_uid.words));
+    static BoardIdentity board_identity(flash_store);
+    identity = &board_identity;
+
+    static const char* const LOAD_NAMES[] = {"ok", "empty", "fell back to the other slot",
+                                             "no valid record, defaults"};
+    const LoadStatus         status       = identity->boot();
+    store_led_flashes                     = ledFlashes(status);
+    std::printf("flash store: %s\n", LOAD_NAMES[static_cast<int>(status)]);
+    printProfile();
 }
 
 // Echoes received bytes and collects them into a line.
@@ -197,6 +295,8 @@ int main()
                 STATUS_NAMES[static_cast<int>(status)]);
     imu_ready = status == Lsm6dsr::Status::kOk;
 
+    identifyBoard();
+
     const uint32_t led_port       = hal::stm32::gpioPort(board::LED);
     const uint16_t led_bit        = hal::stm32::gpioBit(board::LED);
     uint32_t       last_report_ms = 0;
@@ -205,9 +305,11 @@ int main()
         __asm__ volatile("wfi");
         pollConsole();
         const uint32_t now_ms = hal::time::nowMs();
-        const bool     led_on = clock == hal::stm32::ClockSource::kHse
-                                    ? (now_ms / BLINK_HALF_MS) % 2 == 0
-                                    : hal::stm32::clockFaultLedOn(now_ms);
+        bool           led_on = (now_ms / BLINK_HALF_MS) % 2 == 0;
+        if (clock != hal::stm32::ClockSource::kHse)
+            led_on = hal::stm32::clockFaultLedOn(now_ms);
+        else if (store_led_flashes > 0)
+            led_on = ledCodeOn(now_ms, store_led_flashes);
         if (led_on)
             gpio_set(led_port, led_bit);
         else

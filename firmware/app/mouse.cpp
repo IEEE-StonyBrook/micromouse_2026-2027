@@ -2129,7 +2129,7 @@ bool Mouse::test_SS90E(bool turn_left)
 
 #ifndef SIMULATOR_BUILD
     if (!run_on_simulator && motion_ != nullptr)
-        runLog().start();
+        motion_->start_trace();
 #endif
     smooth_turn_step(turn_left);
     maze_mouse_->turn45Steps(turn_left ? -2 : 2);
@@ -2152,7 +2152,7 @@ bool Mouse::test_SS90E(bool turn_left)
         motion_->set_heading_hold(target_yaw_deg);
         motion_->move(2.0f * CELL_SIZE_MM, cruise_speed_mmps_, 0.0f, ROBOT_SEARCH_ACCEL_MMPS2);
         const bool run_out_ok = waitForMotion();
-        runLog().stop();
+        motion_->stop_trace();
         print_turn_trace(target_yaw_deg);
         if (!run_out_ok)
             return false;

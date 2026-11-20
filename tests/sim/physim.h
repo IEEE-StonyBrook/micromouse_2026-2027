@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <functional>
 
+#include "control/crash_detector.h"
 #include "drivers/encoder.h"
 #include "drivers/imu.h"
 #include "drivers/motor.h"
@@ -55,6 +56,18 @@ struct Seam
     float accel_z_peak_mps2     = 0.0f;  // peak of the z-accel bump
 };
 
+/**
+ * @brief A wheel jammed from at_s on: against a wall or post, or a seized
+ * gearbox. The tyre stops turning and skids on the floor, so the motor stalls
+ * and the other wheel swings the body round it.
+ */
+struct PinnedWheel
+{
+    bool  enabled = false;
+    bool  left    = true;
+    float at_s    = 0.0f; // run time the wheel jams
+};
+
 struct Params
 {
     // Body.
@@ -83,7 +96,8 @@ struct Params
     float gyro_noise_degps_rthz = 0.0f; // white yaw-rate noise density, deg/s/sqrt(Hz)
     float gyro_bias_degps       = 0.0f; // constant yaw-rate offset (+ = CCW)
 
-    Seam seam;
+    Seam        seam;
+    PinnedWheel pinned_wheel;
 
     uint64_t seed = 1;
 };
@@ -123,6 +137,7 @@ class Robot
     float accelZMps2() const { return accel_z_mps2_; }
     int   seamCrossings() const { return seam_crossings_; }
     float volts(bool left) const;
+    float amps(bool left) const; // motor winding current, + = driving forward
 
     Motor   left_motor;
     Motor   right_motor;
@@ -164,6 +179,7 @@ class Robot
     float    pitch_rate_degps_ = 0.0f;
     float    accel_z_mps2_     = 0.0f;
     int      seam_crossings_   = 0;
+    Wheel*   pinned_           = nullptr; // the jammed wheel, once PinnedWheel.at_s passes
     uint64_t rng_;
 };
 
@@ -181,6 +197,12 @@ struct RunOptions
 {
     float speed_mmps  = 1000.0f; // straight cruise
     float accel_mmps2 = 2500.0f;
+    // Crash watchdog: on, inhibited, fed the plant's motor current (as the
+    // STM32's IPROPI would) or not, and a hook for the motor cut.
+    bool crash_watchdog    = false;
+    bool crash_inhibit     = false;
+    bool sense_current     = false;
+    void (*on_crash_cut)() = nullptr;
 };
 
 /// One control tick of a run, for traces.
@@ -208,15 +230,18 @@ struct Sample
 
 struct Result
 {
-    bool  finished;    // every move ended before the guard time
-    float duration_s;  // including the settle time after the last move
-    float distance_mm; // true body-centre path length
-    float yaw_deg;     // true heading, + = CCW
-    float imu_yaw_deg;
-    float encoder_mm; // mean of the two encoders
-    float peak_pitch_rate_degps;
-    float peak_accel_z_mps2;
-    int   seam_crossings;
+    bool       finished;    // every move ended before the guard time
+    float      duration_s;  // including the settle time after the last move
+    float      distance_mm; // true body-centre path length
+    float      yaw_deg;     // true heading, + = CCW
+    float      imu_yaw_deg;
+    float      encoder_mm; // mean of the two encoders
+    float      peak_pitch_rate_degps;
+    float      peak_accel_z_mps2;
+    int        seam_crossings;
+    CrashCause crash_cause;           // kNone if the watchdog never tripped
+    float      crash_trip_s;          // run time of the trip; < 0 if none
+    float      peak_volts_after_trip; // largest |motor volts| on any tick after it
 };
 
 /// Runs a scenario; on_sample (if set) sees every control tick.

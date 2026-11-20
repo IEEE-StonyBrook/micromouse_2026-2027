@@ -141,7 +141,9 @@ void Drivetrain::update()
 
 void Drivetrain::setVoltage(float left_volts, float right_volts)
 {
-    float batt = batteryVoltage();
+    float batt   = batteryVoltage();
+    left_volts_  = left_volts;
+    right_volts_ = right_volts;
     left_motor_->set_motor_volts(left_volts, batt);
     right_motor_->set_motor_volts(right_volts, batt);
 }
@@ -157,6 +159,8 @@ float Drivetrain::batteryVoltage() const
 
 void Drivetrain::stop()
 {
+    left_volts_  = 0.0f;
+    right_volts_ = 0.0f;
     left_motor_->stop();
     right_motor_->stop();
 }

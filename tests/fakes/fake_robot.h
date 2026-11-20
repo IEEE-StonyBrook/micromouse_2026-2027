@@ -11,6 +11,8 @@
  * positive counts mean the wheel drives forward; invert_direction is ignored.
  */
 
+#include <functional>
+
 #include "drivers/encoder.h"
 #include "drivers/imu.h"
 #include "drivers/motor.h"
@@ -25,6 +27,13 @@ void setEncoderCount(const Encoder& encoder, int count);
 
 /// Sets the IMU's absolute yaw (deg, + = CCW) and yaw rate (deg/s).
 void setImu(const IMU& imu, float yaw_deg, float omega_degps);
+
+/**
+ * @brief Runs hook inside every IMU::update(), which Motion::update() calls
+ * mid-tick. Lets a test act as main-loop code that runs while a control tick
+ * is in progress. An empty function removes the hook.
+ */
+void setImuUpdateHook(std::function<void()> hook);
 
 /**
  * @brief Two wheels on a first-order motor model, wired to fake drivers.
