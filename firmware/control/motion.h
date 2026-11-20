@@ -10,6 +10,7 @@
 
 class Drivetrain;
 class IMU;
+class RunLog;
 
 /**
  * @brief High-level motion controller (mazerunner-core Motion style)
@@ -190,38 +191,10 @@ class Motion
     // scheduler pinned to LOOP_FREQUENCY_HZ.
     void update();
 
-    // === Turn trace (diagnostics) ===
-    // Recorded on the control core every TRACE_DECIMATION ticks while armed;
-    // read back on Core 0 only after the motion has finished.
-    struct TraceSample
-    {
-        float target_deg;    // rotation profile position, relative to turn start
-        float yaw_deg;       // IMU robot angle (absolute)
-        float rot_error_deg; // rotation PD accumulated error
-        float rot_volts;     // rotation PD output
-        float hold_err_deg;  // heading hold error
-        float wall_degps;    // ToF wall steering fed to the rotation PD
-        float hold_degps;    // IMU heading hold fed to the rotation PD
-        float fwd_mmps;      // forward profile velocity
-        float left_mmps;     // measured wheel velocity
-        float right_mmps;
-        float left_volts;
-        float right_volts;
-        bool  encoder_rotation; // rotation PD fed from encoders, not the IMU
-        float left_tof_mm;      // filtered ToF distances as last set by Core 0
-        float front_tof_mm;
-        float right_tof_mm;
-        float pos_mm; // forward profile position (the search's cell frame)
-    };
-    static constexpr uint16_t TRACE_CAPACITY = 1500; // ~108 KB RAM
-    // Default sample period 4 ms: 2 ticks at 500 Hz, 4 at 1 kHz.
-    static constexpr uint16_t TRACE_DECIMATION = LOOP_TICKS(0.004f);
-
-    void               start_trace(uint16_t decimation = TRACE_DECIMATION);
-    void               stop_trace();
-    uint16_t           traceCount() const;
-    uint16_t           traceDtMs() const;
-    const TraceSample& traceSample(uint16_t index) const;
+    // === Run log (diagnostics) ===
+    // Records one sample into `log` whenever it is active and a sample is
+    // due. nullptr (the default) records nothing.
+    void set_run_log(RunLog* log) { run_log_ = log; }
 
   private:
     void  runPositionControl();
@@ -288,12 +261,7 @@ class Motion
     float latest_heading_hold_error_deg_        = 0.0f;
     float latest_heading_hold_adjustment_degps_ = 0.0f;
 
-    TraceSample       trace_[TRACE_CAPACITY] = {};
-    volatile uint16_t trace_count_           = 0;
-    uint16_t          trace_next_            = 0; // ring write index
-    uint16_t          trace_tick_            = 0;
-    uint16_t          trace_decimation_      = TRACE_DECIMATION;
-    volatile bool     trace_active_          = false;
+    RunLog* run_log_ = nullptr;
 
     // Non-zero while the rotation PD reads encoder yaw: UINT16_MAX during a
     // smooth-turn arc, then a holdover countdown in ticks once it ends.

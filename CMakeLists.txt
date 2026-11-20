@@ -57,6 +57,7 @@ set(CONTROL_SOURCES
     firmware/control/profile.cpp
     firmware/control/drivetrain.cpp
     firmware/control/motion.cpp
+    firmware/control/run_log.cpp
     firmware/control/line_follower.cpp
 )
 

@@ -11,7 +11,6 @@
 
 namespace
 {
-// Motion holds a ~100 KB trace buffer, so tests keep the rig on the heap.
 struct Rig
 {
     fake::Robot robot;

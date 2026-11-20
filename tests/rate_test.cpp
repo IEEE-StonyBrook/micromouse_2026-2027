@@ -9,6 +9,7 @@
 #include "control/line_follower.h"
 #include "control/motion.h"
 #include "control/pid.h"
+#include "control/run_log.h"
 #include "doctest/doctest.h"
 #include "fakes/fake_robot.h"
 
@@ -49,7 +50,7 @@ TEST_CASE("tick counts derive from a time, not a rate")
     CHECK(LOOP_TICKS(0.1f) == static_cast<int>(LOOP_FREQUENCY_HZ / 10.0f));
 }
 
-TEST_CASE("motion trace samples every 4 ms by default at any rate")
+TEST_CASE("motion records the run log every 8 ms by default at any rate")
 {
     struct Rig
     {
@@ -57,14 +58,39 @@ TEST_CASE("motion trace samples every 4 ms by default at any rate")
         Drivetrain  dt{&robot.left_motor, &robot.right_motor, &robot.left_encoder,
                        &robot.right_encoder};
         Motion      motion{&dt, &robot.imu};
+        RunLog      log;
     };
-    auto r = std::make_unique<Rig>();                    // Motion's trace buffer is ~100 KB
-    r->motion.start_move(180.0f, 300.0f, 0.0f, 2000.0f); // traces only record a move
-    r->motion.start_trace();
-    CHECK(r->motion.traceDtMs() == 4);
-    for (int i = 0; i < LOOP_TICKS(0.040f); i++)
+    auto r = std::make_unique<Rig>(); // the run log is ~56 KB
+    r->motion.set_run_log(&r->log);
+    r->motion.start_move(180.0f, 300.0f, 0.0f, 2000.0f);
+    r->log.start();
+    CHECK(r->log.dtMs() == 8);
+    for (int i = 0; i < LOOP_TICKS(0.080f); i++)
         r->motion.update();
-    CHECK(r->motion.traceCount() == 10); // 40 ms of 4 ms samples
+    CHECK(r->log.count() == 10); // 80 ms of 8 ms samples
+    const RunLog::Sample last = r->log.sample(9);
+    CHECK((last.events & RunLog::FORWARD_ACTIVE) != 0);
+    CHECK((last.events & RunLog::ROTATION_ACTIVE) == 0);
+    CHECK(last.fwd_mmps > 0.0f); // accelerating at 2000 mm/s^2
+    CHECK(last.pos_mm > 0.0f);
+}
+
+TEST_CASE("motion without a run log records nothing")
+{
+    struct Rig
+    {
+        fake::Robot robot{MOTOR_KM, MOTOR_TM};
+        Drivetrain  dt{&robot.left_motor, &robot.right_motor, &robot.left_encoder,
+                       &robot.right_encoder};
+        Motion      motion{&dt, &robot.imu};
+        RunLog      log;
+    };
+    auto r = std::make_unique<Rig>();
+    r->log.start(); // never handed to Motion
+    r->motion.start_move(180.0f, 300.0f, 0.0f, 2000.0f);
+    for (int i = 0; i < LOOP_TICKS(0.080f); i++)
+        r->motion.update();
+    CHECK(r->log.count() == 0);
 }
 
 TEST_CASE("line error filter settles in the same time at 500 Hz and 1 kHz")

@@ -6,6 +6,7 @@
 #include "common/utils.h"
 #include "config/config.h"
 #include "control/drivetrain.h"
+#include "control/run_log.h"
 #include "drivers/imu.h"
 #include "hal/time.h"
 
@@ -659,63 +660,40 @@ void Motion::runPositionControl()
 
     drivetrain_->setVoltage(left_volts, right_volts);
 
-    // Ring buffer: a run longer than the buffer keeps its last samples, the
-    // ones leading up to a crash or HALT.
-    if (trace_active_ && ++trace_tick_ >= trace_decimation_)
+    // The run log's ring keeps the last samples of a long run, the ones
+    // leading up to a crash or HALT.
+    if (run_log_ != nullptr && run_log_->due())
     {
-        trace_tick_         = 0;
-        trace_[trace_next_] = {rotation_.position(),
-                               yaw_deg(),
-                               rotation_controller_.error(),
-                               rotation_output,
-                               latest_heading_hold_error_deg_,
-                               wall_adjustment,
-                               heading_adjustment,
-                               fwd_velocity,
-                               drivetrain_->velocity(WheelSide::LEFT),
-                               drivetrain_->velocity(WheelSide::RIGHT),
-                               left_volts,
-                               right_volts,
-                               encoder_rotation,
-                               left_wall_mm_,
-                               front_wall_mm_,
-                               right_wall_mm_,
-                               forward_.position()};
-        trace_next_         = static_cast<uint16_t>((trace_next_ + 1) % TRACE_CAPACITY);
-        if (trace_count_ < TRACE_CAPACITY)
-            trace_count_ = trace_count_ + 1;
+        RunLog::Sample s;
+        s.target_deg    = rotation_.position();
+        s.yaw_deg       = yaw_deg();
+        s.rot_error_deg = rotation_controller_.error();
+        s.rot_volts     = rotation_output;
+        s.hold_err_deg  = latest_heading_hold_error_deg_;
+        s.wall_degps    = wall_adjustment;
+        s.hold_degps    = heading_adjustment;
+        s.fwd_mmps      = fwd_velocity;
+        s.left_mmps     = drivetrain_->velocity(WheelSide::LEFT);
+        s.right_mmps    = drivetrain_->velocity(WheelSide::RIGHT);
+        s.left_volts    = left_volts;
+        s.right_volts   = right_volts;
+        s.left_tof_mm   = left_wall_mm_;
+        s.front_tof_mm  = front_wall_mm_;
+        s.right_tof_mm  = right_wall_mm_;
+        s.pos_mm        = forward_.position();
+        const bool saturated =
+            std::fabs(left_volts) >= MAX_VOLTAGE || std::fabs(right_volts) >= MAX_VOLTAGE;
+        uint16_t events = 0;
+        events |= encoder_rotation ? RunLog::ENCODER_ROTATION : 0;
+        events |= latest_wall_state_.left_wall ? RunLog::WALL_LEFT : 0;
+        events |= latest_wall_state_.front_wall ? RunLog::WALL_FRONT : 0;
+        events |= latest_wall_state_.right_wall ? RunLog::WALL_RIGHT : 0;
+        events |= saturated ? RunLog::VOLTS_SATURATED : 0;
+        events |= forward_.active() ? RunLog::FORWARD_ACTIVE : 0;
+        events |= rotation_.active() ? RunLog::ROTATION_ACTIVE : 0;
+        s.events = events;
+        run_log_->record(s);
     }
-}
-
-void Motion::start_trace(uint16_t decimation)
-{
-    trace_active_     = false;
-    trace_count_      = 0;
-    trace_next_       = 0;
-    trace_tick_       = 0;
-    trace_decimation_ = decimation > 0 ? decimation : 1;
-    trace_active_     = true;
-}
-
-void Motion::stop_trace()
-{
-    trace_active_ = false;
-}
-
-uint16_t Motion::traceCount() const
-{
-    return trace_count_;
-}
-
-uint16_t Motion::traceDtMs() const
-{
-    return static_cast<uint16_t>(trace_decimation_ * 1000.0f / LOOP_FREQUENCY_HZ);
-}
-
-const Motion::TraceSample& Motion::traceSample(uint16_t index) const
-{
-    // Oldest sample first.
-    return trace_[(trace_next_ + TRACE_CAPACITY - trace_count_ + index) % TRACE_CAPACITY];
 }
 
 float Motion::wallSteeringAdjustment(float fwd_velocity_mmps, float rot_velocity_degps)

@@ -59,7 +59,6 @@ void recordProfile(Trajectory& traj)
     }
 }
 
-// Motion holds a ~100 KB trace buffer, so the rig lives on the heap.
 struct Rig
 {
     fake::Robot robot{MOTOR_KM, MOTOR_TM};
