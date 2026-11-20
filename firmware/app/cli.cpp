@@ -29,6 +29,7 @@
 #include "drivers/beacon_ir.h"
 #include "drivers/motor.h"
 #include "drivers/tof.h"
+#include "hal/console.h"
 #include "maze/maze.h"
 #include "maze/maze_mouse.h"
 #include "maze/maze_setting.h"
@@ -330,7 +331,7 @@ void CommandLineInterface::print(const char* text)
     if (text == nullptr)
         return;
 
-    std::fputs(text, stdout);
+    hal::console::write(text, std::strlen(text));
     if (deps_.bluetooth != nullptr)
     {
         deps_.bluetooth->write(text);
@@ -550,8 +551,8 @@ bool CommandLineInterface::process_serial_data()
 
     while (true)
     {
-        int c = getchar_timeout_us(0);
-        if (c == PICO_ERROR_TIMEOUT || c < 0)
+        int c = hal::console::getcNonBlocking();
+        if (c < 0)
             break;
 
         char ch = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
@@ -956,7 +957,7 @@ void CommandLineInterface::runCompetitionMode()
                 if (bt->hasCommand() && bt->command() == Bluetooth::Command::HALT)
                     return false;
             }
-            int c = getchar_timeout_us(0);
+            int c = hal::console::getcNonBlocking();
             if (c == 'X' || c == 'x')
                 return false;
 
@@ -2077,7 +2078,7 @@ void CommandLineInterface::pollHaltOnly()
     // reported while process_serial_data() is not being polled.
     Motor::reportBatteryFallback();
 
-    int c = getchar_timeout_us(0);
+    int c = hal::console::getcNonBlocking();
     if (c >= 0)
     {
         char ch = static_cast<char>(c);
@@ -2425,7 +2426,7 @@ bool CommandLineInterface::waitForLineStartButton()
             if (bt->hasCommand() && bt->command() == Bluetooth::Command::HALT)
                 return false;
         }
-        int c = getchar_timeout_us(0);
+        int c = hal::console::getcNonBlocking();
         if (c == 'X' || c == 'x')
             return false;
 
@@ -2677,7 +2678,7 @@ void CommandLineInterface::handle_calibrate_encoders_command()
     halted_           = false;
     while (true)
     {
-        if (getchar_timeout_us(0) >= 0)
+        if (hal::console::getcNonBlocking() >= 0)
             break;
         pollHaltOnly(); // BT HALT / BOOTSEL also end the stream
         if (halted_)
