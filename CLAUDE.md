@@ -85,13 +85,15 @@ the STM32's 1 kHz (`-DHOST_LOOP_FREQUENCY_HZ=1000.0f`), where
 `rate_trajectory_test.cpp` checks that a profile move and a closed-loop
 straight match the 500 Hz run. Each STM32 driver keeps its arithmetic and
 state machines in libopencm3-free headers in `hal/stm32/` (`clock_plan.h`,
-`clock_startup.h`, `counter_extender.h`, `console_rings.h`, `flash_layout.h`)
-that the host tests include; only the thin register glue is untested off
+`clock_startup.h`, `counter_extender.h`, `console_rings.h`, `flash_layout.h`,
+`reset_flags.h`, `watchdog_plan.h`) that the host tests include; only the thin register glue is untested off
 target. The flash store (`common/flash_store.h`, two A/B slots in sectors 1-2)
 and board identity (`common/board_identity.h`) are platform-neutral and run
 against `hal/host/memory_flash.h`, which can cut power at any word:
 `flash_store_test.cpp` cuts every word of a save and checks the old or the new
-record always loads.
+record always loads. The next-boot reset verdict (`common/reset_report.h`:
+the reset cause plus the breadcrumb, `common/breadcrumb.h`) is platform-neutral
+too and tested in `reset_report_test.cpp`.
 `tests/fakes/` stands in for the Motor, Encoder and IMU drivers on the host and
 adds a first-order two-wheel plant, so control changes can be tested without a
 mouse. `tests/sim/` grows that into a physics sim: a DC-motor, two-wheel
@@ -272,6 +274,27 @@ The build runs `tools/check_stm32_layout.py`, which fails if anything lands in
 flash sectors 1-2 (the flash store) or code starts before sector 3. Flash
 `Jurababa_stm32.hex` or the `.elf`, never a raw `.bin`: a `.bin` zero-fills
 the flash store.
+
+At boot the STM32 prints why it last reset, decoded from RCC_CSR (power-up,
+brownout, reset button, software, independent or window watchdog, low
+power), and what it was doing then: `Breadcrumb` keeps the last boot phase or
+console command in `.noinit` SRAM, which survives every reset but a power-off.
+An independent watchdog of at least 3 s (sized for the fastest 47 kHz LSI;
+about 4.4 s at 32 kHz) resets a hung main loop. Only the main loop feeds it,
+never the tick, and a flash-store erase feeds it just before its 500 ms stall.
+
+The brownout reset needs BOR level 3 (reset below about 2.7 V), set once per
+board in the option bytes. The firmware never writes option bytes; set it
+with STM32CubeProgrammer over SWD (or USB DFU with BOOT0 high), then confirm
+with `-ob displ`:
+
+```bash
+STM32_Programmer_CLI -c port=SWD -ob BOR_LEV=0   # FLASH_OPTCR BOR_LEV 00 = level 3
+```
+
+The option bytes survive reflashing and mass erase. At the factory default
+(BOR off) only the 1.8 V power-down reset catches a sag, which reads as a
+power-up, or a power fault if the breadcrumb survived.
 
 Simulator: `cd sim && make`, producing `sim/bin/simulator`.
 
