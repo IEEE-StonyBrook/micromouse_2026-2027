@@ -61,7 +61,7 @@ TEST_CASE("A watchdog timeout says the main loop hung and what it was doing")
     const ResetReport r       = resetReport(c, crumb(0.0f, "profile save"), SAG_V);
     REQUIRE(r.count >= 1);
     CHECK(r.lines[0].severity == ResetSeverity::kError);
-    CHECK(first(r) == "WATCHDOG RESET: the main loop hung after 4200 ms, during: profile save");
+    CHECK(first(r) == "WATCHDOG RESET: the main loop hung during: profile save (begun at 4200 ms)");
 }
 
 TEST_CASE("A power-up with no breadcrumb is a cold boot, not a fault")

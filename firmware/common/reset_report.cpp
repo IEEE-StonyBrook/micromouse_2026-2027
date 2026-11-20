@@ -40,8 +40,8 @@ ResetReport resetReport(const hal::system::ResetCause& cause, const Breadcrumb::
     else if (cause.watchdog_timeout)
     {
         if (prev.valid)
-            add(r, kError, "WATCHDOG RESET: the main loop hung after %lu ms, during: %s", up_ms,
-                activity);
+            add(r, kError, "WATCHDOG RESET: the main loop hung during: %s (begun at %lu ms)",
+                activity, up_ms);
         else
             add(r, kError, "WATCHDOG RESET: the main loop hung; no breadcrumb survived.");
         add(r, kError, "  -> The firmware stopped feeding the watchdog for at least 3 s.");
