@@ -1,6 +1,7 @@
 #include "app/start_gesture.h"
 
 #include <cstdio>
+#include <cstring>
 
 #include "pico/stdlib.h"
 
@@ -9,6 +10,7 @@
 #include "common/log.h"
 #include "config/sensors.h"
 #include "drivers/tof.h"
+#include "hal/console.h"
 
 namespace
 {
@@ -52,7 +54,7 @@ struct WaveMachine
 
 bool peekSerialChar(int& out)
 {
-    int c = getchar_timeout_us(0);
+    int c = hal::console::getcNonBlocking();
     if (c < 0)
         return false;
     out = c;
@@ -64,7 +66,7 @@ void writeDiagnostic(Bluetooth* bt, const char* text)
     if (text == nullptr)
         return;
 
-    std::fputs(text, stdout);
+    hal::console::write(text, std::strlen(text));
     if (bt != nullptr)
     {
         bt->write(text);
@@ -197,7 +199,7 @@ StartTrigger waitForCompetitionGesture(Bluetooth* bt, ToF* front_tof, ToF* right
         // Bluetooth char/command consumption — it routes diagnostic letters
         // (W/C/D/etc.) into the existing CLI parser and surfaces gesture
         // shortcuts (G/H/J) and BT START via its return value. We must NOT
-        // also call getchar_timeout_us / bt->command() here because both
+        // also read the console or bt->command() here because both
         // operations are destructive: a parallel reader would steal chars
         // and break CLI command parsing while COMP is armed.
         if (service_cb != nullptr)

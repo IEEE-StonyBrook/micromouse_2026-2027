@@ -1,26 +1,13 @@
 // Host test for the speed-run route planners.
-// Build and run: make -C tests
 #include <array>
-#include <cstdio>
 #include <string>
 #include <vector>
 
+#include "doctest/doctest.h"
 #include "maze/maze.h"
 #include "maze/maze_mouse.h"
 #include "navigation/route_planner.h"
 #include "navigation/run_time.h"
-
-static int failures = 0;
-
-#define CHECK(cond)                                                                                \
-    do                                                                                             \
-    {                                                                                              \
-        if (!(cond))                                                                               \
-        {                                                                                          \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);                            \
-            ++failures;                                                                            \
-        }                                                                                          \
-    } while (0)
 
 // Fixed numbers, not config/motion.h, so retuning the mouse leaves the worked
 // examples below valid: 1500 mm/s at 2500 mm/s^2, spins at 270 deg/s, 1200 deg/s^2.
@@ -82,21 +69,21 @@ static std::string cellsText(const std::vector<Cell*>& path)
     return s;
 }
 
-static void timePlannerPrefersFewerTurns()
+TEST_CASE("route planner: time planner prefers fewer turns")
 {
     TwoRouteMaze             m;
     const std::vector<Cell*> path = fastestExploredPath(&m.mouse, {{3, 3}}, model());
     CHECK(cellsText(path) == "(0,1)(0,2)(0,3)(0,4)(1,4)(2,4)(3,4)(4,4)(4,3)(3,3)");
 }
 
-static void lengthPlannerTakesTheStaircase()
+TEST_CASE("route planner: length planner takes the short zigzag")
 {
     TwoRouteMaze             m;
     const std::vector<Cell*> path = shortestExploredPath(&m.mouse, {{3, 3}});
     CHECK(cellsText(path) == "(0,1)(1,1)(1,2)(2,2)(2,3)(3,3)");
 }
 
-static void timePlannerNeverSlowerThanLengthPlanner()
+TEST_CASE("route planner: time route is estimated faster")
 {
     TwoRouteMaze             m;
     const std::array<int, 2> heading = m.mouse.currentDirectionArray();
@@ -108,19 +95,8 @@ static void timePlannerNeverSlowerThanLengthPlanner()
     CHECK(by_time < by_length);
 }
 
-static void unreachableGoalGivesEmptyPath()
+TEST_CASE("route planner: unreachable goal gives an empty path")
 {
     TwoRouteMaze m;
     CHECK(fastestExploredPath(&m.mouse, {{2, 0}}, model()).empty());
-}
-
-int main()
-{
-    timePlannerPrefersFewerTurns();
-    lengthPlannerTakesTheStaircase();
-    timePlannerNeverSlowerThanLengthPlanner();
-    unreachableGoalGivesEmptyPath();
-    if (failures == 0)
-        std::printf("PASS: route planners\n");
-    return failures == 0 ? 0 : 1;
 }

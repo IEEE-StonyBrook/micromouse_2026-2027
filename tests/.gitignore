@@ -1,5 +1,3 @@
-encoder_history_test
-maze_setting_test
+host_tests
 build-host/
-run_time_test
-route_planner_test
+build-tests/
