@@ -32,6 +32,8 @@ ISR_FUNCTIONS = [
     ("firmware/control/motion.cpp", "Motion::recordWallSteeringStats"),
     ("firmware/control/motion.cpp", "Motion::headingHoldAdjustment"),
     ("firmware/control/motion.cpp", "Motion::yaw_deg"),
+    ("firmware/control/run_log.cpp", "RunLog::start"),
+    ("firmware/control/run_log.cpp", "RunLog::stop"),
     ("firmware/control/run_log.cpp", "RunLog::due"),
     ("firmware/control/run_log.cpp", "RunLog::record"),
     ("firmware/control/run_log.cpp", "RunLog::pack"),
