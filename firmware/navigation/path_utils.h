@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include "navigation/route_planner.h"
+
 class Mouse;
 class MazeMouse;
 class Cell;
@@ -14,6 +16,10 @@ class Cell;
  */
 namespace PathUtils
 {
+
+// Planner the explored speed-run paths below use. PathLength by default.
+void         set_route_planner(RoutePlanner planner);
+RoutePlanner routePlanner();
 
 /**
  * @brief Traverse path to goals with iterative re-planning

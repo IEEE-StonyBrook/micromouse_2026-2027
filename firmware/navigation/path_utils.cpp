@@ -31,6 +31,8 @@ namespace
 constexpr float kSpeedRunYawPreflightToleranceDeg = 20.0f;
 #endif
 
+RoutePlanner route_planner = RoutePlanner::PathLength;
+
 class MotionSequenceGuard
 {
   public:
@@ -90,6 +92,17 @@ std::string signedFixed1(float value)
     return buffer;
 }
 #endif
+
+// One line per planned speed route, in a fixed form the sim runner parses:
+// the planner, the route's cells and its estimated cardinal run time.
+void logSpeedRoute(size_t cells, const std::string& lfr)
+{
+    char buffer[96];
+    std::snprintf(buffer, sizeof(buffer), "Speed route: planner=%s cells=%u est_run_time_s=%.4f",
+                  routePlannerName(route_planner), static_cast<unsigned>(cells),
+                  static_cast<double>(estimatedRunTimeS(lfr, RunTimeModel{})));
+    LOG_INFO(buffer);
+}
 
 bool parseForwardToken(const std::string& token, int& cells)
 {
@@ -348,6 +361,16 @@ bool executeFastSequence(Mouse* mouse, const std::string& sequence, bool start_f
 
 } // namespace
 
+void set_route_planner(RoutePlanner planner)
+{
+    route_planner = planner;
+}
+
+RoutePlanner routePlanner()
+{
+    return route_planner;
+}
+
 bool traversePath(Mouse* mouse, MazeMouse* maze_mouse, const std::vector<std::array<int, 2>>& goals,
                   bool diagonals, bool all_explored, bool avoid_goals)
 {
@@ -377,7 +400,7 @@ bool traverseExploredPath(Mouse* mouse, MazeMouse* maze_mouse,
     const MazeMask      previous_mask = maze_mouse->mazeMask();
     maze_mouse->setMazeMask(MASK_CLOSED);
 
-    std::vector<Cell*> best_path = shortestExploredPath(maze_mouse, goals);
+    std::vector<Cell*> best_path = plannedExploredPath(maze_mouse, goals, route_planner);
     if (best_path.empty())
     {
         maze_mouse->setMazeMask(previous_mask);
@@ -390,6 +413,7 @@ bool traverseExploredPath(Mouse* mouse, MazeMouse* maze_mouse,
     std::string lfr = PathConverter::buildLFR(maze_mouse->currentCell(),
                                               maze_mouse->currentDirectionArray(), best_path);
     LOG_INFO("Explored Cardinal A* LFR Path: " + lfr);
+    logSpeedRoute(best_path.size(), lfr);
     const std::string fast_path = compressCardinalForwards(lfr);
     LOG_INFO("Explored Cardinal Fast Path: " + fast_path);
     const bool ok = executeFastSequence(mouse, fast_path, start_from_back_wall);
@@ -412,7 +436,7 @@ bool planExploredPath(Mouse* mouse, MazeMouse* maze_mouse,
 
     const MazeMask previous_mask = maze_mouse->mazeMask();
     maze_mouse->setMazeMask(MASK_CLOSED);
-    path = shortestExploredPath(maze_mouse, goals);
+    path = plannedExploredPath(maze_mouse, goals, route_planner);
     if (!path.empty())
         lfr = PathConverter::buildLFR(maze_mouse->currentCell(),
                                       maze_mouse->currentDirectionArray(), path);
@@ -424,6 +448,7 @@ bool planExploredPath(Mouse* mouse, MazeMouse* maze_mouse,
     }
     colorPath(mouse, path);
     LOG_INFO("Explored Cardinal A* LFR Path: " + lfr);
+    logSpeedRoute(path.size(), lfr);
     return true;
 }
 
@@ -446,7 +471,7 @@ bool traverseExploredDiagonalPath(Mouse* mouse, MazeMouse* maze_mouse,
     const MazeMask      previous_mask = maze_mouse->mazeMask();
     maze_mouse->setMazeMask(MASK_CLOSED);
 
-    std::vector<Cell*> best_path = shortestExploredPath(maze_mouse, goals);
+    std::vector<Cell*> best_path = plannedExploredPath(maze_mouse, goals, route_planner);
     if (best_path.empty())
     {
         maze_mouse->setMazeMask(previous_mask);
@@ -459,6 +484,7 @@ bool traverseExploredDiagonalPath(Mouse* mouse, MazeMouse* maze_mouse,
     std::string lfr = PathConverter::buildLFR(maze_mouse->currentCell(),
                                               maze_mouse->currentDirectionArray(), best_path);
     LOG_INFO("Explored A* LFR Path: " + lfr);
+    logSpeedRoute(best_path.size(), lfr);
 
     std::string diag = Diagonalizer::diagonalize(lfr);
     LOG_INFO("Explored Diagonalized Path: " + diag);
