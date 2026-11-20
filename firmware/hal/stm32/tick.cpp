@@ -83,6 +83,11 @@ void start(Handler tick_handler)
     TIM_CR1(TIM7) |= TIM_CR1_CEN;
 }
 
+bool running()
+{
+    return started;
+}
+
 uint64_t nowUs()
 {
     if (!started)

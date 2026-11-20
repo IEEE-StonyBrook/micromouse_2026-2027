@@ -85,7 +85,7 @@ the STM32's 1 kHz (`-DHOST_LOOP_FREQUENCY_HZ=1000.0f`), where
 `rate_trajectory_test.cpp` checks that a profile move and a closed-loop
 straight match the 500 Hz run. Each STM32 driver keeps its arithmetic and
 state machines in libopencm3-free headers in `hal/stm32/` (`clock_plan.h`,
-`clock_startup.h`, `counter_extender.h`, `console_rings.h`, `flash_layout.h`)
+`clock_startup.h`, `counter_extender.h`, `spin_wait.h`, `console_rings.h`, `flash_layout.h`)
 that the host tests include; only the thin register glue is untested off
 target. The flash store (`common/flash_store.h`, two A/B slots in sectors 1-2)
 and board identity (`common/board_identity.h`) are platform-neutral and run

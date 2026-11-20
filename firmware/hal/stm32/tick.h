@@ -37,7 +37,10 @@ Stats stats();
 
 void resetStats();
 
-/// The widened TIM5 count; hal::time::nowUs() calls this.
+/// True once start() has run: the clock advances and the tick wakes WFI.
+bool running();
+
+/// The widened TIM5 count; hal::time::nowUs() calls this. 0 before start().
 uint64_t nowUs();
 } // namespace hal::stm32::tick
 
