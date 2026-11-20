@@ -10,6 +10,7 @@
 #include "drivers/motor.h"
 #include "drivers/tof.h"
 #include "hal/console.h"
+#include "hal/time.h"
 
 #include "hardware/gpio.h"
 #include "hardware/i2c.h"
@@ -522,7 +523,7 @@ void DriverLab::tickOpenLoop()
         const int kept = ol_.step_loop_count - SKIP_SAMPLES;
         if (kept % OUTPUT_EVERY == 0)
         {
-            const uint32_t now_ms = to_ms_since_boot(get_absolute_time());
+            const uint32_t now_ms = hal::time::nowMs();
             reporter_.reportOpenLoopStereo(now_ms, ol_.current_voltage, left_v, right_v, left_speed,
                                            right_speed, imu_->robot_angle());
         }
@@ -804,7 +805,7 @@ void DriverLab::tickStep()
     }
 
     // CSV emission stays gated by the reporter — independent 10 ms cadence.
-    const uint32_t now_ms = to_ms_since_boot(get_absolute_time());
+    const uint32_t now_ms = hal::time::nowMs();
     if (reporter_.isTimeToReport(now_ms))
         reporter_.reportStep(now_ms, step_.voltage, speed, pos);
 
@@ -988,7 +989,7 @@ void DriverLab::tickMove()
     if (abs_volts > move_.max_volts)
         move_.max_volts = abs_volts;
 
-    const uint32_t now_ms = to_ms_since_boot(get_absolute_time());
+    const uint32_t now_ms = hal::time::nowMs();
     if (reporter_.isTimeToReport(now_ms))
     {
         const uint32_t elapsed    = now_ms - reporter_.startTime();
@@ -1157,7 +1158,7 @@ void DriverLab::tickTurn()
             turn_.peak_overshoot_deg = overshoot;
     }
 
-    const uint32_t now_ms = to_ms_since_boot(get_absolute_time());
+    const uint32_t now_ms = hal::time::nowMs();
     if (reporter_.isTimeToReport(now_ms))
     {
         const uint32_t elapsed = now_ms - reporter_.startTime();
@@ -1302,7 +1303,7 @@ void DriverLab::tickTurnOpenLoop()
         const int kept = tol_.step_loop_count - SKIP_SAMPLES;
         if (kept % REPORT_EVERY == 0)
         {
-            const uint32_t now_ms = to_ms_since_boot(get_absolute_time());
+            const uint32_t now_ms = hal::time::nowMs();
             reporter_.reportTurnOpenLoop(now_ms, tol_.current_voltage, cur_yaw, omega);
         }
     }
@@ -1526,7 +1527,7 @@ void DriverLab::tickTurnStep()
     tstep_.enc_omegas.push_back(encoderOmegaDegps());
 
     // CSV emission stays gated by the reporter — independent 10 ms cadence.
-    const uint32_t now_ms = to_ms_since_boot(get_absolute_time());
+    const uint32_t now_ms = hal::time::nowMs();
     if (reporter_.isTimeToReport(now_ms))
         reporter_.reportTurnStep(now_ms, tstep_.diff_voltage, cur_yaw, omega);
 
@@ -2207,7 +2208,7 @@ void DriverLab::cmdYawContinuous(const DriverLabArgs& args)
                               static_cast<unsigned long>(interval_ms));
     hal::console::printFormat("Time(ms)  Yaw(deg)  Omega(deg/s)\n");
 
-    const uint32_t start_time = to_ms_since_boot(get_absolute_time());
+    const uint32_t start_time = hal::time::nowMs();
     uint32_t       elapsed    = 0;
     hal::console::printFormat("(press any key to stop)\n");
     keyPressed(); // discard the LF that trails the command's CR
@@ -2218,11 +2219,11 @@ void DriverLab::cmdYawContinuous(const DriverLabArgs& args)
             hal::console::printFormat("=== Stopped ===\n");
             return;
         }
-        elapsed = to_ms_since_boot(get_absolute_time()) - start_time;
+        elapsed = hal::time::nowMs() - start_time;
         // IMU is ISR-driven; just read.
         hal::console::printFormat("%7lu  %8.2f  %8.2f\n", static_cast<unsigned long>(elapsed),
                                   imu_->robot_angle(), imu_->robot_omega());
-        sleep_ms(interval_ms);
+        hal::time::sleepMs(interval_ms);
     }
     hal::console::printFormat("=== Done ===\n");
 }
@@ -2279,7 +2280,7 @@ void DriverLab::cmdTofContinuous(const DriverLabArgs& args)
                               static_cast<unsigned long>(interval_ms));
     hal::console::printFormat("Time(ms)  Left(mm)  Front(mm)  Right(mm)\n");
 
-    const uint32_t start_time = to_ms_since_boot(get_absolute_time());
+    const uint32_t start_time = hal::time::nowMs();
     uint32_t       elapsed    = 0;
     hal::console::printFormat("(press any key to stop)\n");
     keyPressed(); // discard the LF that trails the command's CR
@@ -2290,14 +2291,14 @@ void DriverLab::cmdTofContinuous(const DriverLabArgs& args)
             hal::console::printFormat("=== Stopped ===\n");
             return;
         }
-        elapsed                = to_ms_since_boot(get_absolute_time()) - start_time;
+        elapsed                = hal::time::nowMs() - start_time;
         const float left_dist  = (left_tof_ != nullptr) ? left_tof_->get_distance() : 0.0f;
         const float front_dist = (front_tof_ != nullptr) ? front_tof_->get_distance() : 0.0f;
         const float right_dist = (right_tof_ != nullptr) ? right_tof_->get_distance() : 0.0f;
         hal::console::printFormat("%7lu  %8.0f  %9.0f  %8.0f\n",
                                   static_cast<unsigned long>(elapsed), left_dist, front_dist,
                                   right_dist);
-        sleep_ms(interval_ms);
+        hal::time::sleepMs(interval_ms);
     }
     hal::console::printFormat("=== Done ===\n");
 }
@@ -2358,7 +2359,7 @@ void DriverLab::cmdEncoderContinuous(const DriverLabArgs& args)
         static_cast<unsigned long>(duration_ms), static_cast<unsigned long>(interval_ms));
     hal::console::printFormat("Time(ms)  Left(mm)  Right(mm)\n");
 
-    const uint32_t start_time = to_ms_since_boot(get_absolute_time());
+    const uint32_t start_time = hal::time::nowMs();
     uint32_t       elapsed    = 0;
     hal::console::printFormat("(press any key to stop)\n");
     keyPressed(); // discard the LF that trails the command's CR
@@ -2369,12 +2370,12 @@ void DriverLab::cmdEncoderContinuous(const DriverLabArgs& args)
             hal::console::printFormat("=== Stopped ===\n");
             return;
         }
-        elapsed              = to_ms_since_boot(get_absolute_time()) - start_time;
+        elapsed              = hal::time::nowMs() - start_time;
         const float left_mm  = left_encoder_ ? left_encoder_->ticks() * MM_PER_TICK_LEFT : 0.0f;
         const float right_mm = right_encoder_ ? right_encoder_->ticks() * MM_PER_TICK_RIGHT : 0.0f;
         hal::console::printFormat("%7lu  %8.2f  %8.2f\n", static_cast<unsigned long>(elapsed),
                                   left_mm, right_mm);
-        sleep_ms(interval_ms);
+        hal::time::sleepMs(interval_ms);
     }
     hal::console::printFormat("=== Done ===\n");
 }
@@ -2708,7 +2709,7 @@ void DriverLab::cmdGpioDiag(const DriverLabArgs& args)
         const bool pin_b = gpio_get(PIN_ENCODER_R_B);
         const int  state = (pin_a ? 2 : 0) | (pin_b ? 1 : 0);
         hal::console::printFormat("%6d     %d       %d      %d\n", i, pin_a, pin_b, state);
-        sleep_ms(100);
+        hal::time::sleepMs(100);
     }
 
     hal::console::printFormat("\n=== Analysis ===\n");
@@ -2791,7 +2792,7 @@ void DriverLab::cmdLineContinuous(const DriverLabArgs& args)
     hal::console::printFormat(
         "Time(ms)  Raw   Active  Bits      Position  OnLine  Paths  Event  Peak   EventMs\n");
 
-    const uint32_t start_time = to_ms_since_boot(get_absolute_time());
+    const uint32_t start_time = hal::time::nowMs();
     uint32_t       elapsed    = 0;
     hal::console::printFormat("(press any key to stop)\n");
     keyPressed(); // discard the LF that trails the command's CR
@@ -2802,7 +2803,7 @@ void DriverLab::cmdLineContinuous(const DriverLabArgs& args)
             hal::console::printFormat("=== Stopped ===\n");
             return;
         }
-        elapsed = to_ms_since_boot(get_absolute_time()) - start_time;
+        elapsed = hal::time::nowMs() - start_time;
         line_sensor_->read();
         const float                         position = line_sensor_->get_position();
         const bool                          on_line  = line_sensor_->on_line();
@@ -2819,7 +2820,7 @@ void DriverLab::cmdLineContinuous(const DriverLabArgs& args)
             linePathsText(line_sensor_->currentPathsMask(), current_paths, sizeof(current_paths)),
             linePathsText(event.paths_mask, event_paths, sizeof(event_paths)), event.raw_peak_mask,
             static_cast<unsigned long>(event.elapsed_ms));
-        sleep_ms(interval_ms);
+        hal::time::sleepMs(interval_ms);
     }
     hal::console::printFormat("=== Done ===\n");
 }
@@ -2939,7 +2940,7 @@ void DriverLab::cmdDirTest(const DriverLabArgs& args)
         pwm_set_chan_level(left_slice, left_channel, pwm_level);
         pwm_set_chan_level(right_slice, right_channel, pwm_level);
 
-        sleep_ms(2000);
+        hal::time::sleepMs(2000);
     }
 
     stopMotors();
