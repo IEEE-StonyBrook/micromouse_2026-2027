@@ -37,6 +37,7 @@ add_executable(Jurababa_stm32
     firmware/common/emitter_check.cpp
     firmware/common/flash_store.cpp
     firmware/common/reset_report.cpp
+    firmware/common/safe_outputs.cpp
     firmware/control/run_log.cpp
     firmware/drivers/lsm6dsr.cpp
     firmware/drivers/motor_bridge.cpp

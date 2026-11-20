@@ -4,6 +4,11 @@
 // store fault shows instead of the 1 Hz blink until the next good save: two
 // flashes when a damaged slot was skipped, four when no settings loaded.
 //
+// The very first thing at boot, before the clocks, drives every actuator
+// output (motor driver inputs and nSLEEP, IR emitters, fan) to its off level
+// (common/safe_outputs.h); nothing may drive them on until `arm`. On the
+// Feather, which fits none of them, no pin is touched.
+//
 // At boot the board reads its chip UID and loads the profile it saved under
 // it from the flash store (sectors 1-2). An unknown board prints the presets
 // and refuses to arm until one is picked.
@@ -14,12 +19,15 @@
 //   flood        queues 64 KB at once, to show the TX ring dropping and counting
 //   profile      this board's UID and profile, or the presets to pick from
 //   profile <n>  saves preset n as this board's profile (erases a flash sector)
-//   arm          says whether this board may arm; nothing moves in bring-up
+//   arm          arms a board with motor drivers if it may (a known
+//                profile); `motor` needs it. Elsewhere it says whether it may
+//   disarm       puts the motor drivers to sleep and disarms
 //   logfill      fills the run log (in CCM) with a full ring of synthetic samples
 //   log          dumps the run log as TRACE CSV rows
 //   motor        motor driver state and IPROPI current (boards with drivers)
-//   motor <l> <r> drives the motors at duty l, r in [-1, 1]; 0 0 brakes,
-//                and a second of braking puts the drivers to sleep
+//   motor <l> <r> drives the motors at duty l, r in [-1, 1] once armed;
+//                0 0 brakes (armed or not), and a second of braking puts
+//                the drivers to sleep
 //   motor sleep  puts the drivers to sleep now
 //   emitters     IR emitter crosstalk self-test (no emitters wired until rev1)
 // At boot it prints why the chip last reset (RCC_CSR) and what the previous
@@ -42,6 +50,7 @@
 #include "common/breadcrumb.h"
 #include "common/emitter_check.h"
 #include "common/flash_store.h"
+#include "common/safe_outputs.h"
 #include "config/board_feather.h"
 #include "config/board_stm32.h"
 #include "config/motor_driver.h"
@@ -55,6 +64,7 @@
 #include "hal/stm32/gpio.h"
 #include "hal/stm32/h_bridge.h"
 #include "hal/stm32/memory.h"
+#include "hal/stm32/output_port.h"
 #include "hal/stm32/quad_counter.h"
 #include "hal/stm32/spi.h"
 #include "hal/stm32/tick.h"
@@ -66,6 +76,10 @@ namespace
 {
 constexpr uint32_t BLINK_HALF_MS = 500;
 constexpr uint32_t CORE_MHZ      = hal::stm32::BUSES.hclk_hz / 1000000;
+
+// Holds the actuators off from the first line of main() until `arm`.
+hal::stm32::OutputPort output_port;
+SafeOutputs safe_outputs(output_port, board::REV1_SAFE_OUTPUTS, board::SAFE_OUTPUT_COUNT);
 
 hal::stm32::QuadCounter encoder_left;
 hal::stm32::QuadCounter encoder_right;
@@ -79,23 +93,24 @@ hal::stm32::HBridge motor_port;
 MotorBridge motors(motor_port, ipropiAmpsPerCount(board::ADC_FULL_SCALE_VOLTS, 4096.0f,
                                                   board::IPROPI_OHMS, DRV8874_AIPROPI_UA_PER_A));
 
-/// The bring-up firmware never arms and drives no fan or IR emitters yet.
-/// The motor drivers are put to sleep before every save, so an erase that
-/// stalls the tick cannot leave a motor driven. The tickets that add the fan
-/// and emitters must force them off here too.
+/// The bring-up firmware drives no fan or IR emitters yet. The motor drivers
+/// are put to sleep before every save, so an erase that stalls the tick cannot
+/// leave a motor driven. The tickets that add the fan and emitters must force
+/// them off here too.
 class BringupSaveGuard final : public SaveGuard
 {
   public:
     SaveBlocker prepareForSave() override
     {
         motors.sleep();
-        return saveBlocker({false, motors.awake(), false, false});
+        return saveBlocker({safe_outputs.armed(), motors.awake(), false, false});
     }
 };
 
-// TODO(rev1): the emitter and receiver pins are unknown until the rev1
-// schematic. Replace this with the TIM2/ADC2 IR bank then; until it lands,
-// `emitters` reports that the board has none.
+// TODO(rev1): the receiver pins are unknown and the emitter pins
+// (board::EMITTER_PINS) are placeholders until the rev1 schematic. Replace
+// this with the TIM2/ADC2 IR bank then; until it lands, `emitters` reports
+// that the board has none.
 class NoIrBank final : public IrBank
 {
   public:
@@ -233,12 +248,30 @@ void motorCommand(const char* arg)
             std::printf("usage: motor [<left> <right> | sleep]\n");
             return;
         }
+        // 0 0 only brakes, so it needs no arming.
+        if (!safe_outputs.armed() && (left != 0.0f || right != 0.0f))
+        {
+            std::printf("motor: not armed (see arm)\n");
+            return;
+        }
         motors.set_duty(left, right);
     }
     static const char* const STATE_NAMES[] = {"asleep", "waking", "awake"};
     std::printf("motor: %s, IPROPI left %.3f A right %.3f A\n",
                 STATE_NAMES[static_cast<int>(motors.state())], static_cast<double>(motors.amps(0)),
                 static_cast<double>(motors.amps(1)));
+}
+
+// The Feather has nothing to arm: it reports the verdict only, so it never
+// sits armed and refuses a profile save.
+void armCommand()
+{
+    if (!identity->armAllowed())
+        std::printf("arm: refused, unknown board (see profile)\n");
+    else if (!board::MOTOR_DRIVERS_FITTED)
+        std::printf("arm: allowed, but this board has nothing to arm\n");
+    else
+        std::printf(safe_outputs.arm() ? "arm: armed\n" : "arm: refused, outputs not held off\n");
 }
 
 void printProfile()
@@ -297,8 +330,13 @@ void runLine()
     else if (std::strncmp(line, "profile ", 8) == 0)
         pickProfile(line + 8);
     else if (std::strcmp(line, "arm") == 0)
-        std::printf(identity->armAllowed() ? "arm: allowed\n"
-                                           : "arm: refused, unknown board (see profile)\n");
+        armCommand();
+    else if (std::strcmp(line, "disarm") == 0)
+    {
+        motors.sleep();
+        safe_outputs.disarm();
+        std::printf("disarm: motors asleep\n");
+    }
     else if (std::strcmp(line, "logfill") == 0)
         fillRunLog();
     else if (std::strcmp(line, "log") == 0)
@@ -310,7 +348,9 @@ void runLine()
     else if (std::strcmp(line, "emitters") == 0)
         runEmitterCheck(ir_bank);
     else if (line_len > 0)
-        std::printf("unknown: %s (try stats, flood, profile, arm, logfill, log, motor, emitters)\n", line);
+        std::printf(
+            "unknown: %s (try stats, flood, profile, arm, disarm, logfill, log, motor, emitters)\n",
+            line);
     if (line_len > 0)
         Breadcrumb::noteActivity("idle");
     line_len = 0;
@@ -354,6 +394,15 @@ void pollConsole()
             line[line_len++] = ch;
     }
 }
+
+// Runs right after the safe outputs are off. Before anything notes an
+// activity, snapshot what the previous session left in the breadcrumb
+// (.noinit SRAM) and re-arm it; then start the crystal and the PLL.
+hal::stm32::ClockSource startClocks()
+{
+    Breadcrumb::begin();
+    return hal::stm32::setupClocks();
+}
 } // namespace
 
 // Read with `print memory_usage` and `print tick_stats` in gdb.
@@ -362,10 +411,9 @@ volatile hal::stm32::tick::Stats tick_stats;
 
 int main()
 {
-    // First, before anything notes an activity: snapshot what the previous
-    // session left in the breadcrumb (.noinit SRAM), then re-arm it.
-    Breadcrumb::begin();
-    const hal::stm32::ClockSource clock = hal::stm32::setupClocks();
+    // First of all, on the reset HSI before the clocks: every actuator output
+    // to its off level. Then startClocks().
+    const hal::stm32::ClockSource clock = powerOn(safe_outputs, startClocks);
     hal::stm32::gpioOutput(board::LED);
     encoder_left.init(board::ENCODER_PINS[0], board::ENCODER_PINS[1]);
     encoder_right.init(board::ENCODER_PINS[2], board::ENCODER_PINS[3]);
