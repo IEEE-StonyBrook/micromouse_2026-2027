@@ -876,11 +876,11 @@ void Mouse::stationary_turn(const std::string& target_heading, int half_steps)
     // sensing point at search speed.
     if (!stopAtCentre() || !adjustPosition())
         return;
+#ifndef SIMULATOR_BUILD
     // At a dead end, reverse until the body is centred in the cell (read off
     // the front wall), the spot with room to spin; the axle then ends up
     // BODY_CENTRE_AHEAD_OF_AXLE_MM past the centre on the new heading.
     float start_mm = HALF_CELL_MM;
-#ifndef SIMULATOR_BUILD
     if (half_steps == 4 && !run_on_simulator && motion_ != nullptr &&
         tof_wall::wallFront(motion_->frontDistance()))
     {
