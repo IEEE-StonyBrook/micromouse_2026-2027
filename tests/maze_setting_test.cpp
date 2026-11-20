@@ -1,20 +1,8 @@
-// Host test for the MAZE command parser. Build and run: make -C tests
-#include <cstdio>
+// Host test for the MAZE command parser.
 #include <string>
 
+#include "doctest/doctest.h"
 #include "maze/maze_setting.h"
-
-static int failures = 0;
-
-#define CHECK(cond)                                                                                \
-    do                                                                                             \
-    {                                                                                              \
-        if (!(cond))                                                                               \
-        {                                                                                          \
-            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);                            \
-            ++failures;                                                                            \
-        }                                                                                          \
-    } while (0)
 
 static bool parses(const char* text, MazeSetting& out)
 {
@@ -33,7 +21,7 @@ static bool rejected(const char* text)
     return !ok && !error.empty() && out.size == 99 && out.goals.empty();
 }
 
-static void contestCentre()
+TEST_CASE("maze setting: contest centre goals")
 {
     MazeSetting s;
     CHECK(parses("16 7,7..8,8", s));
@@ -42,14 +30,14 @@ static void contestCentre()
     CHECK(mazeSettingText(s) == "16x16 goals=(7,7),(7,8),(8,7),(8,8)");
 }
 
-static void practiceCentre()
+TEST_CASE("maze setting: practice maze centre goals")
 {
     MazeSetting s;
     CHECK(parses("8 3,3..4,4", s));
     CHECK(mazeSettingText(s) == "8x8 goals=(3,3),(3,4),(4,3),(4,4)");
 }
 
-static void singleGoalCell()
+TEST_CASE("maze setting: single goal cell")
 {
     MazeSetting s;
     CHECK(parses("5 4,2", s));
@@ -58,14 +46,14 @@ static void singleGoalCell()
     CHECK(mazeSettingText(s) == "5x5 goals=(4,2)");
 }
 
-static void reversedRectangleIsNormalised()
+TEST_CASE("maze setting: reversed rectangle is normalised")
 {
     MazeSetting s;
     CHECK(parses("16 8,8..7,7", s));
     CHECK(mazeSettingText(s) == "16x16 goals=(7,7),(7,8),(8,7),(8,8)");
 }
 
-static void outOfRange()
+TEST_CASE("maze setting: out-of-range input is rejected")
 {
     CHECK(rejected("17 7,7"));     // larger than the maze the firmware allocates
     CHECK(rejected("0 0,0"));      // no cells
@@ -75,7 +63,7 @@ static void outOfRange()
     CHECK(rejected("16 -1,3"));    // negative coordinate
 }
 
-static void malformed()
+TEST_CASE("maze setting: malformed input is rejected")
 {
     CHECK(rejected(""));
     CHECK(rejected("16"));               // goals missing
@@ -88,21 +76,4 @@ static void malformed()
     CHECK(rejected("16 7,7 extra"));     // trailing token
     CHECK(rejected("16 7,7..8,8..9,9")); // two ranges
     CHECK(rejected("99999999999 1,1"));  // overflow
-}
-
-int main()
-{
-    contestCentre();
-    practiceCentre();
-    singleGoalCell();
-    reversedRectangleIsNormalised();
-    outOfRange();
-    malformed();
-    if (failures != 0)
-    {
-        std::printf("maze_setting_test: %d failure(s)\n", failures);
-        return 1;
-    }
-    std::printf("maze_setting_test: all passed\n");
-    return 0;
 }
