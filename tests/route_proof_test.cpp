@@ -1,0 +1,149 @@
+// Host test for the search-stop proof. Build and run: make -C tests
+#include <algorithm>
+#include <array>
+#include <cstdio>
+#include <vector>
+
+#include "maze/maze.h"
+#include "maze/maze_mouse.h"
+#include "maze/route_proof.h"
+
+static int failures = 0;
+
+#define CHECK(cond)                                                                                \
+    do                                                                                             \
+    {                                                                                              \
+        if (!(cond))                                                                               \
+        {                                                                                          \
+            std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);                            \
+            ++failures;                                                                            \
+        }                                                                                          \
+    } while (0)
+
+using Coord = std::array<int, 2>;
+
+// Visit a cell as the search does: every side becomes a known wall or exit.
+static void visit(Maze& maze, int x, int y, const char* walls)
+{
+    Cell*             cell     = maze.cell(x, y);
+    static const char kSides[] = {'N', 'E', 'S', 'W'};
+    for (int i = 0; i < 4; ++i)
+    {
+        if (walls[i] == '1')
+            cell->setWall(kSides[i]);
+        else
+            cell->setExit(kSides[i]);
+    }
+    cell->markExplored();
+}
+
+static bool contains(const std::vector<Coord>& cells, int x, int y)
+{
+    return std::find(cells.begin(), cells.end(), Coord{x, y}) != cells.end();
+}
+
+// 3 wide, 2 tall, start (0,0), goal (2,0). The short route runs east along
+// the bottom row (2 cells); the long one goes up, across and down (4 cells).
+//
+//   +---+---+---+
+//   | 1   1   1 |
+//   +   +   +   +      (the wall under (1,1) is closed)
+//   | S   ?   G |
+//   +---+---+---+
+static void unexploredCellWithKnownExitsIsNotProof()
+{
+    Maze      maze(2, 3);
+    MazeMouse mm({0, 0}, "n", {{2, 0}}, &maze);
+    // N E S W, '1' = wall.
+    visit(maze, 0, 0, "0011");
+    visit(maze, 0, 1, "1001");
+    visit(maze, 1, 1, "1010");
+    visit(maze, 2, 1, "1100");
+    visit(maze, 2, 0, "0110");
+
+    // (1,0) has every side known from its neighbours but was never entered,
+    // and the speed run only plans over explored cells.
+    RouteBounds bounds = routeBounds(mm, {0, 0}, {{2, 0}});
+    CHECK(bounds.known_cells == 4);
+    CHECK(bounds.optimistic_cells == 2);
+    CHECK(!bounds.proven());
+
+    std::vector<Coord> todo = unprovenRouteCells(mm, {0, 0}, {{2, 0}});
+    CHECK(todo.size() == 1);
+    CHECK(contains(todo, 1, 0));
+
+    visit(maze, 1, 0, "1010");
+    bounds = routeBounds(mm, {0, 0}, {{2, 0}});
+    CHECK(bounds.known_cells == 2);
+    CHECK(bounds.optimistic_cells == 2);
+    CHECK(bounds.proven());
+    CHECK(unprovenRouteCells(mm, {0, 0}, {{2, 0}}).empty());
+}
+
+// Only the start explored: unknown walls closed give no route at all, while
+// unknown walls open give the 4-cell corner-to-corner route through any
+// staircase, so every other cell of the 3x3 could lie on it.
+static void freshMazeIsUnproven()
+{
+    Maze      maze(3, 3);
+    MazeMouse mm({0, 0}, "n", {{2, 2}}, &maze);
+    visit(maze, 0, 0, "0111");
+
+    RouteBounds bounds = routeBounds(mm, {0, 0}, {{2, 2}});
+    CHECK(bounds.known_cells == RouteBounds::NO_ROUTE);
+    CHECK(bounds.optimistic_cells == 4);
+    CHECK(!bounds.proven());
+
+    // The start's east wall is known, so (1,0) is off every 4-cell route,
+    // as is (2,0) beyond it.
+    std::vector<Coord> todo = unprovenRouteCells(mm, {0, 0}, {{2, 2}});
+    CHECK(todo.size() == 6);
+    CHECK(!contains(todo, 0, 0));
+    CHECK(!contains(todo, 1, 0));
+    CHECK(!contains(todo, 2, 0));
+    CHECK(contains(todo, 0, 1));
+    CHECK(contains(todo, 2, 2));
+}
+
+// Any goal cell of a block ends the route.
+static void nearestGoalCellCounts()
+{
+    Maze      maze(2, 3);
+    MazeMouse mm({0, 0}, "n", {{2, 0}, {2, 1}}, &maze);
+    visit(maze, 0, 0, "0011");
+    visit(maze, 0, 1, "1001");
+    visit(maze, 1, 1, "1010");
+    visit(maze, 2, 1, "1100");
+    visit(maze, 2, 0, "0110");
+    visit(maze, 1, 0, "1110"); // closed to the east now
+
+    const RouteBounds bounds = routeBounds(mm, {0, 0}, {{2, 0}, {2, 1}});
+    CHECK(bounds.known_cells == 3);
+    CHECK(bounds.proven());
+}
+
+static void capsStopTheProof()
+{
+    const RouteProofCaps caps{/*max_legs=*/10, /*max_ms=*/1000};
+    RouteBounds          open{/*known_cells=*/6, /*optimistic_cells=*/4};
+    RouteBounds          done{/*known_cells=*/4, /*optimistic_cells=*/4};
+
+    CHECK(keepProving(open, 0, 0, caps));
+    CHECK(keepProving(open, 9, 999, caps));
+    CHECK(!keepProving(done, 0, 0, caps));
+    CHECK(!keepProving(open, 10, 0, caps));
+    CHECK(!keepProving(open, 0, 1000, caps));
+    // No optimistic route at all means nothing left to explore.
+    CHECK(!keepProving(RouteBounds{}, 0, 0, caps));
+}
+
+int main()
+{
+    unexploredCellWithKnownExitsIsNotProof();
+    freshMazeIsUnproven();
+    nearestGoalCellCounts();
+    capsStopTheProof();
+    if (failures == 0)
+        std::printf("PASS: route proof\n");
+    return failures == 0 ? 0 : 1;
+}
