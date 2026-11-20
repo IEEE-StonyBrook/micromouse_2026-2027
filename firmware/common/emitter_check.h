@@ -55,4 +55,36 @@ struct CrosstalkMatrix
 /// by a dark read, and averages the differences.
 CrosstalkMatrix captureCrosstalk(IrBank& bank);
 
+/// A receiver whose own emitter lifts it by fewer counts than this is weak: a
+/// dead emitter or receiver, or no reflector in front of it. About 2.5 % of
+/// a 12-bit ADC's 4095, well clear of its few-count noise. A first guess,
+/// to tune on the rev1 board.
+constexpr int32_t CROSSTALK_MIN_DIAGONAL_COUNTS = 100;
+
+/// Emitter e leaks into receiver r (e != r) when it lifts r by more than this
+/// percentage of r's own diagonal reading. At 25 % the three other emitters
+/// together stay under 75 % of the diagonal, so a passing matrix is strictly
+/// diagonal-dominant down every column.
+constexpr int32_t CROSSTALK_MAX_LEAK_PERCENT = 25;
+
+struct CrosstalkVerdict
+{
+    struct Leak
+    {
+        uint8_t emitter;
+        uint8_t receiver;
+    };
+
+    /// True only with at least one channel, no weak receiver and no leak.
+    bool        pass = false;
+    /// Bit r set: receiver r is weak (below CROSSTALK_MIN_DIAGONAL_COUNTS).
+    /// A weak receiver's column is not judged for leaks.
+    uint8_t     weak_mask  = 0;
+    std::size_t leak_count = 0;
+    Leak        leaks[IrBank::kMaxChannels * (IrBank::kMaxChannels - 1)] = {};
+};
+
+/// Applies the weak and leak thresholds above.
+CrosstalkVerdict judgeCrosstalk(const CrosstalkMatrix& m);
+
 #endif // COMMON_EMITTER_CHECK_H
