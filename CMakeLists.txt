@@ -59,6 +59,7 @@ set(NAVIGATION_SOURCES
     firmware/navigation/flood_fill.cpp
     firmware/navigation/path_converter.cpp
     firmware/navigation/path_utils.cpp
+    firmware/navigation/route_planner.cpp
     firmware/navigation/diagonalizer.cpp
 )
 
