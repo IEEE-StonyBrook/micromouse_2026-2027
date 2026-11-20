@@ -19,6 +19,18 @@ if (EXISTS ${picoVscode})
     include(${picoVscode})
 endif()
 # ====================================================================================
+
+# Target platform. Each platform needs its own build directory, because the
+# compiler is fixed when a directory is first configured.
+set(JURABABA_PLATFORM pico CACHE STRING "Target platform: pico or stm32")
+set_property(CACHE JURABABA_PLATFORM PROPERTY STRINGS pico stm32)
+if(JURABABA_PLATFORM STREQUAL "stm32")
+    include(${CMAKE_CURRENT_LIST_DIR}/cmake/stm32/platform.cmake)
+    return()
+elseif(NOT JURABABA_PLATFORM STREQUAL "pico")
+    message(FATAL_ERROR "JURABABA_PLATFORM must be pico or stm32, not '${JURABABA_PLATFORM}'")
+endif()
+
 set(PICO_BOARD pico CACHE STRING "Board type")
 
 # Pull in Raspberry Pi Pico SDK (must be before project)
