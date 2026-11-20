@@ -5,6 +5,8 @@ namespace hal::system
 ResetCause resetCause()
 {
     // A host process always starts cold.
-    return ResetCause{0, true, false, false, false};
+    ResetCause cause{};
+    cause.power_on = true;
+    return cause;
 }
 } // namespace hal::system

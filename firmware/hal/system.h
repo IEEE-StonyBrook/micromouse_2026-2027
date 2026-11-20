@@ -5,14 +5,19 @@
 
 namespace hal::system
 {
-/// Why the chip last reset, as far as the hardware recorded it.
+/// Why the chip last reset, as far as the hardware recorded it. A platform
+/// that cannot tell a cause apart leaves its flag false.
 struct ResetCause
 {
-    uint32_t raw;      ///< Platform reset register, for diagnostics only
-    bool     power_on; ///< Power-on reset latched (never cleared on the Pico)
-    bool     run_pin;  ///< External reset: RUN pin or reset button
-    bool     debugger; ///< Restart requested by a debugger
-    bool     watchdog; ///< Software reboot through the watchdog (reflash, bootloader)
+    uint32_t raw;              ///< Platform reset register, for diagnostics only
+    bool     power_on;         ///< Power-on reset latched (never cleared on the Pico)
+    bool     run_pin;          ///< External reset: RUN/NRST pin or reset button
+    bool     debugger;         ///< Restart requested by a debugger
+    bool     software;         ///< Software reboot (reflash, bootloader; the Pico's goes through its watchdog)
+    bool     brownout;         ///< Supply fell below the brownout threshold (STM32 BOR)
+    bool     watchdog_timeout; ///< Independent watchdog expired: the main loop hung (STM32 IWDG)
+    bool     window_watchdog;  ///< Window watchdog reset (STM32 WWDG)
+    bool     low_power;        ///< Low-power management reset (STM32 LPWR)
 };
 
 ResetCause resetCause();

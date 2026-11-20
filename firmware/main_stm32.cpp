@@ -17,6 +17,12 @@
 //   arm          says whether this board may arm; nothing moves in bring-up
 //   logfill      fills the run log (in CCM) with a full ring of synthetic samples
 //   log          dumps the run log as TRACE CSV rows
+// At boot it prints why the chip last reset (RCC_CSR) and what the previous
+// session was doing (the breadcrumb in .noinit SRAM): a brownout, a watchdog
+// timeout or the reset button. A 3 s independent watchdog, fed from the main
+// loop, resets a hung loop. Brownout reset at 2.7 V needs BOR level 3 in the
+// option bytes, which the firmware never writes: see CLAUDE.md.
+//
 // Memory use and tick timing are also left in `memory_usage` and `tick_stats`
 // for a debugger to read.
 
@@ -28,6 +34,7 @@
 #include <libopencm3/stm32/gpio.h>
 
 #include "common/board_identity.h"
+#include "common/breadcrumb.h"
 #include "common/flash_store.h"
 #include "config/board_feather.h"
 #include "control/run_log.h"
@@ -42,6 +49,7 @@
 #include "hal/stm32/spi.h"
 #include "hal/stm32/tick.h"
 #include "hal/stm32/uid.h"
+#include "hal/stm32/watchdog.h"
 #include "hal/time.h"
 
 namespace
@@ -164,6 +172,7 @@ void dumpRunLog()
         RunLog::formatRow(row, sizeof row, i, dt_ms, log.sample(i));
         std::printf("%s\n", row);
         hal::time::sleepMs(1); // ~100 bytes take 1 ms at 1 Mbaud
+        hal::stm32::watchdog::feed(); // the whole dump takes about 2 s
     }
     std::printf("TRACE end\n");
 }
@@ -213,6 +222,8 @@ void pickProfile(const char* arg)
 void runLine()
 {
     line[line_len] = '\0';
+    if (line_len > 0)
+        Breadcrumb::noteActivity(line); // the command a watchdog reset would name
     if (std::strcmp(line, "stats") == 0)
         printStats();
     else if (std::strcmp(line, "flood") == 0)
@@ -230,6 +241,8 @@ void runLine()
         dumpRunLog();
     else if (line_len > 0)
         std::printf("unknown: %s (try stats, flood, profile, arm, logfill, log)\n", line);
+    if (line_len > 0)
+        Breadcrumb::noteActivity("idle");
     line_len = 0;
 }
 
@@ -279,14 +292,21 @@ volatile hal::stm32::tick::Stats tick_stats;
 
 int main()
 {
+    // First, before anything notes an activity: snapshot what the previous
+    // session left in the breadcrumb (.noinit SRAM), then re-arm it.
+    Breadcrumb::begin();
     const hal::stm32::ClockSource clock = hal::stm32::setupClocks();
     hal::stm32::gpioOutput(board::LED);
     encoder_left.init(board::ENCODER_PINS[0], board::ENCODER_PINS[1]);
     encoder_right.init(board::ENCODER_PINS[2], board::ENCODER_PINS[3]);
     hal::stm32::tick::start(onTick);
     hal::console::stm32::init();
+    hal::stm32::watchdog::start();
     std::printf("\nJurababa STM32 bring-up, %" PRIu32 " MHz from the %s\n", CORE_MHZ,
                 clock == hal::stm32::ClockSource::kHse ? "crystal" : "HSI (crystal fault)");
+    Breadcrumb::report();
+
+    Breadcrumb::noteActivity("boot: IMU init");
 
     imu_spi.init(board::IMU_SPI);
     hal::time::sleepMs(20); // LSM6DSR boot time is 10 ms from power-up
@@ -297,7 +317,9 @@ int main()
                 STATUS_NAMES[static_cast<int>(status)]);
     imu_ready = status == Lsm6dsr::Status::kOk;
 
+    Breadcrumb::noteActivity("boot: flash store load");
     identifyBoard();
+    Breadcrumb::noteActivity("idle");
 
     const uint32_t led_port       = hal::stm32::gpioPort(board::LED);
     const uint16_t led_bit        = hal::stm32::gpioBit(board::LED);
@@ -305,6 +327,7 @@ int main()
     while (true)
     {
         __asm__ volatile("wfi");
+        hal::stm32::watchdog::feed();
         pollConsole();
         const uint32_t now_ms = hal::time::nowMs();
         bool           led_on = (now_ms / BLINK_HALF_MS) % 2 == 0;
