@@ -146,9 +146,18 @@ TEST_CASE("physim: a seam over-reads the encoders and logs a pitch and z-accel s
     const physim::Result r       = straight(p);
     REQUIRE(r.finished);
     CHECK(r.seam_crossings == 2);
-    // The encoders count ~3 mm the body never travels, so it stops short.
-    CHECK(r.distance_mm < nominal.distance_mm - 1.0f);
-    CHECK(r.distance_mm > nominal.distance_mm - 4.0f);
+    // On a seam that loses grip, the 3 mm jump over the 20 ms crossing reads as
+    // a 150 mm/s overrun: the forward PD brakes, the tyres skid and the body
+    // slides on, handing back most of the over-read. It still stops short.
+    CHECK(r.distance_mm < nominal.distance_mm - 0.5f);
+
+    // Keep the grip and the over-read alone shows: the encoders count ~3 mm
+    // the body never travels, so it stops ~3 mm short (2.7-2.8 measured).
+    p.seam.traction_scale     = 1.0f;
+    const physim::Result grip = straight(p);
+    CHECK(grip.distance_mm < nominal.distance_mm - 2.0f);
+    CHECK(grip.distance_mm > nominal.distance_mm - 3.5f);
+    CHECK(grip.distance_mm < r.distance_mm - 1.0f);
     // Sampled once per tick, so the peaks land near, not on, the set values.
     CHECK(r.peak_pitch_rate_degps > 300.0f);
     CHECK(r.peak_pitch_rate_degps <= 400.0f);
