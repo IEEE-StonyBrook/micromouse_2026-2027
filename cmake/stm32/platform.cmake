@@ -18,6 +18,7 @@ set(STM32_HAL_SOURCES
     firmware/hal/stm32/clock.cpp
     firmware/hal/stm32/console.cpp
     firmware/hal/stm32/flash.cpp
+    firmware/hal/stm32/irq_lock.cpp
     firmware/hal/stm32/memory.cpp
     firmware/hal/stm32/quad_counter.cpp
     firmware/hal/stm32/spi.cpp

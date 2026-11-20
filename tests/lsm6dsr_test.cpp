@@ -1,9 +1,11 @@
 // Host tests for the LSM6DSR driver against a fake register map on a fake SPI
 // bus. Register addresses, bit fields and sensitivities are from ST's LSM6DSR
 // datasheet (DS13254); expected values are worked from it, not from the code.
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <deque>
+#include <thread>
 #include <vector>
 
 #include "doctest/doctest.h"
@@ -212,4 +214,50 @@ TEST_CASE("LSM6DSR FIFO read is capped per tick and counts overruns")
     CHECK(imu.readFifo(4) == 4);
     CHECK(fake.fifo.size() == 6);
     CHECK(imu.fifoOverruns() == 1);
+}
+
+TEST_CASE("LSM6DSR reading is one tick's consistent snapshot while the tick runs")
+{
+    // A host thread stands in for the tick interrupt. Tick n leaves accel
+    // (n, n, n), a gyro word of n and n samples of each, so any snapshot that
+    // mixes two ticks shows unequal axes or counts that disagree.
+    FakeLsm6dsr fake;
+    Lsm6dsr     imu(fake);
+    REQUIRE(imu.init() == Lsm6dsr::Status::kOk);
+
+    constexpr int     TICKS = 20000;
+    std::atomic<bool> done{false};
+    std::thread       tick(
+        [&]
+        {
+            for (int n = 1; n <= TICKS; ++n)
+            {
+                fake.pushWord(lsm6dsr::TAG_ACCEL, static_cast<int16_t>(n), static_cast<int16_t>(n),
+                              static_cast<int16_t>(n));
+                fake.pushWord(lsm6dsr::TAG_GYRO, 0, 0, static_cast<int16_t>(n));
+                imu.readFifo();
+            }
+            done = true;
+        });
+
+    int  torn  = 0;
+    long reads = 0;
+    while (!done)
+    {
+        const Lsm6dsr::Reading r = imu.reading();
+        ++reads;
+        const int16_t n = static_cast<int16_t>(r.accel_samples);
+        if (r.accel_x_g != r.accel_y_g || r.accel_y_g != r.accel_z_g ||
+            r.gyro_samples != r.accel_samples || r.accel_x_g != lsm6dsr::accelG(n) ||
+            r.yaw_rate_degps != lsm6dsr::gyroDegps(n))
+            ++torn;
+    }
+    tick.join();
+    CHECK(reads > 0);
+    CHECK(torn == 0);
+
+    const Lsm6dsr::Reading last = imu.reading();
+    CHECK(last.gyro_samples == TICKS);
+    CHECK(last.yaw_rate_degps == doctest::Approx(lsm6dsr::gyroDegps(TICKS)));
+    CHECK(last.fifo_overruns == 0);
 }

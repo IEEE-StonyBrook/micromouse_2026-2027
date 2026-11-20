@@ -70,8 +70,9 @@ constexpr bool fifoOverrun(uint8_t status2)
  * out of the package top (right-hand rule), so a chip mounted face up needs
  * yaw_sign +1 and one mounted face down -1.
  *
- * init() runs in the main loop; readFifo() and the getters in the tick. No
- * logging or heap anywhere, so both are safe in interrupt context.
+ * init() and reading() run in the main loop; readFifo() and the getters in
+ * the tick. No logging or heap anywhere, so both are safe in interrupt
+ * context.
  */
 class Lsm6dsr
 {
@@ -94,10 +95,27 @@ class Lsm6dsr
     /// Drains up to max_words FIFO words and returns how many it read.
     uint32_t readFifo(uint32_t max_words = 8);
 
-    /// Mean yaw rate over the last read that held gyro data, deg/s, + = CCW.
+    /// One read's results, copied together so the main loop never sees a
+    /// tick half-way through writing them.
+    struct Reading
+    {
+        float    yaw_rate_degps = 0.0f; ///< + = CCW
+        float    accel_x_g      = 0.0f;
+        float    accel_y_g      = 0.0f;
+        float    accel_z_g      = 0.0f;
+        uint32_t gyro_samples   = 0;
+        uint32_t accel_samples  = 0;
+        uint32_t fifo_overruns  = 0;
+    };
+
+    /// Main loop: a consistent snapshot, taken under hal::irq::Lock.
+    Reading reading() const;
+
+    /// Tick only (unlocked): mean yaw rate over the last read that held gyro
+    /// data, deg/s, + = CCW.
     float yawRateDegps() const { return yaw_rate_degps_; }
 
-    /// Latest acceleration along each chip axis, in g.
+    /// Tick only (unlocked): latest acceleration along each chip axis, in g.
     float accelXG() const { return lsm6dsr::accelG(accel_raw_[0]); }
     float accelYG() const { return lsm6dsr::accelG(accel_raw_[1]); }
     float accelZG() const { return lsm6dsr::accelG(accel_raw_[2]); }

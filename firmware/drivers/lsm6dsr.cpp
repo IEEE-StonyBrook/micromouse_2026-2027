@@ -1,5 +1,7 @@
 #include "drivers/lsm6dsr.h"
 
+#include "hal/irq.h"
+
 namespace
 {
 // Register map (DS13254, section 8).
@@ -105,15 +107,16 @@ uint32_t Lsm6dsr::readFifo(uint32_t max_words)
     const uint8_t status_tx[3] = {static_cast<uint8_t>(REG_FIFO_STATUS1 | SPI_READ), 0, 0};
     uint8_t       status_rx[3] = {0, 0, 0};
     spi_.transfer(status_tx, status_rx, 3);
-    if (lsm6dsr::fifoOverrun(status_rx[2]))
-        ++fifo_overruns_;
+    const bool overrun = lsm6dsr::fifoOverrun(status_rx[2]);
 
     uint32_t words = lsm6dsr::fifoLevel(status_rx[1], status_rx[2]);
     if (words > max_words)
         words = max_words;
 
-    int32_t  gyro_z_sum = 0;
-    uint32_t gyro_count = 0;
+    int32_t  gyro_z_sum  = 0;
+    uint32_t gyro_count  = 0;
+    uint32_t accel_count = 0;
+    int16_t  accel_raw[3];
     for (uint32_t i = 0; i < words; ++i)
     {
         // One transaction per word: tag plus six data bytes, auto-incremented.
@@ -128,13 +131,25 @@ uint32_t Lsm6dsr::readFifo(uint32_t max_words)
         }
         else if (w.sensor == lsm6dsr::TAG_ACCEL)
         {
-            accel_raw_[0] = w.x;
-            accel_raw_[1] = w.y;
-            accel_raw_[2] = w.z;
-            ++accel_samples_;
+            accel_raw[0] = w.x;
+            accel_raw[1] = w.y;
+            accel_raw[2] = w.z;
+            ++accel_count;
         }
     }
 
+    // Publish this read's results in one step: reading() on the main loop
+    // takes the same lock, so it never pairs one tick's accel with another's.
+    hal::irq::Lock lock;
+    if (overrun)
+        ++fifo_overruns_;
+    if (accel_count > 0)
+    {
+        accel_raw_[0] = accel_raw[0];
+        accel_raw_[1] = accel_raw[1];
+        accel_raw_[2] = accel_raw[2];
+        accel_samples_ += accel_count;
+    }
     if (gyro_count > 0)
     {
         const float mean_raw = static_cast<float>(gyro_z_sum) / static_cast<float>(gyro_count);
@@ -142,4 +157,18 @@ uint32_t Lsm6dsr::readFifo(uint32_t max_words)
         gyro_samples_ += gyro_count;
     }
     return words;
+}
+
+Lsm6dsr::Reading Lsm6dsr::reading() const
+{
+    hal::irq::Lock lock;
+    Reading        r;
+    r.yaw_rate_degps = yaw_rate_degps_;
+    r.accel_x_g      = lsm6dsr::accelG(accel_raw_[0]);
+    r.accel_y_g      = lsm6dsr::accelG(accel_raw_[1]);
+    r.accel_z_g      = lsm6dsr::accelG(accel_raw_[2]);
+    r.gyro_samples   = gyro_samples_;
+    r.accel_samples  = accel_samples_;
+    r.fifo_overruns  = fifo_overruns_;
+    return r;
 }

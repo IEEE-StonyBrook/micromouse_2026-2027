@@ -17,9 +17,8 @@ namespace hal::irq
  * Backends: the Pico saves PRIMASK and disables interrupts on this core
  * (save_and_disable_interrupts / restore_interrupts), so hold it only for a
  * few dozen instructions. The host takes a process-wide recursive mutex, so a
- * test thread and a tick thread can share state. The STM32 has no backend
- * yet: nothing built there uses it (it would save PRIMASK, or raise BASEPRI
- * to mask only the control timer).
+ * test thread and a tick thread can share state. The STM32 saves PRIMASK and
+ * masks interrupts (cm_mask_interrupts), like the Pico.
  */
 class Lock
 {

@@ -98,11 +98,13 @@ void printStats()
                 ticks.max_period_cycles);
     std::printf("encoders left %" PRId32 " right %" PRId32 " counts\n", encoder_left.count(),
                 encoder_right.count());
+    // One snapshot: the tick rewrites these mid-print otherwise.
+    const Lsm6dsr::Reading imu_now = imu.reading();
     std::printf("imu %s yaw %.2f dps accel z %.3f g, %" PRIu32 " gyro %" PRIu32
                 " accel samples, %" PRIu32 " fifo overruns\n",
-                imu_ready ? "ok" : "off", static_cast<double>(imu.yawRateDegps()),
-                static_cast<double>(imu.accelZG()), imu.gyroSamples(), imu.accelSamples(),
-                imu.fifoOverruns());
+                imu_ready ? "ok" : "off", static_cast<double>(imu_now.yaw_rate_degps),
+                static_cast<double>(imu_now.accel_z_g), imu_now.gyro_samples, imu_now.accel_samples,
+                imu_now.fifo_overruns);
     std::printf("console ring dropped %" PRIu32 " gate dropped %" PRIu32 " rx idle %" PRIu32
                 " overruns %" PRIu32 "\n",
                 console::stm32::txRingDroppedBytes(), console::txGateDroppedBytes(),
