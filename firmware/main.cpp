@@ -448,11 +448,12 @@ static void runDriverLabMode(Battery* battery, SensorMode sensor_mode)
 
     while (true)
     {
-        battery->update();         // 500 Hz; 10-sample MA = 20 ms time constant
-        imu.update();              // no-op for omega; reserved for future fusion
-        driverlab.tick();          // advances active trial by exactly one 500 Hz step
-        driverlab.processSerial(); // poll keyboard for new commands
-        bt_drain();                // pump TX ring -> uart0 FIFO between printfs
+        battery->update();              // 500 Hz; 10-sample MA = 20 ms time constant
+        imu.update();                   // no-op for omega; reserved for future fusion
+        driverlab.tick();               // advances active trial by exactly one 500 Hz step
+        driverlab.processSerial();      // poll keyboard for new commands
+        Motor::reportBatteryFallback(); // log flags the motor tick raised
+        bt_drain();                     // pump TX ring -> uart0 FIFO between printfs
         sleep_until(next_tick);
         next_tick = delayed_by_us(next_tick, LOOP_PERIOD_US);
     }
@@ -678,8 +679,8 @@ int main()
     // Always hand a live Battery* downstream so hot-plug works: if VBAT is
     // absent at boot but plugged in later, BAT and voltage compensation pick
     // it up automatically. Motor::set_motor_volts() already handles the
-    // <1 V case with an edge-triggered fallback warning (motor.cpp), so no
-    // boot-time latch is needed here.
+    // <1 V case, and the main loop reports it through
+    // Motor::reportBatteryFallback(), so no boot-time latch is needed here.
     Battery* battery_ptr = &battery;
     if (battery.voltage() < 1.0f)
     {

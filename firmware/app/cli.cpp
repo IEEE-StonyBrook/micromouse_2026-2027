@@ -27,6 +27,7 @@
 #include "control/motion.h"
 #include "drivers/battery.h"
 #include "drivers/beacon_ir.h"
+#include "drivers/motor.h"
 #include "drivers/tof.h"
 #include "maze/maze.h"
 #include "maze/maze_mouse.h"
@@ -480,6 +481,7 @@ bool CommandLineInterface::process_serial_data()
 {
     handleBluetoothCommand();
     drainConsole();
+    Motor::reportBatteryFallback();
 
     if (deps_.battery != nullptr && deps_.sensor_mode != SensorMode::TOF)
         deps_.battery->update();
@@ -2016,6 +2018,10 @@ void CommandLineInterface::handleBluetoothCommand()
 
 void CommandLineInterface::pollHaltOnly()
 {
+    // Runs every tick of a blocking run, so the control interrupt's flags get
+    // reported while process_serial_data() is not being polled.
+    Motor::reportBatteryFallback();
+
     int c = getchar_timeout_us(0);
     if (c >= 0)
     {
