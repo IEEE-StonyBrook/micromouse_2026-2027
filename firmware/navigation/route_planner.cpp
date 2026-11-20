@@ -2,14 +2,15 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <cstdlib>
 #include <limits>
-#include <queue>
 #include <string>
 
 #include "common/log.h"
 #include "maze/maze.h"
 #include "maze/maze_mouse.h"
+#include "navigation/static_heap.h"
 
 namespace
 {
@@ -22,136 +23,176 @@ struct ExploredNode
     bool operator<(const ExploredNode& other) const { return f_cost > other.f_cost; }
 };
 
+struct TimedNode
+{
+    int   state;
+    float time_s;
+
+    bool operator<(const TimedNode& other) const { return time_s > other.time_s; }
+};
+
+constexpr int MAX_CELLS  = CellPath::CAPACITY;
+constexpr int MAX_STATES = MAX_CELLS * 4; // a cell and a cardinal heading
+
+// The planners' working memory, sized for the largest maze. They run on the
+// main loop only, one at a time. In both searches a push only ever lowers a
+// node's cost, so each node holds at most one live open entry: one slot per
+// node is enough once stale entries are pruned.
+struct ExploredScratch
+{
+    float                               g_costs[MAX_CELLS];
+    Cell*                               parents[MAX_CELLS];
+    bool                                closed[MAX_CELLS];
+    StaticHeap<ExploredNode, MAX_CELLS> open;
+    CellPath                            candidate;
+} explored;
+
+struct TimedScratch
+{
+    float                             best[MAX_STATES];
+    int16_t                           parent[MAX_STATES];
+    bool                              closed[MAX_STATES];
+    bool                              goal[MAX_CELLS];
+    StaticHeap<TimedNode, MAX_STATES> open;
+} timed;
+
 float manhattan(Cell* from, Cell* to)
 {
     return static_cast<float>(std::abs(from->x() - to->x()) + std::abs(from->y() - to->y()));
 }
 
-std::vector<Cell*> reconstructExploredPath(const std::vector<std::vector<Cell*>>& parents,
-                                           Cell* start, Cell* end)
+bool fitsScratch(MazeMouse* maze_mouse)
 {
-    std::vector<Cell*> path;
-    Cell*              node = end;
+    if (maze_mouse->mazeWidth() * maze_mouse->mazeHeight() <= MAX_CELLS)
+        return true;
+    LOG_ERROR("Speed path planner: maze larger than MAZE_SIZE x MAZE_SIZE.");
+    return false;
+}
+
+bool reconstructExploredPath(int height, Cell* start, Cell* end, CellPath& out)
+{
+    out.clear();
+    Cell* node = end;
 
     while (node != nullptr && node != start)
     {
-        path.push_back(node);
-        node = parents[node->x()][node->y()];
+        if (!out.push(node))
+            break;
+        node = explored.parents[node->x() * height + node->y()];
     }
 
     if (node != start)
     {
         LOG_ERROR("Explored speed path reconstruction failed.");
-        return {};
+        out.clear();
+        return false;
     }
 
-    std::reverse(path.begin(), path.end());
+    out.reverse();
 
-    for (Cell* cell : path)
+    for (int i = 0; i < out.size(); ++i)
     {
+        Cell* cell = out[i];
         if (!cell->explored())
         {
             LOG_ERROR("Explored speed path rejected unexplored cell (" + std::to_string(cell->x()) +
                       "," + std::to_string(cell->y()) + ")");
-            return {};
+            out.clear();
+            return false;
         }
     }
 
-    return path;
+    return true;
 }
 
-std::vector<Cell*> exploredPathTo(MazeMouse* maze_mouse, Cell* end)
+// Fewest-cells route to `end` into `out`; empty when there is none.
+void exploredPathTo(MazeMouse* maze_mouse, Cell* end, CellPath& out)
 {
+    out.clear();
     Cell* start = maze_mouse->currentCell();
     if (start == nullptr || end == nullptr)
-        return {};
+        return;
 
     if (!start->explored() || !end->explored())
     {
         LOG_ERROR("Explored speed path requires explored start and goal cells.");
-        return {};
+        return;
     }
 
-    if (start == end)
-        return {};
+    if (start == end || !fitsScratch(maze_mouse))
+        return;
 
     const int width  = maze_mouse->mazeWidth();
     const int height = maze_mouse->mazeHeight();
+    auto      index  = [height](Cell* cell) { return cell->x() * height + cell->y(); };
 
-    std::vector<std::vector<float>> g_costs(
-        width, std::vector<float>(height, std::numeric_limits<float>::infinity()));
-    std::vector<std::vector<Cell*>>   parents(width, std::vector<Cell*>(height, nullptr));
-    std::vector<std::vector<bool>>    closed(width, std::vector<bool>(height, false));
-    std::priority_queue<ExploredNode> open;
-
-    g_costs[start->x()][start->y()] = 0.0f;
-    open.push({start, 0.0f, manhattan(start, end)});
-
-    while (!open.empty())
+    for (int i = 0; i < width * height; ++i)
     {
-        ExploredNode current = open.top();
-        open.pop();
+        explored.g_costs[i] = std::numeric_limits<float>::infinity();
+        explored.parents[i] = nullptr;
+        explored.closed[i]  = false;
+    }
+    explored.open.clear();
+    auto push = [&](const ExploredNode& node)
+    {
+        if (explored.open.push(node))
+            return true;
+        explored.open.prune(
+            [&](const ExploredNode& e)
+            {
+                return explored.closed[index(e.cell)] || e.g_cost > explored.g_costs[index(e.cell)];
+            });
+        return explored.open.push(node);
+    };
+
+    explored.g_costs[index(start)] = 0.0f;
+    push({start, 0.0f, manhattan(start, end)});
+
+    while (!explored.open.empty())
+    {
+        ExploredNode current = explored.open.top();
+        explored.open.pop();
 
         if (current.cell == end)
-            return reconstructExploredPath(parents, start, end);
-
-        if (closed[current.cell->x()][current.cell->y()])
-            continue;
-        closed[current.cell->x()][current.cell->y()] = true;
-
-        for (Cell* neighbor : maze_mouse->cellNeighbors(current.cell, /*include_diagonal=*/false))
         {
+            reconstructExploredPath(height, start, end, out);
+            return;
+        }
+
+        if (explored.closed[index(current.cell)])
+            continue;
+        explored.closed[index(current.cell)] = true;
+
+        std::array<Cell*, 8> neighbors;
+        const int            count =
+            maze_mouse->cellNeighbors(current.cell, /*include_diagonal=*/false, neighbors);
+        for (int i = 0; i < count; ++i)
+        {
+            Cell* neighbor = neighbors[i];
             if (!neighbor->explored())
                 continue;
-            if (closed[neighbor->x()][neighbor->y()])
+            if (explored.closed[index(neighbor)])
                 continue;
             if (!maze_mouse->canMoveBetween(current.cell, neighbor, /*diagonals=*/false))
                 continue;
 
             const float new_g = current.g_cost + 1.0f;
-            if (new_g < g_costs[neighbor->x()][neighbor->y()])
+            if (new_g < explored.g_costs[index(neighbor)])
             {
-                g_costs[neighbor->x()][neighbor->y()] = new_g;
-                parents[neighbor->x()][neighbor->y()] = current.cell;
-                open.push({neighbor, new_g, new_g + manhattan(neighbor, end)});
+                explored.g_costs[index(neighbor)] = new_g;
+                explored.parents[index(neighbor)] = current.cell;
+                if (!push({neighbor, new_g, new_g + manhattan(neighbor, end)}))
+                {
+                    LOG_ERROR("Explored speed path open set full.");
+                    return;
+                }
             }
         }
     }
 
     LOG_ERROR("No explored-only speed path found.");
-    return {};
-}
-} // namespace
-
-std::vector<Cell*> shortestExploredPath(MazeMouse*                             maze_mouse,
-                                        const std::vector<std::array<int, 2>>& goals)
-{
-    std::vector<Cell*> best_path;
-    float              best_cost = std::numeric_limits<float>::infinity();
-
-    for (const auto& goal : goals)
-    {
-        Cell* goal_cell = maze_mouse->cellAt(goal[0], goal[1]);
-        if (goal_cell == nullptr || !goal_cell->explored())
-            continue;
-
-        std::vector<Cell*> path = exploredPathTo(maze_mouse, goal_cell);
-        if (path.empty())
-            continue;
-
-        float cost = static_cast<float>(path.size());
-        if (cost < best_cost)
-        {
-            best_path = path;
-            best_cost = cost;
-        }
-    }
-
-    return best_path;
 }
 
-namespace
-{
 // Cardinal headings in turn order, so +1 is a right turn: N, E, S, W.
 constexpr std::array<std::array<int, 2>, 4> kHeadings = {{{0, 1}, {1, 0}, {0, -1}, {-1, 0}}};
 
@@ -164,69 +205,113 @@ int headingIndex(const std::array<int, 2>& heading)
     }
     return -1;
 }
-
-struct TimedNode
-{
-    int   state;
-    float time_s;
-
-    bool operator<(const TimedNode& other) const { return time_s > other.time_s; }
-};
 } // namespace
 
-std::vector<Cell*> fastestExploredPath(MazeMouse*                             maze_mouse,
-                                       const std::vector<std::array<int, 2>>& goals,
-                                       const RunTimeModel&                    model)
+bool shortestExploredRoute(MazeMouse* maze_mouse, const std::vector<std::array<int, 2>>& goals,
+                           CellPath& out)
 {
+    out.clear();
+    float best_cost = std::numeric_limits<float>::infinity();
+
+    for (const auto& goal : goals)
+    {
+        Cell* goal_cell = maze_mouse->cellAt(goal[0], goal[1]);
+        if (goal_cell == nullptr || !goal_cell->explored())
+            continue;
+
+        exploredPathTo(maze_mouse, goal_cell, explored.candidate);
+        if (explored.candidate.empty())
+            continue;
+
+        float cost = static_cast<float>(explored.candidate.size());
+        if (cost < best_cost)
+        {
+            out       = explored.candidate;
+            best_cost = cost;
+        }
+    }
+
+    return !out.empty();
+}
+
+std::vector<Cell*> shortestExploredPath(MazeMouse*                             maze_mouse,
+                                        const std::vector<std::array<int, 2>>& goals)
+{
+    static CellPath path;
+    shortestExploredRoute(maze_mouse, goals, path);
+    return path.toVector();
+}
+
+bool fastestExploredRoute(MazeMouse* maze_mouse, const std::vector<std::array<int, 2>>& goals,
+                          CellPath& out, const RunTimeModel& model)
+{
+    out.clear();
     Cell* start = maze_mouse->currentCell();
     if (start == nullptr || !start->explored())
-        return {};
+        return false;
     const int start_heading = headingIndex(maze_mouse->currentDirectionArray());
     if (start_heading < 0)
-        return {}; // The speed run starts on a cardinal heading.
+        return false; // The speed run starts on a cardinal heading.
+    if (!fitsScratch(maze_mouse))
+        return false;
 
     const int w = maze_mouse->mazeWidth();
     const int h = maze_mouse->mazeHeight();
 
-    std::vector<bool> goal(static_cast<size_t>(w * h), false);
+    for (int i = 0; i < w * h; ++i)
+        timed.goal[i] = false;
     for (const auto& g : goals)
     {
         Cell* cell = maze_mouse->cellAt(g[0], g[1]);
         if (cell != nullptr && cell->explored())
-            goal[static_cast<size_t>(g[1] * w + g[0])] = true;
+            timed.goal[g[1] * w + g[0]] = true;
     }
 
     // A state is a cell and a heading, with the mouse at rest there: the
     // cardinal speed run stops after every straight and spins in place. Edges
     // are a whole straight of k cells (one merged move) or a spin, so the cost
     // of a route is exactly its estimated run time.
-    auto         state_of = [w](int x, int y, int heading) { return (y * w + x) * 4 + heading; };
-    const size_t states   = static_cast<size_t>(w * h * 4);
-    std::vector<float> best(states, std::numeric_limits<float>::infinity());
-    std::vector<int>   parent(states, -1);
-    std::vector<bool>  closed(states, false);
+    auto      state_of = [w](int x, int y, int heading) { return (y * w + x) * 4 + heading; };
+    const int states   = w * h * 4;
+    for (int i = 0; i < states; ++i)
+    {
+        timed.best[i]   = std::numeric_limits<float>::infinity();
+        timed.parent[i] = -1;
+        timed.closed[i] = false;
+    }
+    timed.open.clear();
 
     const float turn_90_s  = turnTimeS(90.0f, model);
     const float turn_180_s = 2.0f * turn_90_s; // An about-turn is two 90s.
 
-    std::priority_queue<TimedNode> open;
-    const int                      first = state_of(start->x(), start->y(), start_heading);
-    best[first]                          = 0.0f;
-    open.push({first, 0.0f});
+    bool open_full = false;
+    auto push      = [&](const TimedNode& node)
+    {
+        if (timed.open.push(node))
+            return;
+        timed.open.prune([&](const TimedNode& e)
+                         { return timed.closed[e.state] || e.time_s > timed.best[e.state]; });
+        if (!timed.open.push(node))
+            open_full = true;
+    };
+
+    const int first   = state_of(start->x(), start->y(), start_heading);
+    timed.best[first] = 0.0f;
+    push({first, 0.0f});
 
     int end = -1;
-    while (!open.empty())
+    while (!timed.open.empty() && !open_full)
     {
-        const TimedNode node = open.top();
-        open.pop();
-        if (closed[node.state])
+        const TimedNode node = timed.open.top();
+        timed.open.pop();
+        if (timed.closed[node.state])
             continue;
-        closed[node.state] = true;
+        timed.closed[node.state] = true;
 
         const int heading = node.state % 4;
         const int x       = (node.state / 4) % w;
         const int y       = (node.state / 4) / w;
-        if (goal[static_cast<size_t>(y * w + x)])
+        if (timed.goal[y * w + x])
         {
             end = node.state;
             break;
@@ -234,11 +319,11 @@ std::vector<Cell*> fastestExploredPath(MazeMouse*                             ma
 
         auto relax = [&](int next, float time_s)
         {
-            if (!closed[next] && time_s < best[next])
+            if (!timed.closed[next] && time_s < timed.best[next])
             {
-                best[next]   = time_s;
-                parent[next] = node.state;
-                open.push({next, time_s});
+                timed.best[next]   = time_s;
+                timed.parent[next] = static_cast<int16_t>(node.state);
+                push({next, time_s});
             }
         };
 
@@ -261,44 +346,66 @@ std::vector<Cell*> fastestExploredPath(MazeMouse*                             ma
         }
     }
 
+    if (open_full)
+    {
+        LOG_ERROR("Timed speed path open set full.");
+        return false;
+    }
     if (end < 0)
     {
         LOG_ERROR("No explored-only speed path found.");
-        return {};
+        return false;
     }
 
-    // Walk the states back to the start, then lay out every cell each
-    // straight passes through.
-    std::vector<int> chain;
-    for (int s = end; s != -1; s = parent[s])
-        chain.push_back(s);
-    std::reverse(chain.begin(), chain.end());
-
-    std::vector<Cell*> path;
-    for (size_t i = 1; i < chain.size(); ++i)
+    // Walk the states back to the start, laying out every cell each straight
+    // passes through, last cell first; then put them in driving order.
+    for (int s = end; timed.parent[s] != -1; s = timed.parent[s])
     {
-        int       x       = (chain[i - 1] / 4) % w;
-        int       y       = (chain[i - 1] / 4) / w;
-        const int to_x    = (chain[i] / 4) % w;
-        const int to_y    = (chain[i] / 4) / w;
-        const int heading = chain[i] % 4;
-        while (x != to_x || y != to_y)
+        const int from_x  = (timed.parent[s] / 4) % w;
+        const int from_y  = (timed.parent[s] / 4) / w;
+        int       x       = (s / 4) % w;
+        int       y       = (s / 4) / w;
+        const int heading = s % 4;
+        while (x != from_x || y != from_y)
         {
-            x += kHeadings[heading][0];
-            y += kHeadings[heading][1];
-            path.push_back(maze_mouse->cellAt(x, y));
+            if (!out.push(maze_mouse->cellAt(x, y)))
+            {
+                LOG_ERROR("Timed speed path longer than the maze.");
+                out.clear();
+                return false;
+            }
+            x -= kHeadings[heading][0];
+            y -= kHeadings[heading][1];
         }
     }
-    return path;
+    out.reverse();
+    return true;
+}
+
+std::vector<Cell*> fastestExploredPath(MazeMouse*                             maze_mouse,
+                                       const std::vector<std::array<int, 2>>& goals,
+                                       const RunTimeModel&                    model)
+{
+    static CellPath path;
+    fastestExploredRoute(maze_mouse, goals, path, model);
+    return path.toVector();
+}
+
+bool plannedExploredRoute(MazeMouse* maze_mouse, const std::vector<std::array<int, 2>>& goals,
+                          RoutePlanner planner, CellPath& out)
+{
+    if (planner == RoutePlanner::RunTime)
+        return fastestExploredRoute(maze_mouse, goals, out);
+    return shortestExploredRoute(maze_mouse, goals, out);
 }
 
 std::vector<Cell*> plannedExploredPath(MazeMouse*                             maze_mouse,
                                        const std::vector<std::array<int, 2>>& goals,
                                        RoutePlanner                           planner)
 {
-    if (planner == RoutePlanner::RunTime)
-        return fastestExploredPath(maze_mouse, goals);
-    return shortestExploredPath(maze_mouse, goals);
+    static CellPath path;
+    plannedExploredRoute(maze_mouse, goals, planner, path);
+    return path.toVector();
 }
 
 const char* routePlannerName(RoutePlanner planner)

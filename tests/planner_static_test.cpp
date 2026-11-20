@@ -1,5 +1,6 @@
 // The A* and speed-run planners on the sim maze corpus: their routes match a
-// golden file recorded from the original std::vector/priority_queue planners.
+// golden file recorded from the original std::vector/priority_queue planners,
+// and planning allocates nothing but the path it returns.
 //
 // Rewrite the golden file (only after a planner change meant to change routes):
 //   PLANNER_GOLDEN_OUT=planner_golden.txt ./host_tests -tc="planner*golden*"
@@ -11,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <new>
 #include <string>
 #include <vector>
 
@@ -21,6 +23,25 @@
 #include "navigation/a_star.h"
 #include "navigation/route_planner.h"
 #include "navigation/run_time.h"
+
+// Counts every global operator new in this test binary.
+static size_t g_allocations = 0;
+
+void* operator new(std::size_t size)
+{
+    ++g_allocations;
+    if (void* p = std::malloc(size ? size : 1))
+        return p;
+    throw std::bad_alloc();
+}
+void operator delete(void* p) noexcept
+{
+    std::free(p);
+}
+void operator delete(void* p, std::size_t) noexcept
+{
+    std::free(p);
+}
 
 namespace
 {
@@ -178,4 +199,46 @@ TEST_CASE("planner routes on the maze corpus match the golden file")
     REQUIRE(expected.size() == lines.size());
     for (size_t i = 0; i < lines.size(); ++i)
         CHECK(lines[i] == expected[i]);
+}
+
+TEST_CASE("planning allocates only the path it returns")
+{
+    Loaded                                m("classic/APEC2017.txt", Knowledge::Full, MASK_CLOSED);
+    const std::vector<std::array<int, 2>> goals = m.text.goals;
+    AStar                                 a_star(m.mouse.get());
+
+    size_t before = g_allocations;
+    {
+        const std::vector<Cell*> path = a_star.cellPath(goals, false, true);
+        CHECK(!path.empty());
+    }
+    CHECK(g_allocations - before == 1);
+
+    before = g_allocations;
+    {
+        const std::vector<Cell*> path = shortestExploredPath(m.mouse.get(), goals);
+        CHECK(!path.empty());
+    }
+    CHECK(g_allocations - before == 1);
+
+    before = g_allocations;
+    {
+        const std::vector<Cell*> path = fastestExploredPath(m.mouse.get(), goals, model());
+        CHECK(!path.empty());
+    }
+    CHECK(g_allocations - before == 1);
+}
+
+TEST_CASE("planning into a CellPath never allocates")
+{
+    Loaded                                m("classic/APEC2017.txt", Knowledge::Full, MASK_CLOSED);
+    const std::vector<std::array<int, 2>> goals = m.text.goals;
+    AStar                                 a_star(m.mouse.get());
+    CellPath                              path;
+
+    const size_t before = g_allocations;
+    CHECK(!a_star.route(goals, false, true).empty());
+    CHECK(shortestExploredRoute(m.mouse.get(), goals, path));
+    CHECK(fastestExploredRoute(m.mouse.get(), goals, path, model()));
+    CHECK(g_allocations == before);
 }
