@@ -54,4 +54,13 @@ void setIdle();
 
 } // namespace stage_led
 
+/**
+ * @brief The board's plain on-board LED, separate from the status NeoPixel.
+ */
+namespace board_led
+{
+// Blinks count times, 100 ms on and 100 ms off, blocking about count * 200 ms.
+void blink(int count);
+} // namespace board_led
+
 #endif

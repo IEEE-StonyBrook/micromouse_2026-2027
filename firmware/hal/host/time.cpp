@@ -22,4 +22,16 @@ void sleepMs(uint32_t duration_ms)
 {
     std::this_thread::sleep_for(std::chrono::milliseconds(duration_ms));
 }
+
+uint64_t nowUs()
+{
+    const auto elapsed = std::chrono::steady_clock::now() - kBoot;
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count());
+}
+
+void sleepUntilUs(uint64_t deadline_us)
+{
+    std::this_thread::sleep_until(kBoot + std::chrono::microseconds(deadline_us));
+}
 } // namespace hal::time
