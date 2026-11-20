@@ -2,6 +2,8 @@
 
 #include <libopencm3/stm32/flash.h>
 
+#include "hal/stm32/watchdog.h"
+
 // Bounds of the store region, from hal/stm32/stm32f405.ld.
 extern "C" const uint32_t _flash_store_start;
 extern "C" const uint32_t _flash_store_end;
@@ -44,6 +46,9 @@ bool StoreFlash::erase(uint32_t sector)
 {
     if (!layout_.valid || sector >= layout_.count)
         return false;
+    // The erase stalls the CPU for up to 500 ms (FLASH_SECTOR_ERASE_MAX_MS);
+    // a fresh feed leaves the watchdog its whole timeout, at least 3 s.
+    watchdog::feed();
     flash_unlock();
     clearErrors();
     flash_erase_sector(static_cast<uint8_t>(layout_.first_sector + sector), FLASH_CR_PROGRAM_X32);

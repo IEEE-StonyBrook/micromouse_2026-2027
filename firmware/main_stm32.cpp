@@ -42,6 +42,7 @@
 #include "hal/stm32/spi.h"
 #include "hal/stm32/tick.h"
 #include "hal/stm32/uid.h"
+#include "hal/stm32/watchdog.h"
 #include "hal/time.h"
 
 namespace
@@ -162,6 +163,7 @@ void dumpRunLog()
         RunLog::formatRow(row, sizeof row, i, dt_ms, log.sample(i));
         std::printf("%s\n", row);
         hal::time::sleepMs(1); // ~100 bytes take 1 ms at 1 Mbaud
+        hal::stm32::watchdog::feed(); // the whole dump takes about 2 s
     }
     std::printf("TRACE end\n");
 }
@@ -283,6 +285,7 @@ int main()
     encoder_right.init(board::ENCODER_PINS[2], board::ENCODER_PINS[3]);
     hal::stm32::tick::start(onTick);
     hal::console::stm32::init();
+    hal::stm32::watchdog::start();
     std::printf("\nJurababa STM32 bring-up, %" PRIu32 " MHz from the %s\n", CORE_MHZ,
                 clock == hal::stm32::ClockSource::kHse ? "crystal" : "HSI (crystal fault)");
 
@@ -303,6 +306,7 @@ int main()
     while (true)
     {
         __asm__ volatile("wfi");
+        hal::stm32::watchdog::feed();
         pollConsole();
         const uint32_t now_ms = hal::time::nowMs();
         bool           led_on = (now_ms / BLINK_HALF_MS) % 2 == 0;

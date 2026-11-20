@@ -25,6 +25,7 @@ set(STM32_HAL_SOURCES
     firmware/hal/stm32/tick.cpp
     firmware/hal/stm32/time.cpp
     firmware/hal/stm32/uid.cpp
+    firmware/hal/stm32/watchdog.cpp
 )
 
 add_executable(Jurababa_stm32

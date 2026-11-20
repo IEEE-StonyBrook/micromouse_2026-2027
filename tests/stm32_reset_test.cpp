@@ -5,6 +5,7 @@
 
 #include "doctest/doctest.h"
 #include "hal/stm32/reset_flags.h"
+#include "hal/stm32/watchdog_plan.h"
 
 using namespace hal::stm32;
 
@@ -63,4 +64,23 @@ TEST_CASE("Internal resets also pulse NRST, so PIN does not count as the button"
 TEST_CASE("No flags decode to nothing")
 {
     CHECK(flagsSet(decodeResetFlags(0)) == 0);
+}
+
+TEST_CASE("The independent watchdog waits at least 2 s even on the fastest LSI")
+{
+    // IWDG timeout = reload * prescaler / f_LSI (RM0090 19.3). The LSI is
+    // 17-47 kHz across parts and temperature (DS8626).
+    const double fastest_s = IWDG_RELOAD * double(IWDG_PRESCALER) / 47000.0;
+    const double slowest_s = IWDG_RELOAD * double(IWDG_PRESCALER) / 17000.0;
+    CHECK(fastest_s >= 2.0);
+    CHECK(slowest_s <= 10.0); // a real hang still resets within seconds
+    CHECK(IWDG_RELOAD <= 0x0FFFu); // 12-bit reload register
+    CHECK(iwdgTimeoutMs(47000) == doctest::Approx(fastest_s * 1000.0).epsilon(0.001));
+}
+
+TEST_CASE("A flash-store save, fed just before its erase, cannot outlast the watchdog")
+{
+    // One save erases one 16 KB sector (up to 500 ms, DS8626 t_ERASE16KB) and
+    // programs under a KB of words; the timeout must clear it with room to spare.
+    CHECK(iwdgTimeoutMs(47000) >= 2 * FLASH_SECTOR_ERASE_MAX_MS);
 }
