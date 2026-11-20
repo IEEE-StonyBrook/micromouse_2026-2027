@@ -82,3 +82,6 @@ jobs:
 
       - name: No logging or heap in ISR context
         run: python3 tools/check_isr_logging.py
+
+      - name: No Pico SDK includes in platform-neutral code
+        run: python3 tools/check_sdk_free.py
