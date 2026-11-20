@@ -582,3 +582,21 @@ TEST_CASE("The LED code shows its flash count as 100 ms blinks every 2 s")
     // No code, no light.
     CHECK_FALSE(ledCodeOn(0, 0));
 }
+
+TEST_CASE("A flash device without two usable slots never loads or saves")
+{
+    // What the STM32 backend reports when the linker region fails its check.
+    hal::host::MemoryFlash one_sector(1, STORE_SECTOR_BYTES);
+    hal::host::MemoryFlash no_sectors(0, 0);
+    for (hal::host::MemoryFlash* flash : {&one_sector, &no_sectors})
+    {
+        TestGuard      guard;
+        FlashStore     store(*flash, guard, VERSION, UID_HASH);
+        const Settings s = makeSettings(1);
+        CHECK(store.maxPayloadBytes() == 0);
+        CHECK(store.save(&s, sizeof s).status == SaveStatus::kFlashError);
+        Settings got = makeSettings(9);
+        CHECK(store.load(&got, sizeof got).status == LoadStatus::kNoValidRecord);
+        CHECK(same(got, makeSettings(9)));
+    }
+}

@@ -141,6 +141,9 @@ class FlashStore
         uint32_t len;
     };
 
+    /// At least two sectors, each with room for a header and a CRC. A
+    /// device that fails this never loads (kNoValidRecord) or saves (kFlashError).
+    bool     usable() const;
     SlotInfo inspect(uint32_t slot) const;
     bool     sectorErased(uint32_t base) const;
     /// Index of the newest valid slot, or -1.

@@ -120,9 +120,14 @@ FlashStore::FlashStore(hal::FlashDevice& flash, SaveGuard& guard, uint32_t versi
 {
 }
 
+bool FlashStore::usable() const
+{
+    return flash_.sectorCount() >= 2 && flash_.sectorSizeBytes() > HEADER_BYTES + 4;
+}
+
 std::size_t FlashStore::maxPayloadBytes() const
 {
-    return flash_.sectorSizeBytes() - HEADER_BYTES - 4;
+    return usable() ? flash_.sectorSizeBytes() - HEADER_BYTES - 4 : 0;
 }
 
 FlashStore::SlotInfo FlashStore::inspect(uint32_t slot) const
@@ -173,6 +178,8 @@ int FlashStore::newest(const SlotInfo (&slots)[2]) const
 
 LoadResult FlashStore::load(void* payload, std::size_t capacity_bytes) const
 {
+    if (!usable())
+        return {LoadStatus::kNoValidRecord, 0, 0};
     const SlotInfo slots[2] = {inspect(0), inspect(1)};
     const int      pick     = newest(slots);
     const bool     damaged =
@@ -201,6 +208,8 @@ LoadResult FlashStore::load(void* payload, std::size_t capacity_bytes) const
 
 SaveResult FlashStore::save(const void* payload, std::size_t len)
 {
+    if (!usable())
+        return {SaveStatus::kFlashError, SaveBlocker::kNone, 0};
     const SaveBlocker blocker = guard_.prepareForSave();
     if (blocker != SaveBlocker::kNone)
         return {SaveStatus::kRefused, blocker, 0};
