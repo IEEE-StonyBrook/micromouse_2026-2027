@@ -613,8 +613,10 @@ static void runMouseAppMode(Battery* battery, SensorMode sensor_mode, bool compe
     deps.sensor_mode   = sensor_mode;
     deps.start_cell    = start_cell;
     deps.goal_cells    = goal_cells;
+    deps.maze_size     = MAZE_SIZE;
 
     Cli cli(deps);
+    cli.printMazeSetting();
     if (cheese_hunt_mode)
     {
         cli.runCheeseHuntMode();
