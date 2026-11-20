@@ -22,6 +22,7 @@ NUS_RX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"  # host writes
 NUS_TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"  # bridge notifies
 
 SCAN_TIMEOUT_S = 5.0
+CONNECT_TIMEOUT_S = 10.0  # connect plus subscribe, after the scan
 READ_TIMEOUT_S = 0.05  # matches serial_term's pyserial timeout
 
 
@@ -41,16 +42,38 @@ class BleakBackend:
     """The real radio, through bleak. Imported lazily so serial use and the
     tests never need bleak installed."""
 
-    async def connect(self, name, timeout, on_data, on_disconnect):
-        from bleak import BleakClient, BleakScanner
+    def __init__(self, client_cls=None, scanner_cls=None):
+        self._client_cls = client_cls
+        self._scanner_cls = scanner_cls
 
-        device = await BleakScanner.find_device_by_name(name, timeout=timeout)
+    async def connect(self, name, timeout, on_data, on_disconnect):
+        if self._client_cls is None or self._scanner_cls is None:
+            from bleak import BleakClient, BleakScanner
+            self._client_cls = self._client_cls or BleakClient
+            self._scanner_cls = self._scanner_cls or BleakScanner
+
+        device = await self._scanner_cls.find_device_by_name(name, timeout=timeout)
         if device is None:
             raise OSError(f"BLE device {name!r} not advertising")
-        client = BleakClient(device, disconnected_callback=lambda _c: on_disconnect())
+        client = self._client_cls(device, disconnected_callback=lambda _c: on_disconnect())
+        try:
+            # Bounded here, not only by the caller's wait, so a stuck connect is
+            # cancelled on this loop rather than finishing with no owner.
+            await asyncio.wait_for(self._open(client, on_data), CONNECT_TIMEOUT_S)
+        except BaseException:
+            # A half-open link keeps the bridge from advertising, so every
+            # later reconnect would fail: always release it.
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+            raise
+        return _BleakClientAdapter(client)
+
+    @staticmethod
+    async def _open(client, on_data):
         await client.connect()
         await client.start_notify(NUS_TX, lambda _h, data: on_data(bytes(data)))
-        return _BleakClientAdapter(client)
 
 
 class _BleakClientAdapter:
@@ -81,7 +104,8 @@ class BleTransport:
         try:
             self._client = self._call(
                 (backend or BleakBackend()).connect(name, scan_timeout, self._rx.put, self._lost.set),
-                timeout=scan_timeout + 10.0)
+                # Headroom over the backend's own bounds, so they fire first.
+                timeout=scan_timeout + CONNECT_TIMEOUT_S + 5.0)
         except Exception as e:
             self._stop_loop()
             raise OSError(f"BLE connect to {name!r} failed: {e}") from e
@@ -124,5 +148,9 @@ class BleTransport:
         self._stop_loop()
 
     def _stop_loop(self):
+        # Close the loop too: while the mouse is armed this runs on every
+        # failed reconnect, and an unclosed loop leaks its selector.
         self._loop.call_soon_threadsafe(self._loop.stop)
         self._thread.join(timeout=1.0)
+        if not self._thread.is_alive():
+            self._loop.close()

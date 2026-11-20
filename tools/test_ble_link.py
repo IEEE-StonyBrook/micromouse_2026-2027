@@ -97,5 +97,40 @@ class TransportTest(unittest.TestCase):
         t2.close()
 
 
+class FakeBleakClient:
+    instances = []
+
+    def __init__(self, device, disconnected_callback=None):
+        self.device = device
+        self.mtu_size = 247
+        self.connected = False
+        FakeBleakClient.instances.append(self)
+
+    async def connect(self):
+        self.connected = True
+
+    async def start_notify(self, uuid, callback):
+        raise OSError("notify refused")
+
+    async def disconnect(self):
+        self.connected = False
+
+
+class FakeScanner:
+    @staticmethod
+    async def find_device_by_name(name, timeout):
+        return object()
+
+
+class BleakBackendTest(unittest.TestCase):
+    def test_failed_subscribe_releases_the_link(self):
+        # A link left open would stop the bridge advertising, and every later
+        # reconnect would fail until the ESP32 reset.
+        backend = ble_link.BleakBackend(client_cls=FakeBleakClient, scanner_cls=FakeScanner)
+        with self.assertRaises(OSError):
+            ble_link.BleTransport("Jurababa", backend=backend)
+        self.assertFalse(FakeBleakClient.instances[-1].connected)
+
+
 if __name__ == "__main__":
     unittest.main()
