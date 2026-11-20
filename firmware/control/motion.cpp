@@ -7,7 +7,7 @@
 #include "config/config.h"
 #include "control/drivetrain.h"
 #include "drivers/imu.h"
-#include "pico/stdlib.h"
+#include "hal/time.h"
 
 namespace
 {
@@ -18,8 +18,7 @@ constexpr uint32_t kSpinTurnPreStopTimeoutMs   = 1000;
 
 bool timedOut(uint32_t start_ms, uint32_t timeout_ms)
 {
-    return timeout_ms > 0 &&
-           static_cast<uint32_t>(to_ms_since_boot(get_absolute_time()) - start_ms) >= timeout_ms;
+    return timeout_ms > 0 && static_cast<uint32_t>(hal::time::nowMs() - start_ms) >= timeout_ms;
 }
 } // namespace
 
@@ -383,7 +382,7 @@ bool Motion::stop_forward(float accel_mmps2, uint32_t timeout_ms)
 
 bool Motion::wait_until_forward_settled(uint32_t timeout_ms)
 {
-    const uint32_t start_ms = to_ms_since_boot(get_absolute_time());
+    const uint32_t start_ms = hal::time::nowMs();
 
     while (!move_settled(kForwardSettledVelocityMmps))
     {
@@ -398,7 +397,7 @@ bool Motion::wait_until_forward_settled(uint32_t timeout_ms)
             prev_right_cmd_vel_mmps_ = 0.0f;
             return false;
         }
-        sleep_ms(2);
+        hal::time::sleepMs(2);
     }
 
     forward_controller_.reset();
@@ -820,7 +819,7 @@ void Motion::emergency_stop()
 
 bool Motion::wait_until_position(float position_mm, uint32_t timeout_ms)
 {
-    const uint32_t start_ms = to_ms_since_boot(get_absolute_time());
+    const uint32_t start_ms = hal::time::nowMs();
 
     while (position() < position_mm - kPositionToleranceMm)
     {
@@ -832,7 +831,7 @@ bool Motion::wait_until_position(float position_mm, uint32_t timeout_ms)
             drivetrain_->stop();
             return false;
         }
-        sleep_ms(2);
+        hal::time::sleepMs(2);
     }
 
     return true;
