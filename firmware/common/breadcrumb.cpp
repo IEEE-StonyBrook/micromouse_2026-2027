@@ -93,7 +93,7 @@ void Breadcrumb::report()
     const bool                    had_por  = cause.power_on;
     const bool                    had_run  = cause.run_pin;
     const bool                    had_psm  = cause.debugger;
-    const bool                    software = cause.watchdog;
+    const bool                    software = cause.software;
 
     const Snapshot& prev     = previous_;
     const char*     activity = (prev.last_log[0] != '\0') ? prev.last_log : "(nothing logged yet)";
