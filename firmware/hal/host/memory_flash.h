@@ -11,11 +11,12 @@ namespace hal::host
 /**
  * @brief NOR flash in host memory that can lose power at any word.
  *
- * Erase and program both work one word at a time, lowest address first, and
- * each word is one operation. After cutPowerAfterWords(n), n more words
- * complete, the next one is torn (left holding a mix of its old and new
- * bits, as a real cell cut off mid-write would) and the device then ignores
- * every erase and program until restorePower(). Reads always work.
+ * Erase and program both count one operation per word. After
+ * cutPowerAfterWords(n), n more words complete and the next operation is
+ * torn: a program leaves that word holding a mix of its old and new bits,
+ * and an erase leaves every word of the sector part erased (a real erase is
+ * not ordered by address). The device then ignores every erase and program
+ * until restorePower(). Reads always work.
  */
 class MemoryFlash final : public hal::FlashDevice
 {
@@ -39,6 +40,10 @@ class MemoryFlash final : public hal::FlashDevice
     void poke(uint32_t offset_bytes, uint32_t value);
 
   private:
+    /// Which bits of a torn word reach their new value. Fixed per address so
+    /// a failing power-cut case replays exactly.
+    static uint32_t tearMask(std::size_t index);
+
     /// Applies one word operation; false once power is gone.
     bool step(std::size_t index, uint32_t value);
 

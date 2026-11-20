@@ -8,15 +8,19 @@ MemoryFlash::MemoryFlash(uint32_t sector_count, uint32_t sector_size_bytes)
 {
 }
 
+uint32_t MemoryFlash::tearMask(std::size_t index)
+{
+    return 0x5A5A5A5Au ^ static_cast<uint32_t>(index * 2654435761u);
+}
+
 bool MemoryFlash::step(std::size_t index, uint32_t value)
 {
     if (!powered_)
         return false;
     if (cut_armed_ && words_left_ == 0)
     {
-        // Torn word: some bits reached their new value and some did not. The
-        // mask is fixed per address so a test failure replays exactly.
-        const uint32_t mask = 0x5A5A5A5Au ^ static_cast<uint32_t>(index * 2654435761u);
+        // Torn word: some bits reached their new value and some did not.
+        const uint32_t mask = tearMask(index);
         words_[index]       = (value & mask) | (words_[index] & ~mask);
         powered_            = false;
         cut_armed_          = false;
@@ -31,12 +35,18 @@ bool MemoryFlash::step(std::size_t index, uint32_t value)
 
 bool MemoryFlash::erase(uint32_t sector)
 {
-    if (sector >= sector_count_)
+    if (sector >= sector_count_ || !powered_)
         return false;
     const std::size_t first = static_cast<std::size_t>(sector) * sector_size_bytes_ / 4;
     for (std::size_t i = 0; i < sector_size_bytes_ / 4; ++i)
         if (!step(first + i, ERASED_WORD))
+        {
+            // A real sector erase is not ordered by address, so a cut leaves
+            // every word part erased, not a clean prefix: tear them all.
+            for (std::size_t j = 0; j < sector_size_bytes_ / 4; ++j)
+                words_[first + j] |= tearMask(first + j);
             return false;
+        }
     return true;
 }
 
@@ -68,7 +78,8 @@ void MemoryFlash::cutPowerAfterWords(uint64_t words)
 
 void MemoryFlash::restorePower()
 {
-    powered_ = true;
+    powered_   = true;
+    cut_armed_ = false; // a cut that never fired is dropped too
 }
 
 void MemoryFlash::poke(uint32_t offset_bytes, uint32_t value)
