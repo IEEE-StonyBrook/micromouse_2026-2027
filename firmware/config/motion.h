@@ -5,14 +5,16 @@
 #ifndef CONFIG_MOTION_H
 #define CONFIG_MOTION_H
 
+#include "config/board.h"
+
 // ===================== Control Loop ===================== //
-// Forward and rotation controllers run at 500 Hz, matching mazerunner-core /
-// motorlab. Jurababa's rotation feedback still comes from the 100 Hz BNO085
-// RVC stream; IMU::robot_rot_change() distributes the latest packet-rate yaw
-// delta into an equivalent per-500 Hz tick change so the controller keeps the
-// UKMARS single-rate shape without switching away from the IMU.
-#define LOOP_FREQUENCY_HZ 500.0f
-#define LOOP_INTERVAL_S   (1.0f / LOOP_FREQUENCY_HZ)
+// Forward and rotation controllers run at LOOP_FREQUENCY_HZ, set per platform
+// in the board config (500 Hz on the Pico, 1 kHz on the STM32), matching
+// mazerunner-core / motorlab's single-rate shape. Jurababa's rotation feedback
+// still comes from the 100 Hz BNO085 RVC stream; IMU::robot_rot_change()
+// distributes the latest packet-rate yaw delta into an equivalent per-tick
+// change so the controller keeps that shape without switching away from the IMU.
+#define LOOP_INTERVAL_S (1.0f / LOOP_FREQUENCY_HZ)
 
 // 8-tap moving average over per-tick encoder deltas, applied in
 // Drivetrain::update() and DriverLab::sampleEncoders() to mirror
