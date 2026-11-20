@@ -6,9 +6,6 @@
 
 #include "common/log.h"
 #include "config/config.h"
-#include "hardware/gpio.h"
-#include "hardware/irq.h"
-#include "hardware/uart.h"
 
 /**
  * @brief Inertial Measurement Unit (IMU) interface for BNO085 sensor
