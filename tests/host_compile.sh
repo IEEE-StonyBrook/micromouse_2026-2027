@@ -3,11 +3,13 @@
 # control/ and common/ build into a static library against hal/host, and the
 # platform-neutral app/ sources (the CLI and mouse logic) compile against it,
 # all with no Pico SDK on the include path. Run from tests/ (make -C tests does).
+# OUT picks the build directory and HOST_DEFS adds defines, e.g.
+# -DHOST_LOOP_FREQUENCY_HZ=1000.0f for the 1 kHz build.
 set -eu
 
 CXX=${CXX:-g++}
-FLAGS="-std=c++17 -Wall -Wextra -Werror -I../firmware -isystem ../third_party"
-OUT=build-host
+FLAGS="-std=c++17 -Wall -Wextra -Werror -I../firmware -isystem ../third_party ${HOST_DEFS:-}"
+OUT=${OUT:-build-host}
 
 mkdir -p "$OUT"
 rm -f "$OUT"/*.o "$OUT"/libfirmware_host.a

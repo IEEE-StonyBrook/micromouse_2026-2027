@@ -226,7 +226,7 @@ void LineFollower::followLine(float dt)
     else if (line_present)
     {
         filtered_line_error_ +=
-            LINE_ERROR_FILTER_ALPHA * (latest_line_error_ - filtered_line_error_);
+            lineErrorFilterAlpha(LOOP_FREQUENCY_HZ) * (latest_line_error_ - filtered_line_error_);
     }
 
     const float de_dt = (filtered_line_error_ - prev_line_error_) / dt;

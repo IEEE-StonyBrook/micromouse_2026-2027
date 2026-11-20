@@ -1,12 +1,28 @@
 #ifndef CONTROL_LINE_FOLLOWER_H
 #define CONTROL_LINE_FOLLOWER_H
 
+#include <cmath>
 #include <cstdint>
 
 #include "common/utils.h"
 #include "config/config.h"
 #include "control/motion.h"
 #include "drivers/line_sensor.h"
+
+/**
+ * @brief Per-tick gain of the line error low-pass filter at a loop rate.
+ *
+ * The filter keeps (1 - alpha) of the old error each tick. Keeping the same
+ * fraction per second means (1 - alpha)^(ticks per second) is fixed, so the
+ * 500 Hz tuning converts as 1 - (1 - alpha_500)^(500 / hz). At 500 Hz it
+ * returns the tuned constant exactly, and folds to it at compile time.
+ */
+inline float lineErrorFilterAlpha(float loop_frequency_hz)
+{
+    if (loop_frequency_hz == 500.0f)
+        return LINE_ERROR_FILTER_ALPHA_500HZ;
+    return 1.0f - std::pow(1.0f - LINE_ERROR_FILTER_ALPHA_500HZ, 500.0f / loop_frequency_hz);
+}
 
 /**
  * @brief Line-following controller with PD steering and intersection handling

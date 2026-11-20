@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "app/start_gesture.h"
+#include "config/motion.h"
 
 class Mouse;
 class Battery;
@@ -187,10 +188,12 @@ class CommandLineInterface
     int  last_function_ = -1;
     bool halted_        = false;
 
-    // LINE telemetry pacing — counts 500 Hz ticks while LineFollower is in
+    // LINE telemetry pacing — counts control ticks while LineFollower is in
     // FollowingLine state, prints a one-line PATH-style telemetry every
-    // kLineTelemetryTicks (250 = 500 ms). Reset on LINE START.
-    static constexpr uint32_t kLineTelemetryTicks       = 250;
+    // kLineTelemetryTicks (500 ms). Reset on LINE START.
+    static constexpr uint32_t kLineTelemetryTicks = LOOP_TICKS(0.500f);
+    // BOOTSEL poll period while following a line (100 ms).
+    static constexpr uint32_t kLineButtonPollTicks      = LOOP_TICKS(0.100f);
     uint32_t                  line_telemetry_counter_   = 0;
     uint32_t                  line_button_poll_counter_ = 0;
     bool                      line_running_was_active_  = false;

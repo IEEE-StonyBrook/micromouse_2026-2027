@@ -79,7 +79,10 @@ through `hal::time`, never the SDK.
 
 `make -C tests` also builds and runs `tests/host_tests`, the doctest unit tests
 (`tests/*_test.cpp`) for Profile, PID, Drivetrain, Motion, the maze parser and
-the console HAL.
+the console HAL. It runs them twice: at the Pico's 500 Hz, then rebuilt at
+the STM32's 1 kHz (`-DHOST_LOOP_FREQUENCY_HZ=1000.0f`), where
+`rate_trajectory_test.cpp` checks that a profile move and a closed-loop
+straight match the 500 Hz run.
 `tests/fakes/` stands in for the Motor, Encoder and IMU drivers on the host and
 adds a first-order two-wheel plant, so control changes can be tested without a
 mouse. Add a test case to a `*_test.cpp` file; the Makefile picks new files up.
@@ -96,7 +99,9 @@ Normal Mode starts automatically.** Keep that behaviour.
 single-core shape); Core 1 is unused:
 
 - A repeating hardware timer in `main_pico.cpp` calls `Motion::update()` at
-  `LOOP_FREQUENCY_HZ` (500 Hz): encoders, forward and rotation PD, motors.
+  `LOOP_FREQUENCY_HZ`: encoders, forward and rotation PD, motors. The rate is
+  per platform, set in `config/board_pico.h` (500 Hz) or `config/board_stm32.h`
+  (1 kHz); express any tick count as a time with `LOOP_TICKS(seconds)`.
 - The main loop (`cli.loop()`) handles serial and Bluetooth I/O, polls the
   ToFs at 50 Hz, and runs path planning, maze algorithms and high-level decisions.
 

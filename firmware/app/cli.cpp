@@ -494,10 +494,10 @@ void CommandLineInterface::loop()
                     line_telemetry_counter_ = 0;
                     printLineRunningTelemetry();
                 }
-                // BOOTSEL poll at ~10 Hz (50 ticks @ 500 Hz). Reading the
+                // BOOTSEL poll at ~10 Hz (kLineButtonPollTicks). Reading the
                 // BOOTSEL pin briefly suspends XIP, so we keep the cadence
                 // low. A 100 ms latency on a panic-stop press is fine.
-                if (++line_button_poll_counter_ >= 50)
+                if (++line_button_poll_counter_ >= kLineButtonPollTicks)
                 {
                     line_button_poll_counter_ = 0;
                     if (abortRequested())
@@ -859,7 +859,7 @@ void CommandLineInterface::handle_search_command(const Args& args)
     printFormat("Search to %d,%d\n", x, y);
     // 20 ms samples: the 1500-sample buffer covers ~30 s, a whole bench search.
     // TRACE prints it.
-    deps_.motion->start_trace(10);
+    deps_.motion->start_trace(LOOP_TICKS(0.020f));
     std::vector<std::array<int, 2>> goals = {{x, y}};
     const bool                      ok    = deps_.mouse->search_to(goals);
     printFormat(ok ? "Search done.\n" : "Search failed.\n");
@@ -2157,7 +2157,7 @@ void CommandLineInterface::run_function(int cmd)
                 deps_.mouse->setPhaseColor('y');
             printFormat("Searching maze...\n");
             if (deps_.motion != nullptr)
-                deps_.motion->start_trace(10); // 20 ms: TRACE after the run
+                deps_.motion->start_trace(LOOP_TICKS(0.020f)); // 20 ms: TRACE after the run
             printFormat(deps_.mouse->search_maze() ? "Search done.\n" : "Search failed.\n");
             break;
 
@@ -2402,7 +2402,7 @@ void CommandLineInterface::printLineStartBanner()
                 static_cast<double>(tune.kd_base_deg_per_slot),
                 static_cast<double>(LINE_GAIN_REF_SPEED_MMPS),
                 static_cast<double>(LINE_GAIN_SCHED_FLOOR_MMPS),
-                static_cast<double>(LINE_ERROR_FILTER_ALPHA),
+                static_cast<double>(lineErrorFilterAlpha(LOOP_FREQUENCY_HZ)),
                 static_cast<double>(LINE_LOOKAHEAD_TIME_S * 1000.0f));
     printFormat("LINE brake: gain=%.0f mm/s/slot lost_hold=%u ms lost_stop=%u ms recovery=%.2f\n",
                 static_cast<double>(LINE_BRAKE_GAIN_MMPS_PER_SLOT),
