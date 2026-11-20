@@ -177,9 +177,9 @@ class DriverLab
         int   step_index;      // 0-based step number (for headers)
 
         // Velocity-window state for trailing-window speed estimation.
-        // Even with deterministic dt, a 5-tick window smooths quantization
-        // from int encoder ticks at low speeds.
-        static constexpr int VEL_WIN = 5;
+        // Even with deterministic dt, a 10 ms window (5 ticks at 500 Hz)
+        // smooths quantization from int encoder ticks at low speeds.
+        static constexpr int VEL_WIN = LOOP_TICKS(0.010f);
         float                left_pos_buf[VEL_WIN];
         float                right_pos_buf[VEL_WIN];
         int                  v_idx;
@@ -213,10 +213,10 @@ class DriverLab
         int   duration_loops;
         int   loop_count;
 
-        // 5-tick trailing-window velocity (mirrors OpenLoopTrial::VEL_WIN).
-        // Smooths integer encoder quantization at the 2 ms loop rate; without
+        // 10 ms trailing-window velocity (mirrors OpenLoopTrial::VEL_WIN).
+        // Smooths integer encoder quantization at the loop rate; without
         // this, dense Tm-fit samples would be dominated by tick-count noise.
-        static constexpr int VEL_WIN = 5;
+        static constexpr int VEL_WIN = LOOP_TICKS(0.010f);
         float                left_pos_buf[VEL_WIN];
         float                right_pos_buf[VEL_WIN];
         int                  v_idx;
