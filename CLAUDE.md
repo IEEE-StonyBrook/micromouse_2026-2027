@@ -134,6 +134,15 @@ main loop, as `Motor::reportBatteryFallback()` does. `python3
 tools/check_isr_logging.py` enforces this; add a function to its list when the
 control path starts calling it.
 
+**Main loop to tick.** Motion's public mutators (`start_move`, `set_position`,
+`reset_drive_system`, ...) never write the tick's state: each queues one
+command in Motion's latch under `hal::irq::Lock`, and `Motion::update()` applies
+the queue, in issue order, before anything else in the tick. Main-loop reads
+(`position()`, `move_finished()`, ...) see the live state with the queued
+commands applied, so code that reads straight after a command still sees it.
+Add a new mutator as a `Command::Op`; `python3 tools/check_motion_latch.py`
+fails if a main-loop function in `motion.cpp` writes tick-owned state.
+
 ## Units
 
 Carry units in the name whenever the bare quantity is ambiguous.
