@@ -84,7 +84,11 @@ the STM32's 1 kHz (`-DHOST_LOOP_FREQUENCY_HZ=1000.0f`), where
 straight match the 500 Hz run.
 `tests/fakes/` stands in for the Motor, Encoder and IMU drivers on the host and
 adds a first-order two-wheel plant, so control changes can be tested without a
-mouse. Add a test case to a `*_test.cpp` file; the Makefile picks new files up.
+mouse. `tests/sim/` grows that into a physics sim: a DC-motor, two-wheel
+plant with knobs for wheel slip, encoder resolution, gyro noise and bias and a
+floor seam, tested in `physim_test.cpp`. `make -C tests physim` builds a CLI
+(`tests/physim --scenario straight10|ip90|ss90 ...`) that prints a CSV trace.
+Add a test case to a `*_test.cpp` file; the Makefile picks new files up.
 
 Run `ls firmware/<layer>` for the current file list; it is authoritative and
 this document is not.
