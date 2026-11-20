@@ -86,7 +86,7 @@ void setupRxStream()
     dma_set_transfer_mode(DMA, RX_STREAM, DMA_SxCR_DIR_PERIPHERAL_TO_MEM);
     dma_set_peripheral_address(DMA, RX_STREAM, reinterpret_cast<uint32_t>(&USART_DR(USART)));
     dma_set_memory_address(DMA, RX_STREAM, reinterpret_cast<uint32_t>(rx_ring.buffer()));
-    dma_set_number_of_data(DMA, RX_STREAM, 256);
+    dma_set_number_of_data(DMA, RX_STREAM, rx_ring.SIZE);
     dma_set_memory_size(DMA, RX_STREAM, DMA_SxCR_MSIZE_8BIT);
     dma_set_peripheral_size(DMA, RX_STREAM, DMA_SxCR_PSIZE_8BIT);
     dma_enable_memory_increment_mode(DMA, RX_STREAM);
@@ -114,7 +114,10 @@ void stm32::init()
     // BRR written directly: usart_set_baudrate() rounds from rcc_apb1_frequency
     // at run time, while BRR here is checked exact at compile time.
     USART_BRR(USART) = BRR.brr;
-    USART_CR3(USART) = USART_CR3_DMAT | USART_CR3_DMAR;
+    // EIE: with DMA receive on, an overrun (and framing or noise error) raises
+    // the USART interrupt, so rxOverruns() sees every one, not only those
+    // that land with an idle line.
+    USART_CR3(USART) = USART_CR3_DMAT | USART_CR3_DMAR | USART_CR3_EIE;
     USART_CR1(USART) = USART_CR1_UE | USART_CR1_TE | USART_CR1_RE | USART_CR1_IDLEIE;
     nvic_set_priority(NVIC_USART3_IRQ, hal::stm32::irq::CONSOLE);
     nvic_enable_irq(NVIC_USART3_IRQ);
@@ -174,9 +177,12 @@ extern "C" void dma1_stream3_isr()
 extern "C" void usart3_isr()
 {
     const uint32_t sr = USART_SR(USART);
-    if (sr & (USART_SR_IDLE | USART_SR_ORE))
+    if (sr & (USART_SR_IDLE | USART_SR_ORE | USART_SR_FE | USART_SR_NE))
     {
-        // RM0090: IDLE and ORE clear on a read of SR followed by a read of DR.
+        // RM0090: IDLE, ORE, FE and NE clear on a read of SR followed by a read of DR.
+        // A byte that arrives between the two reads goes to this read, not
+        // the DMA, and is lost; the window is a few cycles and the sequence
+        // has no race-free alternative on this USART.
         (void)USART_DR(USART);
         if (sr & USART_SR_IDLE)
             rx_idle_events = rx_idle_events + 1;

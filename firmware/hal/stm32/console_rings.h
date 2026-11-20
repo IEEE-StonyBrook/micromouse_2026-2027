@@ -107,6 +107,8 @@ template <uint32_t N> class TxRing
 template <uint32_t N> class DmaRxRing
 {
   public:
+    static constexpr uint32_t SIZE = N; ///< The DMA stream's transfer count
+
     uint8_t* buffer() { return buf_; }
 
     /// Bytes waiting, given the stream's current NDTR.
