@@ -7,7 +7,7 @@
 
 #ifdef PICO_BUILD
 #include "app/bluetooth.h"
-#include "pico/critical_section.h"
+#include "hal/critical_section.h"
 #endif
 
 LogPriority Log::print_priority_level_     = LogPriority::DEBUG;
@@ -27,22 +27,22 @@ struct QueuedBluetoothLog
     uint16_t length;
 };
 
-QueuedBluetoothLog bluetooth_log_queue[kBluetoothLogQueueSize] = {};
-critical_section_t bluetooth_log_lock;
-bool               bluetooth_log_lock_initialized = false;
-volatile uint16_t  bluetooth_log_head             = 0;
-volatile uint16_t  bluetooth_log_tail             = 0;
-volatile uint16_t  bluetooth_log_count            = 0;
-volatile uint16_t  bluetooth_log_max_count        = 0;
-volatile uint32_t  bluetooth_log_dropped          = 0;
-volatile uint32_t  bluetooth_log_truncated        = 0;
+QueuedBluetoothLog   bluetooth_log_queue[kBluetoothLogQueueSize] = {};
+hal::CriticalSection bluetooth_log_lock;
+bool                 bluetooth_log_lock_initialized = false;
+volatile uint16_t    bluetooth_log_head             = 0;
+volatile uint16_t    bluetooth_log_tail             = 0;
+volatile uint16_t    bluetooth_log_count            = 0;
+volatile uint16_t    bluetooth_log_max_count        = 0;
+volatile uint32_t    bluetooth_log_dropped          = 0;
+volatile uint32_t    bluetooth_log_truncated        = 0;
 
 void ensureBluetoothLogQueue()
 {
     if (bluetooth_log_lock_initialized)
         return;
 
-    critical_section_init(&bluetooth_log_lock);
+    bluetooth_log_lock.init();
     bluetooth_log_lock_initialized = true;
 }
 
@@ -50,11 +50,11 @@ void enqueueBluetoothLog(const std::string& msg)
 {
     ensureBluetoothLogQueue();
 
-    critical_section_enter_blocking(&bluetooth_log_lock);
+    bluetooth_log_lock.enter();
     if (bluetooth_log_count >= kBluetoothLogQueueSize)
     {
         ++bluetooth_log_dropped;
-        critical_section_exit(&bluetooth_log_lock);
+        bluetooth_log_lock.exit();
         return;
     }
 
@@ -76,7 +76,7 @@ void enqueueBluetoothLog(const std::string& msg)
     if (bluetooth_log_count > bluetooth_log_max_count)
         bluetooth_log_max_count = bluetooth_log_count;
 
-    critical_section_exit(&bluetooth_log_lock);
+    bluetooth_log_lock.exit();
 }
 } // namespace
 #endif
@@ -178,10 +178,10 @@ void Log::drainBluetooth()
         char     text[kBluetoothLogMessageBytes];
         uint16_t length = 0;
 
-        critical_section_enter_blocking(&bluetooth_log_lock);
+        bluetooth_log_lock.enter();
         if (bluetooth_log_count == 0)
         {
-            critical_section_exit(&bluetooth_log_lock);
+            bluetooth_log_lock.exit();
             break;
         }
 
@@ -192,7 +192,7 @@ void Log::drainBluetooth()
         bluetooth_log_tail =
             static_cast<uint16_t>((bluetooth_log_tail + 1) % kBluetoothLogQueueSize);
         --bluetooth_log_count;
-        critical_section_exit(&bluetooth_log_lock);
+        bluetooth_log_lock.exit();
 
         bluetooth_->writeBytes(reinterpret_cast<const uint8_t*>(text), length);
     }
@@ -209,10 +209,10 @@ Log::BluetoothDiagnostics Log::bluetoothDiagnostics()
 #ifdef PICO_BUILD
     ensureBluetoothLogQueue();
 
-    critical_section_enter_blocking(&bluetooth_log_lock);
+    bluetooth_log_lock.enter();
     BluetoothDiagnostics diag = {bluetooth_log_count, bluetooth_log_max_count,
                                  bluetooth_log_dropped, bluetooth_log_truncated};
-    critical_section_exit(&bluetooth_log_lock);
+    bluetooth_log_lock.exit();
     return diag;
 #else
     return {0, 0, 0, 0};
