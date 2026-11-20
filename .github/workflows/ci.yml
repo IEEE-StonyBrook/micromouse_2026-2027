@@ -80,6 +80,15 @@ jobs:
       - name: Host tests
         run: make -C tests
 
+      # The physics sim's tests run inside the host tests; this checks the
+      # CLI builds and every scenario finishes.
+      - name: Physics sim scenarios
+        run: |
+          make -C tests physim
+          for s in straight10 ip90 ss90; do
+            tests/physim --scenario "$s" > /dev/null
+          done
+
       - name: No logging or heap in ISR context
         run: python3 tools/check_isr_logging.py
 
