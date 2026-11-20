@@ -1,5 +1,9 @@
 #include "hal/console.h"
 
+#include <cstdarg>
+#include <cstdio>
+#include <string>
+
 namespace hal::console
 {
 namespace
@@ -20,6 +24,29 @@ void write(const char* buf, std::size_t len)
         return;
     }
     detail::writeBytes(buf, len);
+}
+
+void printFormat(const char* format, ...)
+{
+    if (format == nullptr)
+        return;
+    char    buffer[384];
+    va_list args;
+    va_start(args, format);
+    const int length = std::vsnprintf(buffer, sizeof buffer, format, args);
+    va_end(args);
+    if (length <= 0)
+        return;
+    if (static_cast<std::size_t>(length) < sizeof buffer)
+    {
+        write(buffer, static_cast<std::size_t>(length));
+        return;
+    }
+    std::string long_line(static_cast<std::size_t>(length) + 1, '\0');
+    va_start(args, format);
+    std::vsnprintf(&long_line[0], long_line.size(), format, args);
+    va_end(args);
+    write(long_line.data(), static_cast<std::size_t>(length));
 }
 
 void setTxGate(bool gated)

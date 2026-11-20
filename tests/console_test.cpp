@@ -61,3 +61,30 @@ TEST_CASE("console TX gate drops and counts gated writes")
     console::resetTxGateDrops();
     CHECK(console::txGateDroppedBytes() == 0);
 }
+
+TEST_CASE("console printFormat formats like printf, long lines included")
+{
+    namespace console = hal::console;
+    console::host::reset();
+    console::printFormat("kM = %8.2f mm/s/V, n=%d %s\n", 123.456, 7, "ok");
+    CHECK(console::host::takeOutput() == "kM =   123.46 mm/s/V, n=7 ok\n");
+
+    // Past the stack buffer: the whole line still goes out, nothing cut.
+    const std::string long_text(2000, 'x');
+    console::printFormat("[%s]", long_text.c_str());
+    CHECK(console::host::takeOutput() == "[" + long_text + "]");
+
+    console::printFormat("%s", "");
+    CHECK(console::host::takeOutput().empty());
+}
+
+TEST_CASE("console printFormat goes through the TX gate")
+{
+    namespace console = hal::console;
+    console::host::reset();
+    console::setTxGate(true);
+    console::printFormat("%d\n", 12345);
+    CHECK(console::host::takeOutput().empty());
+    CHECK(console::txGateDroppedBytes() == 6);
+    console::host::reset();
+}

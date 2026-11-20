@@ -18,6 +18,10 @@ int getcNonBlocking();
 /// Sends len bytes. While the TX gate is closed the bytes are dropped and counted.
 void write(const char* buf, std::size_t len);
 
+/// printf-style write(): formats into a stack buffer (the heap only for a
+/// line longer than it) and sends the result through the gate. Main loop only.
+void printFormat(const char* format, ...) __attribute__((format(printf, 1, 2)));
+
 /// Closes (true) or opens (false) the TX gate. Used to keep the link quiet
 /// during timing-critical windows.
 void setTxGate(bool gated);
