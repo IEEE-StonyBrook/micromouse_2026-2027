@@ -78,13 +78,17 @@ set(NAVIGATION_SOURCES
 )
 
 set(APP_SOURCES
-    firmware/app/bluetooth.cpp
     firmware/app/mouse.cpp
     firmware/app/firmware_mouse.cpp
     firmware/app/start_gesture.cpp
     firmware/app/cli.cpp
-    firmware/app/bootsel_button.cpp
-    firmware/app/leds.cpp
+)
+
+# Board-specific halves of app/: the interfaces are the headers in app/.
+set(APP_PICO_SOURCES
+    firmware/app/pico/bluetooth.cpp
+    firmware/app/pico/bootsel_button.cpp
+    firmware/app/pico/leds.cpp
 )
 
 set(DRIVER_LAB_SOURCES
@@ -115,6 +119,7 @@ add_executable(Jurababa
     ${MAZE_SOURCES}
     ${NAVIGATION_SOURCES}
     ${APP_SOURCES}
+    ${APP_PICO_SOURCES}
     ${DRIVER_LAB_SOURCES}
     ${COMMON_SOURCES}
     ${HAL_SOURCES}
@@ -129,7 +134,7 @@ target_compile_definitions(Jurababa PRIVATE PICO_BUILD)
 pico_set_program_name(Jurababa "Jurababa")
 pico_set_program_version(Jurababa "1.0")
 
-# USB only. Bluetooth UART is owned manually by firmware/app/bluetooth.cpp and
+# USB only. Bluetooth UART is owned manually by firmware/app/pico/bluetooth.cpp and
 # DriverLab's stdio mirror, using PIN_BT_TX/PIN_BT_RX from config/pins.h.
 pico_enable_stdio_uart(Jurababa 0)
 pico_enable_stdio_usb(Jurababa 1)
