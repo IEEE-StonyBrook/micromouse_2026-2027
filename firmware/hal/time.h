@@ -15,6 +15,15 @@ uint32_t nowMs();
 
 /// Blocks the caller for at least duration_ms. Never call from an interrupt.
 void sleepMs(uint32_t duration_ms);
+
+/// Microseconds since boot, on the same clock as nowMs(). 64 bits, so it never
+/// wraps in practice.
+uint64_t nowUs();
+
+/// Blocks until nowUs() reaches deadline_us; returns at once if it already has.
+/// Advancing a deadline by a fixed period gives a loop that does not drift.
+/// Never call from an interrupt.
+void sleepUntilUs(uint64_t deadline_us);
 } // namespace hal::time
 
 #endif // HAL_TIME_H
