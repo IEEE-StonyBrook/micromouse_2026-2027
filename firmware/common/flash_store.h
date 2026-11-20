@@ -102,8 +102,17 @@ struct SaveResult
     uint32_t    seq;     ///< Of the record written
 };
 
-/// LED code for a load: flashes per period, 0 when nothing is wrong.
+/// LED code for a load: 2 flashes when it fell back to the other slot, 4
+/// when no record loaded, 0 when nothing is wrong.
 uint8_t ledFlashes(LoadStatus status);
+
+/// Whether the LED is lit at uptime_ms while showing a code of `flashes`
+/// 100 ms blinks, 100 ms apart, repeating every 2 s.
+constexpr bool ledCodeOn(uint32_t uptime_ms, uint8_t flashes)
+{
+    const uint32_t phase_ms = uptime_ms % 2000;
+    return phase_ms < 200u * flashes && (phase_ms / 100) % 2 == 0;
+}
 
 class FlashStore
 {

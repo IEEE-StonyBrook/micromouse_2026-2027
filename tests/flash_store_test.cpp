@@ -565,3 +565,20 @@ TEST_CASE("A power cut at any word of a save over two slots leaves the old recor
 {
     sweepPowerCuts(2);
 }
+
+TEST_CASE("The LED code shows its flash count as 100 ms blinks every 2 s")
+{
+    // Two flashes: on 0-99 ms, off 100-199, on 200-299, then dark to 2 s.
+    CHECK(ledCodeOn(0, 2));
+    CHECK(ledCodeOn(99, 2));
+    CHECK_FALSE(ledCodeOn(100, 2));
+    CHECK(ledCodeOn(250, 2));
+    CHECK_FALSE(ledCodeOn(300, 2));
+    CHECK_FALSE(ledCodeOn(1999, 2));
+    CHECK(ledCodeOn(2000, 2));
+    // Four flashes reach a fourth blink at 600-699 ms.
+    CHECK(ledCodeOn(650, 4));
+    CHECK_FALSE(ledCodeOn(750, 4));
+    // No code, no light.
+    CHECK_FALSE(ledCodeOn(0, 0));
+}
