@@ -3,6 +3,7 @@
 #include "common/bluetooth_stdio.h"
 #include "common/utils.h"
 #include "config/config.h"
+#include "driver_lab/board_io.h"
 #include "drivers/battery.h"
 #include "drivers/encoder.h"
 #include "drivers/imu.h"
@@ -11,11 +12,6 @@
 #include "drivers/tof.h"
 #include "hal/console.h"
 #include "hal/time.h"
-
-#include "hardware/gpio.h"
-#include "hardware/i2c.h"
-#include "hardware/pwm.h"
-#include "pico/stdlib.h"
 
 #include <algorithm>
 #include <cctype>
@@ -73,15 +69,6 @@ inline uint32_t msToLoops(uint32_t ms)
 inline float loopsToSeconds(int loops)
 {
     return loops * LOOP_INTERVAL_S;
-}
-
-inline float normalizeYawDelta(float delta)
-{
-    while (delta > 180.0f)
-        delta -= 360.0f;
-    while (delta < -180.0f)
-        delta += 360.0f;
-    return delta;
 }
 
 const char* linePathsText(uint8_t paths_mask, char* buffer, size_t buffer_size)
@@ -1743,7 +1730,7 @@ void DriverLab::executeLine(const char* line)
 
 DriverLabArgs DriverLab::tokenize()
 {
-    DriverLabArgs args  = {0};
+    DriverLabArgs args  = {};
     char*         token = strtok(input_buffer_, " ,=");
     while (token != nullptr && args.argc < DRIVERLAB_MAX_ARGC)
     {
@@ -2692,12 +2679,7 @@ void DriverLab::cmdGpioDiag(const DriverLabArgs& args)
     hal::console::printFormat("Slowly spin right wheel and watch for changes\n");
     hal::console::printFormat("Both pins should toggle. If only one changes -> wiring issue\n\n");
 
-    gpio_init(PIN_ENCODER_R_A);
-    gpio_set_dir(PIN_ENCODER_R_A, GPIO_IN);
-    gpio_pull_up(PIN_ENCODER_R_A);
-    gpio_init(PIN_ENCODER_R_B);
-    gpio_set_dir(PIN_ENCODER_R_B, GPIO_IN);
-    gpio_pull_up(PIN_ENCODER_R_B);
+    driver_lab_board::setupRightEncoderPinsRaw();
 
     hal::console::printFormat("Sample  GP%d(A)  GP%d(B)  State\n", PIN_ENCODER_R_A,
                               PIN_ENCODER_R_B);
@@ -2705,9 +2687,10 @@ void DriverLab::cmdGpioDiag(const DriverLabArgs& args)
 
     for (int i = 0; i < 100; i++)
     {
-        const bool pin_a = gpio_get(PIN_ENCODER_R_A);
-        const bool pin_b = gpio_get(PIN_ENCODER_R_B);
-        const int  state = (pin_a ? 2 : 0) | (pin_b ? 1 : 0);
+        bool pin_a = false;
+        bool pin_b = false;
+        driver_lab_board::readRightEncoderPins(pin_a, pin_b);
+        const int state = (pin_a ? 2 : 0) | (pin_b ? 1 : 0);
         hal::console::printFormat("%6d     %d       %d      %d\n", i, pin_a, pin_b, state);
         hal::time::sleepMs(100);
     }
@@ -2915,12 +2898,6 @@ void DriverLab::cmdDirTest(const DriverLabArgs& args)
     while (hal::console::getcNonBlocking() >= 0)
         ;
 
-    const uint     left_slice    = pwm_gpio_to_slice_num(PIN_MOTOR_L_PWM);
-    const uint     left_channel  = pwm_gpio_to_channel(PIN_MOTOR_L_PWM);
-    const uint     right_slice   = pwm_gpio_to_slice_num(PIN_MOTOR_R_PWM);
-    const uint     right_channel = pwm_gpio_to_channel(PIN_MOTOR_R_PWM);
-    const uint16_t pwm_level     = static_cast<uint16_t>(PWM_WRAP * 0.3f);
-
     int cycle = 0;
     while (true)
     {
@@ -2935,10 +2912,7 @@ void DriverLab::cmdDirTest(const DriverLabArgs& args)
                                   dir_state);
         cycle++;
 
-        gpio_put(PIN_MOTOR_L_DIR, dir_state);
-        gpio_put(PIN_MOTOR_R_DIR, dir_state);
-        pwm_set_chan_level(left_slice, left_channel, pwm_level);
-        pwm_set_chan_level(right_slice, right_channel, pwm_level);
+        driver_lab_board::driveMotorsRaw(dir_state, 0.3f);
 
         hal::time::sleepMs(2000);
     }

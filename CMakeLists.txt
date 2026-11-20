@@ -98,6 +98,7 @@ set(DRIVER_LAB_SOURCES
     firmware/driver_lab/profile.cpp
     firmware/driver_lab/reporter.cpp
     firmware/driver_lab/settings.cpp
+    firmware/driver_lab/pico/board_io.cpp
 )
 
 # Platform-neutral interfaces live in firmware/hal/; these are the Pico backends.

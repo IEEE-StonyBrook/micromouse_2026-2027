@@ -34,10 +34,11 @@ for s in ../firmware/control/*.cpp ../firmware/common/*.cpp ../firmware/hal/host
 done
 ar rcs "$OUT/libfirmware_host.a" "$OUT"/*.o
 
-# app/ wires drivers and boards together, so its sources only need to compile
-# here; app/pico/ holds the board-specific halves and is not built.
+# app/ and driver_lab/ wire drivers and boards together, so their sources only
+# need to compile here; app/pico/ and driver_lab/pico/ hold the board-specific
+# halves and are not built.
 apps=0
-for s in ../firmware/app/*.cpp; do
+for s in ../firmware/app/*.cpp ../firmware/driver_lab/*.cpp; do
     [ -e "$s" ] || continue
     $CXX $FLAGS -fsyntax-only "$s" ||
         { echo "FAIL: $s does not compile on the host"; exit 1; }

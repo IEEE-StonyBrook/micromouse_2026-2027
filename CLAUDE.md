@@ -70,12 +70,14 @@ What each layer is allowed to know:
 | `hal/` | platform-neutral interfaces (time, critical section, reset cause, peripheral handles, console, SPI, flash); backends in `hal/pico/`, `hal/stm32/` and `hal/host/` | robot logic |
 | `app/` | wiring the above together, CLI, Bluetooth, the control timer; board-specific halves (Bluetooth UART, BOOTSEL, LEDs) in `app/pico/` behind headers in `app/` | — |
 
-Only `hal/pico/`, the driver `.cpp` files, `app/pico/`, `driver_lab/*.cpp` and
+Only `hal/pico/`, the driver `.cpp` files, `app/pico/`, `driver_lab/pico/`
+(DriverLab's raw-pin diagnostics, behind `driver_lab/board_io.h`) and
 `main_pico.cpp` may include the Pico SDK, and only `hal/stm32/` and
 `main_stm32.cpp` may include libopencm3. `python3 tools/check_sdk_free.py`
 enforces this, and `make -C tests` compiles the platform-neutral code,
-`app/*.cpp` included, against `hal/host`. App code reads the clock and sleeps
-through `hal::time`, never the SDK.
+`app/*.cpp` and `driver_lab/*.cpp` included, against `hal/host`. App and
+DriverLab code read the clock and sleep through `hal::time` and print through
+`hal::console`, never the SDK.
 
 `make -C tests` also builds and runs `tests/host_tests`, the doctest unit tests
 (`tests/*_test.cpp`) for Profile, PID, Drivetrain, Motion, the maze parser,

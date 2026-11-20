@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Fail if platform-neutral firmware code includes a Pico SDK or libopencm3 header.
 
-Every file in control/, maze/, navigation/, common/, app/, hal/ and
-hal/host/, plus the driver and DriverLab headers, must compile without the
-Pico SDK so they can build against hal/host. Platform code lives in
-hal/pico/, hal/stm32/, app/pico/, the driver .cpp files and the main_*.cpp
-entry points.
+Every file in control/, maze/, navigation/, common/, app/, driver_lab/, hal/
+and hal/host/, plus the driver headers, must compile without the Pico SDK so
+they can build against hal/host. Platform code lives in hal/pico/,
+hal/stm32/, app/pico/, driver_lab/pico/, the driver .cpp files and the
+main_*.cpp entry points.
 
 Includes are followed transitively through files in firmware/ and
 third_party/, so a header that pulls the SDK in through a third-party header
@@ -24,9 +24,9 @@ FIRMWARE = REPO / "firmware"
 SEARCH_ROOTS = [FIRMWARE, REPO / "third_party"]
 
 # Every file in these directories must be SDK-free.
-WHOLE_DIRS = ["control", "maze", "navigation", "common", "app", "hal", "hal/host"]
+WHOLE_DIRS = ["control", "maze", "navigation", "common", "app", "driver_lab", "hal", "hal/host"]
 # Only the headers in these directories must be SDK-free.
-HEADER_DIRS = ["drivers", "driver_lab"]
+HEADER_DIRS = ["drivers"]
 
 SDK_PREFIXES = ("pico/", "hardware/", "boards/", "tusb", "libopencm3/", "libopencmsis/")
 SDK_FILES = {"pico.h"}
