@@ -30,6 +30,9 @@
 #define ROBOT_MAX_SEARCH_SPEED_MMPS  400.0f  // Search mode cruise speed
 #define ROBOT_MAX_FAST_SPEED_MMPS    1500.0f // Stage 3+ explored-path cruise (Mouse::cruiseSpeed)
 #define ROBOT_SEARCH_TURN_SPEED_MMPS 300.0f  // Orion SEARCH_TURN_SPEED
+// Upper bound on any one wheel's speed, above fast cruise to cover the outer
+// wheel in turns. Sizes the encoder history (control/encoder_history.h).
+#define ROBOT_MAX_WHEEL_SPEED_MMPS 3000.0f
 
 // ================ Forward Acceleration ================= //
 #define ROBOT_BASE_ACCEL_MMPS2   2500.0f

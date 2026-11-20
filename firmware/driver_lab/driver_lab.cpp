@@ -207,8 +207,8 @@ void DriverLab::sampleEncoders()
     dl_right_history_total_ -= dl_right_history_[dl_averager_index_];
     dl_left_history_total_ += d_left;
     dl_right_history_total_ += d_right;
-    dl_left_history_[dl_averager_index_]  = static_cast<int8_t>(d_left);
-    dl_right_history_[dl_averager_index_] = static_cast<int8_t>(d_right);
+    dl_left_history_[dl_averager_index_]  = static_cast<EncoderHistoryDelta>(d_left);
+    dl_right_history_[dl_averager_index_] = static_cast<EncoderHistoryDelta>(d_right);
     dl_averager_index_                    = (dl_averager_index_ + 1) % ENCODER_AVERAGER_LENGTH;
 
     constexpr float inv_avg = 1.0f / static_cast<float>(ENCODER_AVERAGER_LENGTH);

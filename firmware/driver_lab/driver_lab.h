@@ -2,6 +2,7 @@
 #define DRIVER_LAB_DRIVER_LAB_H
 
 #include "config/config.h"
+#include "control/encoder_history.h"
 #include "control/pid.h"
 #include "driver_lab/profile.h"
 #include "driver_lab/reporter.h"
@@ -343,11 +344,11 @@ class DriverLab
     // encoders directly (HAL-sharing rule) so it owns its own MA state and
     // applies the same algorithm — gains tuned in DriverLab transfer cleanly
     // to maze-running because both paths see the same smoothed signal.
-    int8_t dl_left_history_[ENCODER_AVERAGER_LENGTH]  = {};
-    int8_t dl_right_history_[ENCODER_AVERAGER_LENGTH] = {};
-    int    dl_left_history_total_                     = 0;
-    int    dl_right_history_total_                    = 0;
-    int    dl_averager_index_                         = 0;
+    EncoderHistoryDelta dl_left_history_[ENCODER_AVERAGER_LENGTH]  = {};
+    EncoderHistoryDelta dl_right_history_[ENCODER_AVERAGER_LENGTH] = {};
+    int                 dl_left_history_total_                     = 0;
+    int                 dl_right_history_total_                    = 0;
+    int                 dl_averager_index_                         = 0;
 
     // Active trial dispatch
     TrialState        trial_;

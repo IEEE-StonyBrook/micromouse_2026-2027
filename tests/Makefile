@@ -1,22 +1,24 @@
-# Host unit tests for pure firmware logic (no Pico SDK). Run: make -C tests
-CXX      = g++
-CXXFLAGS = -Wall -Wextra -Werror -std=c++17 -I../firmware -g -O0
-OUTDIR   = bin
+# Host-side checks for firmware code that needs no Pico SDK.
+# Run with `make -C tests`. Ticket #26 replaces this with the host test target.
+CXX      ?= g++
+CXXFLAGS := -std=c++17 -Wall -Wextra -Werror -I../firmware
 
-TESTS = $(OUTDIR)/maze_setting_test
+.PHONY: test
+test: encoder_history_test maze_setting_test
+	./encoder_history_test
+	./maze_setting_test
+	@if $(CXX) $(CXXFLAGS) -fsyntax-only range_assert_fires.cpp 2>&1 | grep -q "encoder history"; \
+	then echo "PASS: range static_assert fires past the history range"; \
+	else echo "FAIL: range static_assert did not fire"; exit 1; fi
 
-all: test
+encoder_history_test: encoder_history_test.cpp ../firmware/control/encoder_history.h \
+		../firmware/config/geometry.h ../firmware/config/motion.h
+	$(CXX) $(CXXFLAGS) $< -o $@
 
-$(OUTDIR):
-	mkdir -p $(OUTDIR)
-
-$(OUTDIR)/maze_setting_test: maze_setting_test.cpp ../firmware/maze/maze_setting.cpp ../firmware/maze/maze_setting.h | $(OUTDIR)
+maze_setting_test: maze_setting_test.cpp ../firmware/maze/maze_setting.cpp \
+		../firmware/maze/maze_setting.h
 	$(CXX) $(CXXFLAGS) maze_setting_test.cpp ../firmware/maze/maze_setting.cpp -o $@
 
-test: $(TESTS)
-	@for t in $(TESTS); do ./$$t || exit 1; done
-
+.PHONY: clean
 clean:
-	rm -rf $(OUTDIR)
-
-.PHONY: all test clean
+	rm -f encoder_history_test maze_setting_test
