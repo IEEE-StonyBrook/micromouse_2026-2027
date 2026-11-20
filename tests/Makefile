@@ -1,13 +1,14 @@
 # Host tests: the platform-neutral firmware, built against hal/host with no
 # Pico SDK, plus the doctest unit tests that run on it. Run with `make -C tests`.
 CXX      ?= g++
-CXXFLAGS := -std=c++17 -Wall -Wextra -Werror -I../firmware -isystem ../third_party
+CXXFLAGS := -std=c++17 -Wall -Wextra -Werror -I../firmware -isystem ../third_party -I.
 OUT      := build-host
 LIB      := $(OUT)/libfirmware_host.a
 
 # One binary holds every test case; main.cpp supplies doctest's main().
 TEST_SRCS     := $(wildcard *_test.cpp)
 FIRMWARE_SRCS := ../firmware/maze/maze_setting.cpp
+FAKE_SRCS     := $(wildcard fakes/*.cpp)
 
 .PHONY: test
 test:
@@ -24,8 +25,8 @@ build-tests/doctest_main.o: main.cpp
 	mkdir -p build-tests
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-host_tests: build-tests/doctest_main.o $(TEST_SRCS) $(FIRMWARE_SRCS) $(LIB)
-	$(CXX) $(CXXFLAGS) build-tests/doctest_main.o $(TEST_SRCS) $(FIRMWARE_SRCS) $(LIB) -o $@
+host_tests: build-tests/doctest_main.o $(TEST_SRCS) $(FAKE_SRCS) $(FIRMWARE_SRCS) $(LIB)
+	$(CXX) $(CXXFLAGS) build-tests/doctest_main.o $(TEST_SRCS) $(FAKE_SRCS) $(FIRMWARE_SRCS) $(LIB) -o $@
 
 .PHONY: clean
 clean:
