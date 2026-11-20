@@ -15,7 +15,7 @@ NAV_SRCS = ../firmware/navigation/flood_fill.cpp \
            ../firmware/navigation/path_converter.cpp \
            ../firmware/navigation/diagonalizer.cpp
 APP_SRCS = ../firmware/app/mouse.cpp
-COMMON_SRCS = ../firmware/common/log.cpp
+COMMON_SRCS = ../firmware/common/log.cpp ../firmware/common/breadcrumb.cpp
 
 # All sources
 SRCS = $(SIM_SRCS) $(MAZE_SRCS) $(NAV_SRCS) $(APP_SRCS) $(COMMON_SRCS)

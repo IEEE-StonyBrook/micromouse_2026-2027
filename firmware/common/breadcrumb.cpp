@@ -15,9 +15,9 @@
 
 namespace
 {
+#ifdef PICO_BUILD
 constexpr uint32_t kMagic = 0x4A555242; // 'JURB'
 
-#ifdef PICO_BUILD
 struct Live
 {
     uint32_t magic;

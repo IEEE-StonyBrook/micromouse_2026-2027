@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# One job per build or check, so new ones (host tests, maze corpus, other
+# targets) can be added as separate jobs without touching these.
+jobs:
+  pico-firmware:
+    name: Pico firmware
+    runs-on: ubuntu-24.04
+    env:
+      PICO_SDK_VERSION: 2.3.0
+      ARM_TOOLCHAIN_VERSION: 14.2.rel1
+      PICO_SDK_PATH: ${{ github.workspace }}/pico-sdk
+      PICO_TOOLCHAIN_PATH: ${{ github.workspace }}/arm-toolchain
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out the Pico SDK
+        uses: actions/checkout@v4
+        with:
+          repository: raspberrypi/pico-sdk
+          ref: ${{ env.PICO_SDK_VERSION }}
+          path: pico-sdk
+          submodules: true
+
+      - name: Cache the Arm toolchain
+        id: toolchain-cache
+        uses: actions/cache@v4
+        with:
+          path: arm-toolchain
+          key: arm-gnu-toolchain-${{ env.ARM_TOOLCHAIN_VERSION }}-x86_64-arm-none-eabi
+
+      - name: Download the Arm toolchain
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        run: |
+          url="https://developer.arm.com/-/media/Files/downloads/gnu/${ARM_TOOLCHAIN_VERSION}/binrel/arm-gnu-toolchain-${ARM_TOOLCHAIN_VERSION}-x86_64-arm-none-eabi.tar.xz"
+          mkdir -p "$PICO_TOOLCHAIN_PATH"
+          curl -fsSL "$url" | tar -xJ --strip-components=1 -C "$PICO_TOOLCHAIN_PATH"
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ninja-build
+
+      - name: Configure
+        run: cmake -S . -B build-pico -G Ninja
+
+      - name: Build
+        run: ninja -C build-pico
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jurababa-uf2
+          path: build-pico/Jurababa.uf2
+          if-no-files-found: error
+
+  sim:
+    name: Simulator bot
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: make -C sim
