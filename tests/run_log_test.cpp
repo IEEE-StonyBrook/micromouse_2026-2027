@@ -34,6 +34,8 @@ RunLog::Sample typical()
     s.front_tof_mm  = 1234.4f;
     s.right_tof_mm  = 64.2f;
     s.pos_mm        = 2879.9f;
+    s.enc_l_mm      = 2875.4f;
+    s.enc_r_mm      = -31002.6f;
     s.events        = RunLog::ENCODER_ROTATION | RunLog::WALL_FRONT;
     return s;
 }
@@ -57,7 +59,9 @@ void checkRoundTrip(const RunLog::Sample& in)
     CHECK(std::fabs(out.left_tof_mm - in.left_tof_mm) <= 0.25f + 1e-3f); // 0.5 mm
     CHECK(std::fabs(out.front_tof_mm - in.front_tof_mm) <= 0.25f + 1e-3f);
     CHECK(std::fabs(out.right_tof_mm - in.right_tof_mm) <= 0.25f + 1e-3f);
-    CHECK(std::fabs(out.pos_mm - in.pos_mm) <= 0.1f + 1e-3f); // 0.2 mm
+    CHECK(std::fabs(out.pos_mm - in.pos_mm) <= 0.1f + 1e-3f);     // 0.2 mm
+    CHECK(std::fabs(out.enc_l_mm - in.enc_l_mm) <= 0.5f + 1e-3f); // 1 mm
+    CHECK(std::fabs(out.enc_r_mm - in.enc_r_mm) <= 0.5f + 1e-3f);
     CHECK(out.events == in.events);
 }
 
@@ -76,16 +80,16 @@ void recordTagged(RunLog& log, int index)
 }
 } // namespace
 
-TEST_CASE("run log: a packed sample is 16 int16 fields and an event word")
+TEST_CASE("run log: a packed sample is 18 int16 fields and an event word")
 {
-    CHECK(sizeof(RunLog::Packed) == 34);
+    CHECK(sizeof(RunLog::Packed) == 38);
 }
 
-TEST_CASE("run log: holds over 13 s at 8 ms in at most 56 KB")
+TEST_CASE("run log: holds over 13 s at 8 ms inside the STM32's 64 KB CCM")
 {
     CHECK(RunLog::DEFAULT_PERIOD_MS == 8);
     CHECK(RunLog::CAPACITY * RunLog::DEFAULT_PERIOD_MS >= 13000);
-    CHECK(sizeof(RunLog) <= 56u * 1024u);
+    CHECK(sizeof(RunLog) <= 64u * 1024u); // the log is all that lives in CCM
 }
 
 TEST_CASE("run log: every field round-trips within half a step")
@@ -103,6 +107,8 @@ TEST_CASE("run log: worked values unpack to the nearest step")
     in.left_mmps             = 300.2f;  // 0.5 mm/s steps: 600
     in.pos_mm                = 180.07f; // 0.2 mm steps: 900
     in.front_tof_mm          = 54.3f;   // 0.5 mm steps: 109
+    in.enc_l_mm              = 1234.6f; // 1 mm steps: 1235
+    in.enc_r_mm              = -0.4f;   // 1 mm steps: 0
     const RunLog::Packed p   = RunLog::pack(in);
     const RunLog::Sample out = RunLog::unpack(p);
     CHECK(out.yaw_deg == doctest::Approx(12.34f));
@@ -111,6 +117,8 @@ TEST_CASE("run log: worked values unpack to the nearest step")
     CHECK(out.left_mmps == doctest::Approx(300.0f));
     CHECK(out.pos_mm == doctest::Approx(180.0f));
     CHECK(out.front_tof_mm == doctest::Approx(54.5f));
+    CHECK(out.enc_l_mm == doctest::Approx(1235.0f));
+    CHECK(out.enc_r_mm == 0.0f);
     CHECK((p.events & RunLog::CLIPPED) == 0);
 }
 
@@ -120,7 +128,9 @@ TEST_CASE("run log: out-of-range values saturate and flag the sample")
     in.yaw_deg               = 1000.0f;  // past the +-327.67 deg range
     in.pos_mm                = -9000.0f; // past the +-6553.4 mm range
     in.left_mmps             = 1.0e9f;
+    in.enc_r_mm              = 40000.0f; // past the +-32767 mm range
     const RunLog::Sample out = RunLog::unpack(RunLog::pack(in));
+    CHECK(out.enc_r_mm == doctest::Approx(32767.0f));
     CHECK(out.yaw_deg == doctest::Approx(327.67f));
     CHECK(out.pos_mm == doctest::Approx(-6553.4f));
     CHECK(out.left_mmps == doctest::Approx(16383.5f));
@@ -250,6 +260,13 @@ TEST_CASE("run log: a period shorter than a tick samples every tick")
     CHECK(log->due());
 }
 
+TEST_CASE("run log: the encoder distance columns sit after pos_mm, before ev")
+{
+    const std::string cols = RunLog::COLUMNS;
+    CHECK(cols.find(",pos_mm,enc_l_mm,enc_r_mm,ev") != std::string::npos);
+    CHECK(cols.substr(cols.size() - 3) == ",ev");
+}
+
 TEST_CASE("run log: a dump row keeps the trace CSV columns and adds the events")
 {
     RunLog::Sample s = typical();
@@ -257,5 +274,5 @@ TEST_CASE("run log: a dump row keeps the trace CSV columns and adds the events")
     char row[RunLog::ROW_BYTES];
     RunLog::formatRow(row, sizeof row, 3, 8, s);
     CHECK(std::string(row) == "T,24,-91.2,179.4,-3.21,1.23,-0.57,12.3,-45.6,1500,-812,2999,-5.99,"
-                              "6.00,1,88,1234,64,2879.9,5");
+                              "6.00,1,88,1234,64,2879.9,2875,-31003,5");
 }

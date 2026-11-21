@@ -9,9 +9,9 @@
  * after the mouse is disarmed.
  *
  * Motion records one sample every `dtMs()` while the log is active. Each
- * sample packs 16 physical fields into int16 steps plus a word of event bits
- * (34 bytes), so the ring holds CAPACITY samples, 13.4 s at the default 8 ms,
- * in under 56 KB. On the STM32 the firmware's log (runLog()) sits in the
+ * sample packs 18 physical fields into int16 steps plus a word of event bits
+ * (38 bytes), so the ring holds CAPACITY samples, 13.4 s at the default 8 ms,
+ * in under 63 KB. On the STM32 the firmware's log (runLog()) sits in the
  * 64 KB CCM, which DMA cannot reach: a dump unpacks each sample into an SRAM
  * copy and formats it into an SRAM row before the console queues it.
  *
@@ -40,7 +40,9 @@ class RunLog
         float    front_tof_mm  = 0.0f;
         float    right_tof_mm  = 0.0f;
         float    pos_mm        = 0.0f; // forward profile position (the search's cell frame)
-        uint16_t events        = 0;    // Event bits
+        float    enc_l_mm      = 0.0f; // encoder distance per wheel since the trace started
+        float    enc_r_mm      = 0.0f;
+        uint16_t events        = 0; // Event bits
     };
 
     /// Event bits: what the loop was doing when the sample was taken.
@@ -58,19 +60,22 @@ class RunLog
 
     /// A packed sample. Each field stores round(value * steps per unit),
     /// clamped to +-32767; INT16_MIN stands for NaN.
+    static constexpr int FIELDS = 18;
     struct Packed
     {
-        int16_t  field[16];
+        int16_t  field[FIELDS];
         uint16_t events;
     };
 
-    static constexpr uint16_t CAPACITY          = 1680; // 13.44 s at 8 ms, 57120 bytes
+    static constexpr uint16_t CAPACITY          = 1680; // 13.44 s at 8 ms, 63840 bytes
     static constexpr uint16_t DEFAULT_PERIOD_MS = 8;
-    static constexpr size_t   ROW_BYTES         = 192; // formatRow() buffer size
-    /// Column names of formatRow(): the old turn-trace columns plus `ev`.
+    static constexpr size_t   ROW_BYTES         = 224; // formatRow() buffer size
+    /// Column names of formatRow(): the old turn-trace columns, the encoder
+    /// distances and `ev`. Parsers go by name: columns only ever get inserted.
     static constexpr const char* COLUMNS =
         "t_ms,target_deg,yaw_deg,rot_err_deg,rot_v,hold_err_deg,wall_degps,hold_degps,"
-        "fwd_mmps,left_mmps,right_mmps,left_v,right_v,enc,tof_l_mm,tof_f_mm,tof_r_mm,pos_mm,ev";
+        "fwd_mmps,left_mmps,right_mmps,left_v,right_v,enc,tof_l_mm,tof_f_mm,tof_r_mm,pos_mm,"
+        "enc_l_mm,enc_r_mm,ev";
 
     static Packed pack(const Sample& sample);
     static Sample unpack(const Packed& packed);

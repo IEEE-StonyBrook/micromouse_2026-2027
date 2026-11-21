@@ -14,8 +14,9 @@ constexpr float   PACKED_MAX = 32767.0f;
 // Steps per unit of each packed field, in Sample order. Each range is
 // +-32767 steps: deg at 0.01 (+-327 deg), target at 0.02 (+-655 deg, room
 // for a turn past 180), volts at 1 mV, deg/s at 0.1, mm/s and ToF mm at 0.5,
-// position at 0.2 mm (+-6.5 m, a full diagonal of a 16x16 maze).
-constexpr float STEPS_PER_UNIT[16] = {
+// position at 0.2 mm (+-6.5 m, a full diagonal of a 16x16 maze), encoder
+// distance at 1 mm (+-32.7 m, a full 13.4 s ring at 2.4 m/s).
+constexpr float STEPS_PER_UNIT[RunLog::FIELDS] = {
     50.0f,   // target_deg
     100.0f,  // yaw_deg
     100.0f,  // rot_error_deg
@@ -32,6 +33,8 @@ constexpr float STEPS_PER_UNIT[16] = {
     2.0f,    // front_tof_mm
     2.0f,    // right_tof_mm
     5.0f,    // pos_mm
+    1.0f,    // enc_l_mm
+    1.0f,    // enc_r_mm
 };
 
 // Rounds to the nearest step and clamps to the int16 range; sets *clipped
@@ -71,13 +74,13 @@ RunLog& runLog()
 
 RunLog::Packed RunLog::pack(const Sample& s)
 {
-    const float values[16] = {s.target_deg,   s.yaw_deg,      s.rot_error_deg, s.rot_volts,
-                              s.hold_err_deg, s.wall_degps,   s.hold_degps,    s.fwd_mmps,
-                              s.left_mmps,    s.right_mmps,   s.left_volts,    s.right_volts,
-                              s.left_tof_mm,  s.front_tof_mm, s.right_tof_mm,  s.pos_mm};
-    Packed      packed{};
-    bool        clipped = false;
-    for (int i = 0; i < 16; ++i)
+    const float values[FIELDS] = {
+        s.target_deg,  s.yaw_deg,      s.rot_error_deg, s.rot_volts,  s.hold_err_deg, s.wall_degps,
+        s.hold_degps,  s.fwd_mmps,     s.left_mmps,     s.right_mmps, s.left_volts,   s.right_volts,
+        s.left_tof_mm, s.front_tof_mm, s.right_tof_mm,  s.pos_mm,     s.enc_l_mm,     s.enc_r_mm};
+    Packed packed{};
+    bool   clipped = false;
+    for (int i = 0; i < FIELDS; ++i)
         packed.field[i] = packField(values[i], STEPS_PER_UNIT[i], &clipped);
     packed.events = static_cast<uint16_t>(s.events | (clipped ? CLIPPED : 0));
     return packed;
@@ -85,8 +88,8 @@ RunLog::Packed RunLog::pack(const Sample& s)
 
 RunLog::Sample RunLog::unpack(const Packed& p)
 {
-    float v[16];
-    for (int i = 0; i < 16; ++i)
+    float v[FIELDS];
+    for (int i = 0; i < FIELDS; ++i)
         v[i] = unpackField(p.field[i], STEPS_PER_UNIT[i]);
     Sample s;
     s.target_deg    = v[0];
@@ -105,6 +108,8 @@ RunLog::Sample RunLog::unpack(const Packed& p)
     s.front_tof_mm  = v[13];
     s.right_tof_mm  = v[14];
     s.pos_mm        = v[15];
+    s.enc_l_mm      = v[16];
+    s.enc_r_mm      = v[17];
     s.events        = p.events;
     return s;
 }
@@ -113,7 +118,7 @@ void RunLog::formatRow(char* out, size_t size, uint16_t index, uint16_t dt_ms, c
 {
     std::snprintf(out, size,
                   "T,%d,%.1f,%.1f,%.2f,%.2f,%.2f,%.1f,%.1f,%.0f,%.0f,%.0f,%.2f,%.2f,%d,%.0f,%.0f,"
-                  "%.0f,%.1f,%u",
+                  "%.0f,%.1f,%.0f,%.0f,%u",
                   index * dt_ms, static_cast<double>(s.target_deg), static_cast<double>(s.yaw_deg),
                   static_cast<double>(s.rot_error_deg), static_cast<double>(s.rot_volts),
                   static_cast<double>(s.hold_err_deg), static_cast<double>(s.wall_degps),
@@ -122,7 +127,8 @@ void RunLog::formatRow(char* out, size_t size, uint16_t index, uint16_t dt_ms, c
                   static_cast<double>(s.left_volts), static_cast<double>(s.right_volts),
                   (s.events & ENCODER_ROTATION) ? 1 : 0, static_cast<double>(s.left_tof_mm),
                   static_cast<double>(s.front_tof_mm), static_cast<double>(s.right_tof_mm),
-                  static_cast<double>(s.pos_mm), static_cast<unsigned>(s.events));
+                  static_cast<double>(s.pos_mm), static_cast<double>(s.enc_l_mm),
+                  static_cast<double>(s.enc_r_mm), static_cast<unsigned>(s.events));
 }
 
 void RunLog::start(uint16_t period_ms)
