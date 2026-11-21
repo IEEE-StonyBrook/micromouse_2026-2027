@@ -76,6 +76,15 @@ class Drivetrain
     float rotChangeDeg() const { return rot_change_deg_; }
 
     /**
+     * @brief Raw encoder counts a wheel moved in the last update(), unaveraged.
+     *        The run log sums them into each wheel's distance.
+     */
+    int32_t stepTicks(WheelSide side) const
+    {
+        return side == WheelSide::LEFT ? left_step_ticks_ : right_step_ticks_;
+    }
+
+    /**
      * @brief Sets motor voltages (scaled by current battery voltage)
      */
     void setVoltage(float left_volts, float right_volts);
@@ -103,6 +112,8 @@ class Drivetrain
 
     int32_t prev_left_ticks_  = 0;
     int32_t prev_right_ticks_ = 0;
+    int32_t left_step_ticks_  = 0;
+    int32_t right_step_ticks_ = 0;
 
     float left_volts_  = 0.0f;
     float right_volts_ = 0.0f;

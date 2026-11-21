@@ -83,6 +83,59 @@ TEST_CASE("motion records the run log every 8 ms by default at any rate")
     CHECK(r->log.count() == 10); // frozen for the dump
 }
 
+TEST_CASE("the run log carries each wheel's encoder distance since the trace started")
+{
+    struct Rig
+    {
+        fake::Robot robot{MOTOR_KM, MOTOR_TM};
+        Drivetrain  dt{&robot.left_motor, &robot.right_motor, &robot.left_encoder,
+                       &robot.right_encoder};
+        Motion      motion{&dt, &robot.imu};
+        RunLog      log;
+    };
+    auto r = std::make_unique<Rig>();
+    r->motion.set_run_log(&r->log);
+    auto tick = [&r]
+    {
+        r->motion.update();
+        r->robot.step();
+    };
+
+    // A move before the trace starts is not counted.
+    r->motion.start_move(90.0f, 300.0f, 0.0f, 2000.0f);
+    while (!r->motion.move_finished())
+        tick();
+    r->motion.start_trace();
+    r->motion.reset_drive_system(); // zeroes the encoders, not the trace's distance
+    r->motion.start_move(180.0f, 300.0f, 0.0f, 2000.0f);
+    while (!r->motion.move_finished())
+        tick();
+    for (int i = 0; i < LOOP_TICKS(0.2f); i++) // settle; at least one more sample
+        tick();
+    const float left_mm  = r->dt.position(WheelSide::LEFT);
+    const float right_mm = r->dt.position(WheelSide::RIGHT);
+    CHECK(left_mm == doctest::Approx(180.0f).epsilon(0.05));
+
+    r->motion.reset_drive_system();
+    r->motion.start_move(90.0f, 300.0f, 0.0f, 2000.0f);
+    while (!r->motion.move_finished())
+        tick();
+    for (int i = 0; i < LOOP_TICKS(0.2f); i++)
+        tick();
+    const float          left2_mm  = left_mm + r->dt.position(WheelSide::LEFT);
+    const float          right2_mm = right_mm + r->dt.position(WheelSide::RIGHT);
+    const RunLog::Sample last      = r->log.sample(static_cast<uint16_t>(r->log.count() - 1));
+    CHECK(last.enc_l_mm == doctest::Approx(left2_mm).epsilon(0.01));
+    CHECK(last.enc_r_mm == doctest::Approx(right2_mm).epsilon(0.01));
+    CHECK(r->log.sample(0).enc_l_mm < 1.0f); // starts from zero
+
+    // A new trace starts again from zero.
+    r->motion.start_trace();
+    for (int i = 0; i < LOOP_TICKS(0.016f); i++)
+        tick();
+    CHECK(r->log.sample(0).enc_l_mm == 0.0f);
+}
+
 TEST_CASE("motion without a run log records nothing")
 {
     struct Rig

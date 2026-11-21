@@ -385,6 +385,10 @@ class Motion
     float latest_heading_hold_adjustment_degps_ = 0.0f;
 
     RunLog* run_log_ = nullptr;
+    // Encoder counts per wheel since the trace started: the log's enc_l_mm and
+    // enc_r_mm. Summed every tick, so reset_drive_system() never zeroes them.
+    int32_t trace_left_ticks_  = 0;
+    int32_t trace_right_ticks_ = 0;
 
     // Main-loop commands waiting for the next tick, oldest first. Written by
     // the main loop and drained by update(), both under hal::irq::Lock.

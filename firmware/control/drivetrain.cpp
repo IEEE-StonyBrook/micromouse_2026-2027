@@ -49,8 +49,10 @@ void Drivetrain::reset()
     left_velocity_mmps_  = 0.0f;
     right_velocity_mmps_ = 0.0f;
 
-    fwd_change_mm_  = 0.0f;
-    rot_change_deg_ = 0.0f;
+    fwd_change_mm_    = 0.0f;
+    rot_change_deg_   = 0.0f;
+    left_step_ticks_  = 0;
+    right_step_ticks_ = 0;
 }
 
 float Drivetrain::position(WheelSide side)
@@ -115,6 +117,8 @@ void Drivetrain::update()
         d_right            = static_cast<int>(curr_right - prev_right_ticks_);
         prev_right_ticks_  = curr_right;
     }
+    left_step_ticks_  = d_left;
+    right_step_ticks_ = d_right;
 
     // 8-tap moving averager — drop the oldest sample at this index, add the
     // newest. Mirrors ukmars/motorlab/src/encoders.h::update(). Both the PD's

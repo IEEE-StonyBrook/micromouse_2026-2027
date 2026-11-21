@@ -516,6 +516,8 @@ void Motion::update()
         applyPendingCommands();
     }
     drivetrain_->update();
+    trace_left_ticks_ += drivetrain_->stepTicks(WheelSide::LEFT);
+    trace_right_ticks_ += drivetrain_->stepTicks(WheelSide::RIGHT);
     imu_->update();
     // A tripped watchdog keeps the motors cut and the move frozen.
     if (!crash_.tripped())
@@ -703,6 +705,8 @@ void Motion::runPositionControl()
         s.front_tof_mm  = front_wall_mm_;
         s.right_tof_mm  = right_wall_mm_;
         s.pos_mm        = forward_.position();
+        s.enc_l_mm      = static_cast<float>(trace_left_ticks_) * MM_PER_TICK_LEFT;
+        s.enc_r_mm      = static_cast<float>(trace_right_ticks_) * MM_PER_TICK_RIGHT;
         const bool saturated =
             std::fabs(left_volts) >= MAX_VOLTAGE || std::fabs(right_volts) >= MAX_VOLTAGE;
         uint16_t events = 0;
@@ -1071,6 +1075,8 @@ void Motion::applyCommand(const Command& command)
             drivetrain_->stop();
             break;
         case Op::StartTrace:
+            trace_left_ticks_  = 0;
+            trace_right_ticks_ = 0;
             if (run_log_ != nullptr)
                 run_log_->start(static_cast<uint16_t>(command.a));
             break;
