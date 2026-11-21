@@ -136,6 +136,42 @@ TEST_CASE("the run log carries each wheel's encoder distance since the trace sta
     CHECK(r->log.sample(0).enc_l_mm == 0.0f);
 }
 
+TEST_CASE("tracing never changes what motion commands the motors")
+{
+    struct Rig
+    {
+        fake::Robot robot{MOTOR_KM, MOTOR_TM};
+        Drivetrain  dt{&robot.left_motor, &robot.right_motor, &robot.left_encoder,
+                       &robot.right_encoder};
+        Motion      motion{&dt, &robot.imu};
+        RunLog      log;
+    };
+    auto traced = std::make_unique<Rig>();
+    auto plain  = std::make_unique<Rig>();
+    traced->motion.set_run_log(&traced->log);
+    traced->log.set_header("PATH F", 8.0f);
+    traced->motion.start_trace();
+    int ticks = 0;
+    for (Rig* r : {traced.get(), plain.get()})
+    {
+        r->motion.start_move(180.0f, 600.0f, 0.0f, 3000.0f);
+        r->motion.start_turn(90.0f, 360.0f, 0.0f, 3600.0f);
+    }
+    for (; ticks < LOOP_TICKS(1.5f); ticks++)
+    {
+        if (ticks == LOOP_TICKS(0.3f))
+            traced->log.set_segment(2);
+        for (Rig* r : {traced.get(), plain.get()})
+        {
+            r->motion.update();
+            r->robot.step();
+        }
+        CHECK(traced->dt.leftVolts() == plain->dt.leftVolts()); // bit for bit
+        CHECK(traced->dt.rightVolts() == plain->dt.rightVolts());
+    }
+    CHECK(traced->log.count() > 50); // the move and turn take ~0.5 s
+}
+
 TEST_CASE("motion without a run log records nothing")
 {
     struct Rig
