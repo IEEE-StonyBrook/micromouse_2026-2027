@@ -131,9 +131,36 @@ void RunLog::formatRow(char* out, size_t size, uint16_t index, uint16_t dt_ms, c
                   static_cast<double>(s.enc_r_mm), static_cast<unsigned>(s.events));
 }
 
+void RunLog::formatHeader(char* out, size_t size) const
+{
+    std::snprintf(out, size,
+                  "TRACE n=%u dt_ms=%u cols=%s run=%lu loop_hz=%d batt_v=%.2f wrapped=%d "
+                  "cmd=\"%s\"",
+                  static_cast<unsigned>(count()), static_cast<unsigned>(dtMs()), COLUMNS,
+                  static_cast<unsigned long>(header_.run_id),
+                  static_cast<int>(LOOP_FREQUENCY_HZ + 0.5f),
+                  static_cast<double>(header_.battery_v), wrapped_ ? 1 : 0, header_.cmd);
+}
+
+void RunLog::set_header(const char* cmd, float battery_v)
+{
+    header_.run_id    = header_.run_id + 1;
+    header_.battery_v = battery_v;
+    size_t i          = 0;
+    for (; cmd != nullptr && cmd[i] != '\0' && i + 1 < CMD_BYTES; ++i)
+    {
+        // Unsigned: char's sign differs between the host and Arm.
+        const unsigned char c = static_cast<unsigned char>(cmd[i]);
+        header_.cmd[i]        = c == '"' ? '\'' : (c < 0x20 || c == 0x7F) ? ' ' : cmd[i];
+    }
+    header_.cmd[i] = '\0';
+    segment_       = 0;
+}
+
 void RunLog::start(uint16_t period_ms)
 {
     active_         = false;
+    wrapped_        = false;
     count_          = 0;
     next_           = 0;
     tick_           = 0;
@@ -159,10 +186,14 @@ void RunLog::record(const Sample& sample)
 {
     if (!active_)
         return;
-    samples_[next_] = pack(sample);
+    Packed packed   = pack(sample);
+    packed.events   = static_cast<uint16_t>(packed.events | (segment_ << SEGMENT_SHIFT));
+    samples_[next_] = packed;
     next_           = static_cast<uint16_t>((next_ + 1) % CAPACITY);
     if (count_ < CAPACITY)
         count_ = count_ + 1;
+    else
+        wrapped_ = true;
 }
 
 uint16_t RunLog::dtMs() const

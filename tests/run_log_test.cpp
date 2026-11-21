@@ -276,3 +276,93 @@ TEST_CASE("run log: a dump row keeps the trace CSV columns and adds the events")
     CHECK(std::string(row) == "T,24,-91.2,179.4,-3.21,1.23,-0.57,12.3,-45.6,1500,-812,2999,-5.99,"
                               "6.00,1,88,1234,64,2879.9,2875,-31003,5");
 }
+
+TEST_CASE("run log: each sample carries the segment the main loop last set, mod 64")
+{
+    auto log = freshLog();
+    log->start();
+    RunLog::Sample s;
+    s.events = RunLog::WALL_LEFT | RunLog::ROTATION_ACTIVE;
+    log->record(s); // segment 0 until set
+    log->set_segment(5);
+    log->record(s);
+    log->set_segment(70); // 70 mod 64
+    log->record(s);
+    CHECK(log->sample(0).events == (RunLog::WALL_LEFT | RunLog::ROTATION_ACTIVE));
+    CHECK(log->sample(1).events == (RunLog::WALL_LEFT | RunLog::ROTATION_ACTIVE | (5u << 8)));
+    CHECK(RunLog::segment(log->sample(1).events) == 5);
+    CHECK(RunLog::segment(log->sample(2).events) == 6);
+    CHECK((log->sample(2).events & ((1u << 7) | (1u << 14))) == 0); // bits 7 and 14 stay free
+}
+
+TEST_CASE("run log: wrapped says the ring overwrote the start of the run")
+{
+    auto log = freshLog();
+    log->start();
+    for (int i = 0; i < RunLog::CAPACITY; ++i)
+        recordTagged(*log, i);
+    CHECK_FALSE(log->wrapped()); // exactly full: nothing lost yet
+    recordTagged(*log, RunLog::CAPACITY);
+    CHECK(log->wrapped());
+    log->start();
+    CHECK_FALSE(log->wrapped());
+}
+
+namespace
+{
+#ifdef HOST_LOOP_FREQUENCY_HZ
+const std::string LOOP_HZ_TEXT = "1000";
+#else
+const std::string LOOP_HZ_TEXT = "500";
+#endif
+} // namespace
+
+TEST_CASE("run log: the dump header names the run, its rate, battery and command")
+{
+    auto log = freshLog();
+    log->set_header("PATH FFRFF speed=600 accel=3000", 7.936f);
+    log->start();
+    for (int i = 0; i < 5; ++i)
+        recordTagged(*log, i);
+    log->stop();
+    char line[RunLog::HEADER_BYTES];
+    log->formatHeader(line, sizeof line);
+    CHECK(std::string(line) ==
+          "TRACE n=5 dt_ms=8 cols=" + std::string(RunLog::COLUMNS) + " run=1 loop_hz=" +
+              LOOP_HZ_TEXT + " batt_v=7.94 wrapped=0 cmd=\"PATH FFRFF speed=600 accel=3000\"");
+}
+
+TEST_CASE("run log: each new header counts a new run and resets the segment")
+{
+    auto log = freshLog();
+    log->set_header("SEARCH 7 7", 8.0f);
+    log->set_segment(9);
+    log->set_header("SEARCH 0 0", 8.1f);
+    CHECK(log->header().run_id == 2);
+    CHECK(std::string(log->header().cmd) == "SEARCH 0 0");
+    CHECK(log->header().battery_v == doctest::Approx(8.1f));
+    log->start();
+    recordTagged(*log, 0);
+    CHECK(RunLog::segment(log->sample(0).events) == 0);
+}
+
+TEST_CASE("run log: a command keeps the header one parsable line")
+{
+    auto log = freshLog();
+    log->set_header("A \"quoted\"\nline", 7.0f);
+    CHECK(std::string(log->header().cmd) == "A 'quoted' line");
+
+    // Too long: truncated to the buffer, and the whole header still fits.
+    const std::string long_cmd(300, 'F');
+    log->set_header(long_cmd.c_str(), 7.0f);
+    CHECK(std::string(log->header().cmd) == long_cmd.substr(0, RunLog::CMD_BYTES - 1));
+    log->start();
+    for (int i = 0; i < RunLog::CAPACITY + 1; ++i) // wrapped
+        recordTagged(*log, i);
+    char line[RunLog::HEADER_BYTES];
+    log->formatHeader(line, sizeof line);
+    const std::string text = line;
+    CHECK(text.find(" wrapped=1 cmd=\"" + long_cmd.substr(0, RunLog::CMD_BYTES - 1) + "\"") !=
+          std::string::npos);
+    CHECK(text.back() == '"');
+}
