@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Real vs Sim</title>
+  <link rel="stylesheet" href="vendor/uPlot.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="realsim">
+  <header class="top">
+    <h1>Real vs sim</h1>
+    <a class="navlink" href="index.html">Sim stories</a>
+    <span class="spacer"></span>
+    <span id="source" class="source"></span>
+    <button id="theme" class="ghost" type="button" aria-label="Toggle light or dark theme">Light</button>
+  </header>
+  <p id="caption" class="caption">Load a TRACE capture: the mouse's run is replayed in the sim by its command and by its volts.</p>
+
+  <main class="rs-layout">
+    <aside class="knobs" aria-label="Log and sim knobs">
+      <label class="row">Log <select id="logPick"><option value="">…</option></select></label>
+      <div id="drop" class="drop" tabindex="0">Drop a .log here or <label class="linkish">pick a file<input type="file" id="file" accept=".log,.txt" hidden></label></div>
+      <label class="row">Run <select id="runPick"></select></label>
+      <label class="col">PATH replayed
+        <input id="path" type="text" spellcheck="false" placeholder="from the log's cmd, e.g. FFRFFLF 400 2000">
+      </label>
+      <label class="check"><input type="checkbox" id="nudge" checked> Nudge by cross-correlation</label>
+      <p id="align" class="status"></p>
+      <label class="row">Slip flag over <span><input id="slipThr" type="number" value="40" min="1" max="500" step="5"> <span class="unit">°/s</span></span></label>
+      <h2 class="sub">Plant knobs <span class="unit">(rerun on release)</span></h2>
+      <div id="sliders"></div>
+      <div class="buttons">
+        <button id="rerun" type="button" class="primary">Rerun sim</button>
+        <button id="nominal" type="button" class="ghost">Nominal</button>
+      </div>
+      <p id="status" class="status" role="status"></p>
+      <p class="note">This view needs the server (<code>python3 tools/physim_gui/server.py</code>); unlike the stories it has no offline fallback.</p>
+    </aside>
+
+    <section class="rs-main">
+      <div class="rs-top">
+        <div class="canvasWrap rs-floor"><canvas id="floor" aria-label="Dead-reckoned paths, real against sim, on the maze grid"></canvas>
+          <div class="key" id="floorKey"></div>
+        </div>
+        <div class="rs-side">
+          <div id="cards" class="cards rs-cards"></div>
+          <div class="tableWrap"><table id="segs" class="segs" aria-label="Per-segment comparison"></table></div>
+        </div>
+      </div>
+      <section id="charts" class="rs-charts" aria-label="Time traces"></section>
+    </section>
+  </main>
+
+  <script src="vendor/uPlot.iife.min.js"></script>
+  <script src="realsim.js"></script>
+</body>
+</html>

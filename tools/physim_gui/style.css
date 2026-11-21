@@ -229,3 +229,55 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
   .charts { overflow: visible; }
   .chart { flex: none; }
 }
+
+/* ---------- real vs sim (realsim.html) ---------- */
+.navlink { color: var(--accent); text-decoration: none; font-size: 14px; }
+.navlink:hover { text-decoration: underline; }
+.spacer { flex: 1; }
+body.realsim { height: auto; overflow: auto; }
+@media (min-width: 1100px) and (min-height: 560px) {
+  body.realsim { height: auto; overflow: auto; }
+}
+.rs-layout {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr);
+  gap: 10px;
+  padding: 8px 14px 14px;
+}
+.rs-layout .knobs { align-self: start; }
+.rs-main { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.rs-top { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+.rs-floor { min-height: 380px; }
+.rs-side { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.rs-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.rs-cards .card .v { white-space: normal; }
+.tableWrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
+.segs { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
+.segs th, .segs td { padding: 3px 8px; text-align: right; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.segs th { font-weight: 500; color: var(--muted); }
+.segs th:first-child, .segs td:first-child { text-align: left; }
+.segs .bad { color: var(--slip); font-weight: 600; }
+.rs-charts { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.rs-charts .chart { flex: none; }
+.drop { border: 1px dashed var(--border); border-radius: 6px; padding: 8px; font-size: 13px; color: var(--muted); text-align: center; }
+.drop.over { border-color: var(--runb); color: var(--text); }
+.linkish { color: var(--accent); cursor: pointer; text-decoration: underline; }
+.col { display: flex; flex-direction: column; gap: 3px; font-size: 14px; }
+.col input { background: var(--panel2); border: 1px solid var(--border); border-radius: 5px; padding: 3px 5px; font-family: ui-monospace, Menlo, monospace; }
+.sub { font-size: 13px; margin: 6px 0 0; font-weight: 600; }
+.note { font-size: 12.5px; color: var(--muted); margin: 4px 0 0; }
+.note code { font-size: 12px; }
+.slider { display: flex; flex-direction: column; gap: 1px; }
+.sl-head { display: flex; align-items: center; gap: 6px; font-size: 13.5px; }
+.sl-head span:first-child { flex: 1; }
+.sl-head output { font-variant-numeric: tabular-nums; color: var(--muted); }
+.slider.changed .sl-head output { color: var(--runb); font-weight: 600; }
+.slider input[type="range"] { width: 100%; accent-color: var(--runb); }
+button.tiny { padding: 0 6px; line-height: 1.2; }
+.swatch.dashed { border-top-style: dashed; }
+.swatch.dotted { border-top-style: dotted; }
+@media (max-width: 900px) {
+  .rs-layout { grid-template-columns: 1fr; padding: 8px 16px; }
+  .rs-top { grid-template-columns: 1fr; }
+  .rs-cards { grid-template-columns: 1fr 1fr; }
+}
