@@ -228,3 +228,24 @@ TEST_CASE("physim trace: volts replay of a logged run tracks the same plant, not
     const physim::ReplayResult other = physim::replayVolts(logged, sticky, nullptr);
     CHECK(other.rms_left_mmps > 2.0f * same.rms_left_mmps);
 }
+
+TEST_CASE("physim trace: the header is the firmware's own, cmd text bounded as RunLog keeps it")
+{
+    // '#' is a PATH no-op, so this sequence is short to drive but long to
+    // name: past the 127 characters RunLog::set_header() keeps.
+    std::vector<std::string> trace;
+    physim::RunOptions       opt;
+    opt.trace = &trace;
+    physim::PathCommand c;
+    std::string         error;
+    REQUIRE(physim::parsePathCommand("F" + std::string(150, '#') + "L", &c, &error));
+    REQUIRE(physim::runPath(c, physim::nominal(), opt).finished);
+    const std::string& header = trace.front();
+    const size_t       cmd_at = header.find(" cmd=\"") + 6;
+    REQUIRE(cmd_at > 6);
+    const std::string cmd = header.substr(cmd_at, header.size() - cmd_at - 1);
+    CHECK(header.back() == '"');
+    CHECK(cmd.size() == RunLog::CMD_BYTES - 1);
+    CHECK(cmd.rfind("PATH F###", 0) == 0);
+    CHECK(header.find(" run=1 loop_hz=") != std::string::npos);
+}

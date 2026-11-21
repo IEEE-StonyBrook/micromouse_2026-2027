@@ -310,29 +310,23 @@ int ticksPerSample(int dt_ms)
     return ticks > 0 ? ticks : 1;
 }
 
-// The firmware's TRACE header (app/mouse.cpp print_turn_trace) with the
-// extended keys, and RunLog::COLUMNS with the sim-only truth columns before ev.
-std::string traceHeader(unsigned count, int dt_ms, float batt_v, bool wrapped,
-                        const std::string& cmd)
+// RunLog::formatHeader()'s line with the sim-only truth columns spliced into
+// cols= before ev, the last column.
+std::string traceHeader(const RunLog& log)
 {
-    std::string cols = RunLog::COLUMNS;
-    cols.insert(cols.rfind(','), ",true_dist_mm,true_yaw_deg");
-    char head[96];
-    std::snprintf(head, sizeof head, "TRACE n=%u dt_ms=%d cols=", count, dt_ms);
-    char tail[96];
-    std::snprintf(tail, sizeof tail, " run=1 loop_hz=%.0f batt_v=%.2f wrapped=%d cmd=\"",
-                  static_cast<double>(LOOP_FREQUENCY_HZ), static_cast<double>(batt_v),
-                  wrapped ? 1 : 0);
-    return head + cols + tail + cmd + "\"";
+    char head[RunLog::HEADER_BYTES];
+    log.formatHeader(head, sizeof head);
+    std::string  out   = head;
+    const size_t ev_at = out.find(",ev ");
+    if (ev_at != std::string::npos)
+        out.insert(ev_at, ",true_dist_mm,true_yaw_deg");
+    return out;
 }
 
-// RunLog::formatRow() with the truth columns spliced in before ev, the last,
-// and the PATH segment index in ev bits 8-13 (0 = start advance, then 1..n),
-// as the Pico's RunLog::set_segment() numbers them.
-std::string traceRow(uint16_t index, uint16_t dt_ms, RunLog::Sample sample, float true_dist_mm,
-                     float true_yaw_deg, uint8_t segment = 0)
+// RunLog::formatRow() with the truth columns spliced in before ev, the last.
+std::string traceRow(uint16_t index, uint16_t dt_ms, const RunLog::Sample& sample,
+                     float true_dist_mm, float true_yaw_deg)
 {
-    sample.events = static_cast<uint16_t>(sample.events | (segment % 64u) << 8);
     char row[RunLog::ROW_BYTES];
     RunLog::formatRow(row, sizeof row, index, dt_ms, sample);
     char truth[48];
@@ -354,10 +348,25 @@ float normalizeYawDelta(float deg)
 
 struct Truth
 {
-    float   distance_mm;
-    float   yaw_deg;
-    uint8_t segment;
+    float distance_mm;
+    float yaw_deg;
 };
+
+// Dumps a stopped log as the firmware does, plus the truth recorded with each
+// sample. Once the ring wrapped, the kept samples are the newest: so is their truth.
+void dumpLog(const RunLog& log, const std::vector<Truth>& truth, std::vector<std::string>* out)
+{
+    const uint16_t count = log.count();
+    const uint16_t dt_ms = log.dtMs();
+    const size_t   first = log.wrapped() && truth.size() > count ? truth.size() - count : 0;
+    out->push_back(traceHeader(log));
+    for (uint16_t i = 0; i < count; ++i)
+    {
+        const Truth t = first + i < truth.size() ? truth[first + i] : Truth{NAN, NAN};
+        out->push_back(traceRow(i, dt_ms, log.sample(i), t.distance_mm, t.yaw_deg));
+    }
+    out->push_back("TRACE end");
+}
 
 struct Rig
 {
@@ -366,7 +375,6 @@ struct Rig
     Motion                                    motion;
     RunLog                                    log;
     std::vector<Truth>                        truth; // one per sample the log recorded
-    uint8_t                                   segment = 0; // the PATH segment driving
     float                                     battery_v;
     Result                                    result{};
     const std::function<void(const Sample&)>& on_sample;
@@ -399,7 +407,7 @@ struct Rig
             ends_before[1] = RunLog::pack(log.sample(before - 1));
         }
         // Truth at the instant Motion samples: before this tick's plant step.
-        const Truth now{robot.distanceMm(), robot.yawDeg(), segment};
+        const Truth now{robot.distanceMm(), robot.yawDeg()};
         motion.update();
         if (log.count() < before)
             truth.clear(); // restarted
@@ -472,20 +480,10 @@ struct Rig
     }
 
     // Stops the log and dumps it as the firmware does.
-    void dumpTrace(const std::string& cmd, std::vector<std::string>* out)
+    void dumpTrace(std::vector<std::string>* out)
     {
         log.stop();
-        const uint16_t count = log.count();
-        const uint16_t dt_ms = log.dtMs();
-        const size_t   first = truth.size() > count ? truth.size() - count : 0; // overwritten
-        out->push_back(traceHeader(count, dt_ms, battery_v, first > 0, cmd));
-        for (uint16_t i = 0; i < count; ++i)
-        {
-            const Truth t = first + i < truth.size() ? truth[first + i] : Truth{NAN, NAN, 0};
-            out->push_back(
-                traceRow(i, dt_ms, log.sample(i), t.distance_mm, t.yaw_deg, t.segment));
-        }
-        out->push_back("TRACE end");
+        dumpLog(log, truth, out);
     }
 };
 
@@ -532,7 +530,14 @@ Result run(Scenario scenario, const Params& params, const RunOptions& options,
     auto r = std::make_unique<Rig>(params, on_sample);
     configure(*r, options);
     if (options.trace != nullptr)
+    {
+        char cmd[96];
+        std::snprintf(cmd, sizeof cmd, "SCENARIO %s speed=%g accel=%g", scenarioName(scenario),
+                      static_cast<double>(options.speed_mmps),
+                      static_cast<double>(options.accel_mmps2));
+        r->log.set_header(cmd, r->battery_v);
         r->motion.start_trace();
+    }
     switch (scenario)
     {
         case Scenario::kStraight10:
@@ -568,13 +573,7 @@ Result run(Scenario scenario, const Params& params, const RunOptions& options,
     }
     r->settle();
     if (options.trace != nullptr)
-    {
-        char cmd[96];
-        std::snprintf(cmd, sizeof cmd, "SCENARIO %s speed=%g accel=%g", scenarioName(scenario),
-                      static_cast<double>(options.speed_mmps),
-                      static_cast<double>(options.accel_mmps2));
-        r->dumpTrace(cmd, options.trace);
-    }
+        r->dumpTrace(options.trace);
     fillResult(*r);
     return r->result;
 }
@@ -866,7 +865,9 @@ Result runPath(const PathCommand& c, const Params& params, const RunOptions& opt
         return r->result;
     }
 
-    // Armed before the start advance (segment 0), as handle_path_command() does.
+    // Named and armed before the start advance (segment 0), as
+    // handle_path_command() does.
+    r->log.set_header(describe(c).c_str(), r->battery_v);
     m.start_trace();
     // run_path_start_center(): from against the back wall to the first cell's centre.
     if (!c.raw)
@@ -880,7 +881,7 @@ Result runPath(const PathCommand& c, const Params& params, const RunOptions& opt
         {
             m.stop_trace();
             if (options.trace != nullptr)
-                r->dumpTrace(describe(c), options.trace);
+                r->dumpTrace(options.trace);
             fillResult(*r); // PATH stops here too
             return r->result;
         }
@@ -893,7 +894,7 @@ Result runPath(const PathCommand& c, const Params& params, const RunOptions& opt
     float expected_yaw_deg = m.yaw_deg();
     for (const Segment& s : segments)
     {
-        r->segment = static_cast<uint8_t>((&s - segments.data() + 1) % 64);
+        r->log.set_segment(static_cast<uint8_t>(&s - segments.data() + 1));
         if (s.type == SegmentType::kForward)
         {
             if (!c.raw)
@@ -949,7 +950,7 @@ Result runPath(const PathCommand& c, const Params& params, const RunOptions& opt
     m.stop_trace(); // run_path_segments() stops it on the way out
     r->settle();
     if (options.trace != nullptr)
-        r->dumpTrace(describe(c), options.trace);
+        r->dumpTrace(options.trace);
 
     fillResult(*r);
     // Relative to the first cell's centre and the heading there.
@@ -1095,9 +1096,16 @@ ReplayResult replayVolts(const TraceRun& logged, const Params& params,
     const auto dt_ms   = static_cast<uint16_t>(logged.dt_ms);
     double     sq_left = 0.0, sq_right = 0.0;
     int        compared = 0;
+    // The replay's own run log, dumped as the firmware would: the logged
+    // segments carried over, so both traces split the same way.
+    const int          ev  = logged.column("ev");
+    auto               log = std::make_unique<RunLog>();
+    std::vector<Truth> truth;
     if (trace != nullptr)
-        trace->push_back(traceHeader(static_cast<unsigned>(logged.rows.size()), logged.dt_ms,
-                                     p.battery_v, false, "REPLAY-VOLTS " + logged.cmd));
+    {
+        log->set_header(("REPLAY-VOLTS " + logged.cmd).c_str(), p.battery_v);
+        log->start(dt_ms);
+    }
     for (size_t i = 0; i < logged.rows.size(); i++)
     {
         const std::vector<float>& row = logged.rows[i];
@@ -1122,14 +1130,18 @@ ReplayResult replayVolts(const TraceRun& logged, const Params& params,
                 }
                 if (trace != nullptr)
                 {
+                    if (ev >= 0 && !std::isnan(row[ev]))
+                        log->set_segment(RunLog::segment(static_cast<uint16_t>(row[ev])));
                     RunLog::Sample s;
                     s.yaw_deg     = robot->imuYawDeg();
                     s.left_mmps   = left_mmps;
                     s.right_mmps  = right_mmps;
                     s.left_volts  = left_v;
                     s.right_volts = right_v;
-                    trace->push_back(traceRow(static_cast<uint16_t>(i), dt_ms, s,
-                                              robot->distanceMm(), robot->yawDeg()));
+                    s.enc_l_mm    = robot->encoderMm(true);
+                    s.enc_r_mm    = robot->encoderMm(false);
+                    log->record(s);
+                    truth.push_back({robot->distanceMm(), robot->yawDeg()});
                 }
                 // The logged volts are what the wheels got: the firmware scales
                 // duty by its battery reading. The pack caps them.
@@ -1140,7 +1152,10 @@ ReplayResult replayVolts(const TraceRun& logged, const Params& params,
         }
     }
     if (trace != nullptr)
-        trace->push_back("TRACE end");
+    {
+        log->stop();
+        dumpLog(*log, truth, trace);
+    }
     ReplayResult res;
     res.samples        = static_cast<int>(logged.rows.size());
     res.rms_left_mmps  = compared ? static_cast<float>(std::sqrt(sq_left / compared)) : NAN;

@@ -205,6 +205,9 @@ class ReplayFixture(unittest.TestCase):
         out, nominal = self.physim("--replay-volts", str(FIXTURE))
         (sim,) = tracelog.parse(out)
         self.assertEqual(len(sim.rows), len(self.real.rows))
+        # The replay carries the logged segments and its own encoder travel.
+        self.assertEqual(sim.segment, self.real.segment)
+        self.assertGreater(sim.distance_mm[-1], 500.0)
         _, matched = self.physim("--replay-volts", str(FIXTURE), *FIXTURE_KNOBS)
         # The knobs that made the fixture fit it far better than nominal does.
         self.assertLess(rms(matched), 0.5 * rms(nominal))
