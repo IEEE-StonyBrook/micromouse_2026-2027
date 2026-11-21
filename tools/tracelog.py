@@ -2,6 +2,7 @@
 """Parses the firmware's TRACE dumps (the run log) out of a serial capture.
 
     python3 tools/tracelog.py tools/logs/latest.log [--run N] [--csv out.csv] [--json out.json]
+                              [--compare sim.log]
 
 A dump is a header line, one `T,...` row per sample, then `TRACE end`:
 
@@ -188,6 +189,30 @@ def path_args(run):
     return " ".join(out)
 
 
+def compare(real, sim):
+    """Gaps between two runs sampled at the same rate, row by row from the
+    start (both logs start with the run): RMS of each column they share over
+    the rows both have, and the end-pose, distance and duration differences
+    (sim minus real)."""
+    n = min(len(real.rows), len(sim.rows))
+    rms = {}
+    for col in ("left_mmps", "right_mmps", "left_v", "right_v", "yaw_deg", "fwd_mmps"):
+        if col in real.columns and col in sim.columns:
+            pairs = [(a[col], b[col]) for a, b in zip(real.rows[:n], sim.rows[:n])]
+            pairs = [(a, b) for a, b in pairs if not (math.isnan(a) or math.isnan(b))]
+            if pairs:
+                rms[col] = math.sqrt(sum((b - a) ** 2 for a, b in pairs) / len(pairs))
+    out = {"rows_compared": n, "rms": rms}
+    if real.rows and sim.rows:
+        dt = real.header.get("dt_ms", 0)
+        out["end_dx_mm"] = sim.x_mm[-1] - real.x_mm[-1]
+        out["end_dy_mm"] = sim.y_mm[-1] - real.y_mm[-1]
+        out["end_dyaw_deg"] = sim.yaw_unwrapped_deg[-1] - real.yaw_unwrapped_deg[-1]
+        out["distance_diff_mm"] = sim.distance_mm[-1] - real.distance_mm[-1]
+        out["duration_diff_ms"] = (len(sim.rows) - len(real.rows)) * dt
+    return out
+
+
 def summary(index, run):
     h = run.header
     line = f"run {index}: n={len(run.rows)} dt_ms={h.get('dt_ms')}"
@@ -210,6 +235,8 @@ def main(argv=None):
     ap.add_argument("--run", type=int, default=-1, help="which dump (default: the last)")
     ap.add_argument("--csv", help="write the run's rows plus derived columns")
     ap.add_argument("--json", help="write the run as JSON")
+    ap.add_argument("--compare", metavar="LOG",
+                    help="print the gaps from this run to the same-numbered run in LOG (e.g. physim's)")
     args = ap.parse_args(argv)
 
     with open(args.log, encoding="utf-8", errors="replace") as f:
@@ -224,6 +251,14 @@ def main(argv=None):
     except IndexError:
         print(f"no run {args.run}; {len(runs)} found", file=sys.stderr)
         return 1
+    if args.compare:
+        with open(args.compare, encoding="utf-8", errors="replace") as f:
+            other = parse(f.read())
+        try:
+            print(json.dumps(compare(run, other[args.run]), indent=1))
+        except IndexError:
+            print(f"no run {args.run} in {args.compare}", file=sys.stderr)
+            return 1
     if args.csv:
         names, body = run.table()
         with open(args.csv, "w", newline="", encoding="utf-8") as f:
