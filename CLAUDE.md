@@ -133,6 +133,21 @@ prints its RMS wheel-speed gap, so plant error shows apart from the
 controller's; `--emit-pico-trace` wraps output as a capture.
 `tools/fixtures/path_ffrfflf_capture.log` is an off-nominal sim run standing
 in for the mouse (`python3 -m unittest tools/test_tracelog.py`).
+physim names, segments and prints its traces through the firmware's own
+`RunLog` (`set_header()`, `set_segment()`, `formatHeader()`), so its headers
+match the mouse's. The GUI's **Real vs sim** page
+(`http://127.0.0.1:8765/realsim.html`, linked from the stories page) loads
+a capture (`tools/logs/*.log` and `tools/fixtures/*.log` from the server's
+`GET /logs`, or a dropped or picked file), and `POST /realsim` parses it
+with `tracelog.py` and runs both replays with the slider knobs: it overlays
+the dead-reckoned paths on the cell grid, wheel speeds, volts, yaw, an
+encoder-vs-gyro yaw-rate slip check and a per-segment table with RMSEs.
+The command replay is aligned on the first FORWARD/ROTATION_ACTIVE sample
+(optionally nudged by cross-correlation). It needs the server; it has no
+offline fallback. To capture a real run: put the mouse on an open floor
+against a back wall, run `python3 tools/serial_term.py`, type
+`PATH FFRFFLF 400 2000` and then `TRACE`; the session lands in
+`tools/logs/latest.log`, which the page opens first.
 Add a test case to a `*_test.cpp` file; the Makefile picks new files up.
 
 Run `ls firmware/<layer>` for the current file list; it is authoritative and
