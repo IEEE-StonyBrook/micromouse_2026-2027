@@ -142,6 +142,29 @@ single-core shape); Core 1 is unused:
 - The main loop (`cli.loop()`) handles serial and Bluetooth I/O, polls the
   ToFs at 50 Hz, and runs path planning, maze algorithms and high-level decisions.
 
+**Run log.** `control/run_log.h` keeps what the tick did during a run: one
+int16-packed sample every 8 ms (20 ms for a search), 1680 in a ring, about
+13 s at 8 ms. PATH, the fast path, SEARCH, the search menu and SMOOTH RUN
+arm it through the CLI's `arm_trace()`/`name_trace()`, which also set the
+header: a run counter, the battery voltage and the command with its
+resolved parameters (`PATH FFRFF speed=600 accel=3000 ... smooth=0 raw=0`).
+PATH arms before its start advance and stops at the end, so the ring holds
+the whole run. `TRACE` (Pico) and `log` (STM32) dump it through
+`RunLog::formatHeader()`/`formatRow()`:
+
+```text
+TRACE n=<n> dt_ms=<dt> cols=<cols> run=<id> loop_hz=<hz> batt_v=<v.vv> wrapped=<0|1> cmd="<text>"
+T,<t_ms>,...,pos_mm,enc_l_mm,enc_r_mm,ev
+```
+
+`enc_l_mm`/`enc_r_mm` are each wheel's encoder distance since the trace
+started; `ev` bits 0-6 are `RunLog::Event`, bits 8-13 the PATH segment
+(1-based as PATH prints it, 0 for the start advance, mod 64), bit 15 a
+clipped field; `wrapped=1` means the ring overwrote the run's start. Keep
+the header keys in order and only insert columns: parsers go by name. The
+log is logging only: nothing that sets the motor volts may read it
+(`rate_test.cpp` checks the volts match bit for bit with it armed).
+
 **DriverLab Mode** is a single-core calibration and characterisation tool:
 open-loop voltage sweeps, step response, PID tuning, and export of
 `config.h`/`tuning.h`-compatible constants.
@@ -291,9 +314,10 @@ and while disarmed every non-zero `motor`, `move` and `driverlab` is refused
 (`motor 0 0` and `motor sleep` still work). On the Feather `arm` only reports
 whether it may, so the board never sits armed and refuses a profile save.
 A damaged store shows as 2 LED flashes every 2 s,
-no usable record as 4. The run log (`control/run_log.h`: int16-packed
-samples every 8 ms, about 13 s) sits in CCM, which DMA cannot reach, so a
-dump formats each row into an SRAM buffer before the console queues it.
+no usable record as 4. The run log (`control/run_log.h`, 63.9 KB of the
+64 KB) sits in CCM, which DMA cannot reach, so a dump formats the header
+and each row into an SRAM buffer before the console queues it. Each `move`
+traces itself for `log`.
 
 The tick runs the Pico's control path: `Motion::update()` over Drivetrain,
 with STM32 definitions of Motor (one DRV8874 through `MotorBridge`, so the
