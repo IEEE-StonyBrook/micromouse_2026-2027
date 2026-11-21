@@ -2,7 +2,6 @@
 #define DRIVERS_TOF_H
 
 #include "vl53l0x_api_rp2040/core/inc/vl53l0x_api.h"
-#include "vl53l0x_api_rp2040/platform/inc/vl53l0x_rp2040.h"
 
 /**
  * @brief Time-of-Flight (ToF) distance sensor interface for VL53L0X

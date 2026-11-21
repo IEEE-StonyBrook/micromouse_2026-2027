@@ -1,14 +1,15 @@
 #include "app/start_gesture.h"
 
 #include <cstdio>
-
-#include "pico/stdlib.h"
+#include <cstring>
 
 #include "app/bluetooth.h"
 #include "app/bootsel_button.h"
 #include "common/log.h"
 #include "config/sensors.h"
 #include "drivers/tof.h"
+#include "hal/console.h"
+#include "hal/time.h"
 
 namespace
 {
@@ -52,7 +53,7 @@ struct WaveMachine
 
 bool peekSerialChar(int& out)
 {
-    int c = getchar_timeout_us(0);
+    int c = hal::console::getcNonBlocking();
     if (c < 0)
         return false;
     out = c;
@@ -64,7 +65,7 @@ void writeDiagnostic(Bluetooth* bt, const char* text)
     if (text == nullptr)
         return;
 
-    std::fputs(text, stdout);
+    hal::console::write(text, std::strlen(text));
     if (bt != nullptr)
     {
         bt->write(text);
@@ -148,7 +149,7 @@ StartTrigger waitForStartGesture(Bluetooth* bt, ToF* front_tof, uint32_t low_mm,
             int16_t        raw_mm  = 0;
             const uint32_t front_d = readToFDistance(front_tof, high_mm, raw_mm);
 
-            uint32_t now_ms = to_ms_since_boot(get_absolute_time());
+            uint32_t now_ms = hal::time::nowMs();
             if (now_ms - last_report_ms >= 250)
             {
                 char report[160];
@@ -165,7 +166,7 @@ StartTrigger waitForStartGesture(Bluetooth* bt, ToF* front_tof, uint32_t low_mm,
                 return StartTrigger::TOF_WAVE;
         }
 
-        sleep_ms(20);
+        hal::time::sleepMs(20);
     }
 }
 
@@ -197,7 +198,7 @@ StartTrigger waitForCompetitionGesture(Bluetooth* bt, ToF* front_tof, ToF* right
         // Bluetooth char/command consumption — it routes diagnostic letters
         // (W/C/D/etc.) into the existing CLI parser and surfaces gesture
         // shortcuts (G/H/J) and BT START via its return value. We must NOT
-        // also call getchar_timeout_us / bt->command() here because both
+        // also read the console or bt->command() here because both
         // operations are destructive: a parallel reader would steal chars
         // and break CLI command parsing while COMP is armed.
         if (service_cb != nullptr)
@@ -248,7 +249,7 @@ StartTrigger waitForCompetitionGesture(Bluetooth* bt, ToF* front_tof, ToF* right
         const uint32_t right_d = readToFDistance(right_tof, side_high, raw_right, TOF_RIGHT_SCALE);
         const uint32_t left_d  = readToFDistance(left_tof, side_high, raw_left, TOF_LEFT_SCALE);
 
-        uint32_t now_ms = to_ms_since_boot(get_absolute_time());
+        uint32_t now_ms = hal::time::nowMs();
         if (now_ms - last_report_ms >= 500)
         {
             char report[220];
@@ -281,6 +282,6 @@ StartTrigger waitForCompetitionGesture(Bluetooth* bt, ToF* front_tof, ToF* right
         if (left_fired)
             return StartTrigger::LEFT_WAVE;
 
-        sleep_ms(20);
+        hal::time::sleepMs(20);
     }
 }

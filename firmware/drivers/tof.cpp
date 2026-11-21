@@ -5,6 +5,7 @@
 #include "config/config.h"
 #include "hardware/gpio.h"
 #include "pico/stdlib.h"
+#include "vl53l0x_api_rp2040/platform/inc/vl53l0x_rp2040.h"
 
 ToF::ToF(int xshut_pin, char sensor_position) : sensor_position_(sensor_position)
 {

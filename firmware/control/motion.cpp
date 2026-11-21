@@ -6,8 +6,10 @@
 #include "common/utils.h"
 #include "config/config.h"
 #include "control/drivetrain.h"
+#include "control/run_log.h"
 #include "drivers/imu.h"
-#include "pico/stdlib.h"
+#include "hal/irq.h"
+#include "hal/time.h"
 
 namespace
 {
@@ -18,8 +20,7 @@ constexpr uint32_t kSpinTurnPreStopTimeoutMs   = 1000;
 
 bool timedOut(uint32_t start_ms, uint32_t timeout_ms)
 {
-    return timeout_ms > 0 &&
-           static_cast<uint32_t>(to_ms_since_boot(get_absolute_time()) - start_ms) >= timeout_ms;
+    return timeout_ms > 0 && static_cast<uint32_t>(hal::time::nowMs() - start_ms) >= timeout_ms;
 }
 } // namespace
 
@@ -31,6 +32,9 @@ Motion::Motion(Drivetrain* drivetrain, IMU* imu)
     rotation_controller_.setOutputLimit(MAX_VOLTAGE);
 
     reset();
+    // No tick runs yet, so the reset applies now rather than on the first tick.
+    hal::irq::Lock lock;
+    applyPendingCommands();
 }
 
 void Motion::reset()
@@ -40,24 +44,16 @@ void Motion::reset()
 
 void Motion::reset_drive_system()
 {
-    motion_sequence_active_ = false;
-    clear_heading_hold();
-    drivetrain_->stop();
-    drivetrain_->reset();
+    issue(Command::Op::ResetDriveSystem);
+    // IMU yaw belongs to the IMU's UART interrupt, not the control tick, and
+    // IMU::reset() logs, so it zeroes here on the main loop. After the issue,
+    // so a tick between the two never holds the old heading on a zeroed yaw.
     imu_->reset();
-    forward_.reset();
-    rotation_.reset();
-    resetControlHistory();
-    steering_mode_ = tof_wall::SteeringMode::STEERING_OFF;
 }
 
 void Motion::reset_drive_control()
 {
-    drivetrain_->stop();
-    drivetrain_->reset();
-    forward_.reset();
-    rotation_.reset();
-    resetControlHistory();
+    issue(Command::Op::ResetDriveControl);
 }
 
 void Motion::resetControlHistory()
@@ -78,7 +74,7 @@ void Motion::resetControlHistory()
     latest_line_rotation_volts_           = 0.0f;
     latest_line_differential_volts_       = 0.0f;
     latest_motor_differential_volts_      = 0.0f;
-    resetWallSteeringStats();
+    clearWallSteeringStats();
 }
 
 void Motion::set_wall_distances(float left_mm, float front_mm, float right_mm)
@@ -90,6 +86,9 @@ void Motion::set_wall_distances(float left_raw_mm, float front_raw_mm, float rig
                                 float left_filtered_mm, float front_filtered_mm,
                                 float right_filtered_mm)
 {
+    // The main loop owns these and the tick only reads them; the lock keeps a
+    // tick from steering on half old, half new distances.
+    hal::irq::Lock lock;
     left_raw_wall_mm_  = left_raw_mm;
     front_raw_wall_mm_ = front_raw_mm;
     right_raw_wall_mm_ = right_raw_mm;
@@ -100,15 +99,12 @@ void Motion::set_wall_distances(float left_raw_mm, float front_raw_mm, float rig
 
 void Motion::set_steering_mode(tof_wall::SteeringMode mode)
 {
-    side_error_prev_norm_             = 0.0f;
-    side_error_prev_valid_            = false;
-    latest_steering_adjustment_degps_ = 0.0f;
-    steering_mode_                    = mode;
+    issue(Command::Op::SetSteeringMode, static_cast<float>(static_cast<int>(mode)));
 }
 
 tof_wall::SteeringMode Motion::steeringMode() const
 {
-    return steering_mode_;
+    return view().steering_mode;
 }
 
 bool Motion::wallLeft()
@@ -183,6 +179,11 @@ Motion::WallSteeringStats Motion::wallSteeringStats() const
 
 void Motion::resetWallSteeringStats()
 {
+    issue(Command::Op::ResetWallSteeringStats);
+}
+
+void Motion::clearWallSteeringStats()
+{
     wall_steering_peak_degps_        = 0.0f;
     wall_steering_sum_degps_         = 0.0f;
     wall_steering_samples_           = 0;
@@ -195,24 +196,22 @@ void Motion::resetWallSteeringStats()
 
 void Motion::set_line_steering_adjustment_degps(float adjustment_degps, bool valid)
 {
-    line_steering_adjustment_degps_ = valid ? adjustment_degps : 0.0f;
-    line_steering_valid_            = valid;
+    issue(Command::Op::SetLineSteering, adjustment_degps, valid ? 1.0f : 0.0f);
 }
 
 void Motion::clear_line_steering_adjustment()
 {
-    line_steering_adjustment_degps_ = 0.0f;
-    line_steering_valid_            = false;
+    issue(Command::Op::ClearLineSteering);
 }
 
 float Motion::lineSteeringAdjustmentDegps() const
 {
-    return line_steering_adjustment_degps_;
+    return view().line_steering_adjustment_degps;
 }
 
 bool Motion::lineSteeringValid() const
 {
-    return line_steering_valid_;
+    return view().line_steering_valid;
 }
 
 float Motion::lineRotationVolts() const
@@ -232,27 +231,22 @@ float Motion::motorDifferentialVolts() const
 
 void Motion::set_heading_hold(float target_yaw_deg)
 {
-    heading_hold_enabled_          = true;
-    heading_hold_target_yaw_deg_   = utils::wrapAngle180(target_yaw_deg);
-    latest_heading_hold_error_deg_ = utils::wrapAngle180(heading_hold_target_yaw_deg_ - yaw_deg());
+    issue(Command::Op::SetHeadingHold, utils::wrapAngle180(target_yaw_deg));
 }
 
 void Motion::clear_heading_hold()
 {
-    heading_hold_enabled_                 = false;
-    heading_hold_target_yaw_deg_          = 0.0f;
-    latest_heading_hold_error_deg_        = 0.0f;
-    latest_heading_hold_adjustment_degps_ = 0.0f;
+    issue(Command::Op::ClearHeadingHold);
 }
 
 bool Motion::headingHoldActive() const
 {
-    return heading_hold_enabled_;
+    return view().heading_hold_enabled;
 }
 
 float Motion::headingHoldTargetYawDeg() const
 {
-    return heading_hold_target_yaw_deg_;
+    return view().heading_hold_target_yaw_deg;
 }
 
 float Motion::headingHoldErrorDeg() const
@@ -267,42 +261,44 @@ float Motion::headingHoldAdjustmentDegps() const
 
 float Motion::position() const
 {
-    return forward_.position();
+    return view().fwd.position();
 }
 
 float Motion::wheel_position(WheelSide side)
 {
-    return drivetrain_->position(side);
+    hal::irq::Lock lock;
+    return drivetrainResetQueued() ? 0.0f : drivetrain_->position(side);
 }
 
 int32_t Motion::encoder_ticks(WheelSide side) const
 {
-    return drivetrain_->ticks(side);
+    hal::irq::Lock lock;
+    return drivetrainResetQueued() ? 0 : drivetrain_->ticks(side);
 }
 
 float Motion::velocity() const
 {
-    return forward_.velocity();
+    return view().fwd.velocity();
 }
 
 float Motion::acceleration() const
 {
-    return forward_.acceleration();
+    return view().fwd.acceleration();
 }
 
 float Motion::angle() const
 {
-    return rotation_.position();
+    return view().rot.position();
 }
 
 float Motion::omega() const
 {
-    return rotation_.velocity();
+    return view().rot.velocity();
 }
 
 float Motion::alpha() const
 {
-    return rotation_.acceleration();
+    return view().rot.acceleration();
 }
 
 float Motion::yaw_deg() const
@@ -317,46 +313,39 @@ float Motion::yaw_rate_degps() const
 
 void Motion::set_target_velocity(float velocity_mmps)
 {
-    forward_.setTargetSpeed(velocity_mmps);
+    issue(Command::Op::SetTargetVelocity, velocity_mmps);
 }
 
 void Motion::set_final_velocity(float velocity_mmps)
 {
-    forward_.setFinalSpeed(velocity_mmps);
+    issue(Command::Op::SetFinalVelocity, velocity_mmps);
 }
 
 void Motion::extend_move(float distance_mm)
 {
-    forward_.extendTarget(distance_mm);
+    issue(Command::Op::ExtendMove, distance_mm);
 }
 
 void Motion::begin_motion_sequence()
 {
-    reset_drive_control();
-    clear_heading_hold();
-    set_steering_mode(tof_wall::SteeringMode::STEERING_OFF);
-    motion_sequence_active_ = true;
+    issue(Command::Op::BeginSequence);
 }
 
 void Motion::end_motion_sequence()
 {
-    motion_sequence_active_ = false;
-    clear_heading_hold();
-    drivetrain_->stop();
-    forward_.reset();
-    rotation_.reset();
-    resetControlHistory();
+    issue(Command::Op::EndSequence);
 }
 
 void Motion::start_move(float distance_mm, float top_speed_mmps, float final_speed_mmps,
                         float accel_mmps2)
 {
-    forward_.start(distance_mm, velocity(), top_speed_mmps, final_speed_mmps, accel_mmps2);
+    // The tick starts the profile from the velocity it has when it applies this.
+    issue(Command::Op::StartMove, distance_mm, top_speed_mmps, final_speed_mmps, accel_mmps2);
 }
 
 bool Motion::move_finished() const
 {
-    return !forward_.active();
+    return !view().fwd.active();
 }
 
 void Motion::move(float distance_mm, float top_speed_mmps, float final_speed_mmps,
@@ -367,23 +356,23 @@ void Motion::move(float distance_mm, float top_speed_mmps, float final_speed_mmp
 
 bool Motion::move_settled(float velocity_tolerance_mmps) const
 {
-    return forward_.settled(velocity_tolerance_mmps);
+    return view().fwd.settled(velocity_tolerance_mmps);
 }
 
 bool Motion::turn_settled(float velocity_tolerance_degps) const
 {
-    return rotation_.settled(velocity_tolerance_degps);
+    return view().rot.settled(velocity_tolerance_degps);
 }
 
 bool Motion::stop_forward(float accel_mmps2, uint32_t timeout_ms)
 {
-    forward_.stop(accel_mmps2);
+    issue(Command::Op::StopForward, accel_mmps2);
     return wait_until_forward_settled(timeout_ms);
 }
 
 bool Motion::wait_until_forward_settled(uint32_t timeout_ms)
 {
-    const uint32_t start_ms = to_ms_since_boot(get_absolute_time());
+    const uint32_t start_ms = hal::time::nowMs();
 
     while (!move_settled(kForwardSettledVelocityMmps))
     {
@@ -391,32 +380,25 @@ bool Motion::wait_until_forward_settled(uint32_t timeout_ms)
         {
             LOG_ERROR("Motion: forward stop timeout position_mm=" << position() << " velocity_mmps="
                                                                   << velocity());
-            drivetrain_->stop();
-            forward_.reset();
-            forward_controller_.reset();
-            prev_left_cmd_vel_mmps_  = 0.0f;
-            prev_right_cmd_vel_mmps_ = 0.0f;
+            issue(Command::Op::ForwardAbort);
             return false;
         }
-        sleep_ms(2);
+        hal::time::sleepMs(2);
     }
 
-    forward_controller_.reset();
-    prev_left_cmd_vel_mmps_  = 0.0f;
-    prev_right_cmd_vel_mmps_ = 0.0f;
+    issue(Command::Op::ForwardSettled);
     return true;
 }
 
 void Motion::start_turn(float degrees, float top_speed_degps, float final_speed_degps,
                         float accel_degps2)
 {
-    rotation_.start(degrees, rotation_.velocity(), top_speed_degps, final_speed_degps,
-                    accel_degps2);
+    issue(Command::Op::StartTurn, degrees, top_speed_degps, final_speed_degps, accel_degps2);
 }
 
 bool Motion::turn_finished() const
 {
-    return !rotation_.active();
+    return !view().rot.active();
 }
 
 void Motion::turn(float degrees, float top_speed_degps, float final_speed_degps, float accel_degps2)
@@ -430,12 +412,11 @@ bool Motion::spin_turn(float degrees, float omega_degps, float alpha_degps2)
     {
         LOG_ERROR("Motion: spin_turn cancelled before turn degrees="
                   << degrees << " forward_velocity_mmps=" << velocity());
-        rotation_.reset();
+        issue(Command::Op::ResetRotation);
         return false;
     }
 
-    rotation_.reset();
-    rotation_.start(degrees, omega_degps, 0.0f, alpha_degps2);
+    issue(Command::Op::SpinTurn, degrees, omega_degps, alpha_degps2);
     return true;
 }
 
@@ -462,25 +443,22 @@ bool Motion::turn_IP90L()
 
 void Motion::stop_at(float position_mm)
 {
-    const float remaining_mm = position_mm - forward_.position();
-    forward_.start(remaining_mm, forward_.velocity(), std::fabs(forward_.velocity()), 0.0f,
-                   forward_.acceleration());
+    issue(Command::Op::StopAt, position_mm);
 }
 
 void Motion::stop_after(float distance_mm)
 {
-    forward_.start(distance_mm, forward_.velocity(), std::fabs(forward_.velocity()), 0.0f,
-                   forward_.acceleration());
+    issue(Command::Op::StopAfter, distance_mm);
 }
 
 void Motion::set_position(float position_mm)
 {
-    forward_.setPosition(position_mm);
+    issue(Command::Op::SetPosition, position_mm);
 }
 
 void Motion::adjust_forward_position(float delta_mm)
 {
-    forward_.adjustPosition(delta_mm);
+    issue(Command::Op::AdjustPosition, delta_mm);
 }
 
 float Motion::smoothTurnLeadMm(bool turn_left, float turn_centre_ahead_mm) const
@@ -521,24 +499,70 @@ void Motion::start_smooth_turn_arc(bool turn_left, float heading_error_deg)
 {
     // mazerunner-core: motion.turn(params.angle, params.omega, 0, params.alpha).
     const float angle_deg = smooth_turn_.side(turn_left).angle_deg;
-    start_turn((turn_left ? angle_deg : -angle_deg) + heading_error_deg, smooth_turn_.omega_degps,
-               0.0f, smooth_turn_.alpha_degps2);
-    encoder_rotation_ticks_ = UINT16_MAX;
+    issue(Command::Op::SmoothArc, (turn_left ? angle_deg : -angle_deg) + heading_error_deg,
+          smooth_turn_.omega_degps, 0.0f, smooth_turn_.alpha_degps2);
 }
 
 void Motion::update()
 {
     // Mazerunner systick.update() shape:
     //   encoders.update(); motion.update(); motors.update_controllers(...)
-    // We add imu_->update() because IMU owns rotation tracking
-    // (substitutes mazerunner's encoder-derived robot_rot_change).
+    // We add imu_->update() to keep the IMU yaw current for heading hold (and
+    // for the rotation PD when ROT_FEEDBACK_ENCODER is 0).
+    // Main-loop commands apply first, whole and in order, so the rest of the
+    // tick never sees one half-written.
+    {
+        hal::irq::Lock lock;
+        applyPendingCommands();
+    }
     drivetrain_->update();
+    trace_left_ticks_ += drivetrain_->stepTicks(WheelSide::LEFT);
+    trace_right_ticks_ += drivetrain_->stepTicks(WheelSide::RIGHT);
     imu_->update();
-    forward_.update();
+    // A tripped watchdog keeps the motors cut and the move frozen.
+    if (!crash_.tripped())
+    {
+        forward_.update();
 
-    rotation_.update();
+        rotation_.update();
 
-    runPositionControl();
+        runPositionControl();
+    }
+    checkCrash();
+}
+
+void Motion::checkCrash()
+{
+    // Off and clear (the Pico default): skip the work entirely.
+    if (!crash_.enabled() && !crash_.tripped())
+        return;
+    CrashInputs in;
+    in.left_volts    = drivetrain_->leftVolts();
+    in.right_volts   = drivetrain_->rightVolts();
+    in.battery_volts = drivetrain_->batteryVoltage();
+    in.left_mmps     = drivetrain_->velocity(WheelSide::LEFT);
+    in.right_mmps    = drivetrain_->velocity(WheelSide::RIGHT);
+    in.fwd_error_mm  = forward_controller_.error();
+    if (current_reader_ != nullptr)
+        in.has_current = current_reader_(current_context_, &in.left_amps, &in.right_amps);
+    if (crash_.update(in))
+    {
+        drivetrain_->stop();
+        if (crash_cut_hook_ != nullptr)
+            crash_cut_hook_();
+    }
+}
+
+void Motion::set_motor_current_reader(CurrentReader reader, void* context)
+{
+    current_reader_  = reader;
+    current_context_ = context;
+}
+
+void Motion::clear_crash()
+{
+    reset_drive_system();
+    crash_.clear();
 }
 
 void Motion::runPositionControl()
@@ -590,11 +614,11 @@ void Motion::runPositionControl()
     float fwd_velocity   = forward_.velocity();
     float rot_velocity   = rotation_.velocity();
 
-    // Single-rate PD — both forward and rotation update every 500 Hz tick,
-    // exactly like UKMARS mazerunner-core. Rotation feedback comes from the
-    // IMU as a held-flat per-tick delta; this removes the 10 ms staircase
-    // that the old 100 Hz gate produced in rotation_output_ and stops the
-    // step-input-driven oscillation on spin turns.
+    // Single-rate PD — both forward and rotation update every control tick,
+    // exactly like UKMARS mazerunner-core. Rotation feedback is the averaged
+    // encoder yaw (ROT_FEEDBACK_ENCODER). With that 0 it is the IMU's yaw as a
+    // held-flat per-tick delta, which removes the 10 ms staircase the old
+    // 100 Hz gate produced in rotation_output_.
     // mazerunner-core runs both PDs every tick. During a spin the forward
     // setpoint is 0, so this holds position; skipping it let motor imbalance
     // walk the robot ~30 mm forward per 360 deg.
@@ -660,63 +684,52 @@ void Motion::runPositionControl()
 
     drivetrain_->setVoltage(left_volts, right_volts);
 
-    // Ring buffer: a run longer than the buffer keeps its last samples, the
-    // ones leading up to a crash or HALT.
-    if (trace_active_ && ++trace_tick_ >= trace_decimation_)
+    // The run log's ring keeps the last samples of a long run, the ones
+    // leading up to a crash or HALT.
+    if (run_log_ != nullptr && run_log_->due())
     {
-        trace_tick_         = 0;
-        trace_[trace_next_] = {rotation_.position(),
-                               yaw_deg(),
-                               rotation_controller_.error(),
-                               rotation_output,
-                               latest_heading_hold_error_deg_,
-                               wall_adjustment,
-                               heading_adjustment,
-                               fwd_velocity,
-                               drivetrain_->velocity(WheelSide::LEFT),
-                               drivetrain_->velocity(WheelSide::RIGHT),
-                               left_volts,
-                               right_volts,
-                               encoder_rotation,
-                               left_wall_mm_,
-                               front_wall_mm_,
-                               right_wall_mm_,
-                               forward_.position()};
-        trace_next_         = static_cast<uint16_t>((trace_next_ + 1) % TRACE_CAPACITY);
-        if (trace_count_ < TRACE_CAPACITY)
-            trace_count_ = trace_count_ + 1;
+        RunLog::Sample s;
+        s.target_deg    = rotation_.position();
+        s.yaw_deg       = yaw_deg();
+        s.rot_error_deg = rotation_controller_.error();
+        s.rot_volts     = rotation_output;
+        s.hold_err_deg  = latest_heading_hold_error_deg_;
+        s.wall_degps    = wall_adjustment;
+        s.hold_degps    = heading_adjustment;
+        s.fwd_mmps      = fwd_velocity;
+        s.left_mmps     = drivetrain_->velocity(WheelSide::LEFT);
+        s.right_mmps    = drivetrain_->velocity(WheelSide::RIGHT);
+        s.left_volts    = left_volts;
+        s.right_volts   = right_volts;
+        s.left_tof_mm   = left_wall_mm_;
+        s.front_tof_mm  = front_wall_mm_;
+        s.right_tof_mm  = right_wall_mm_;
+        s.pos_mm        = forward_.position();
+        s.enc_l_mm      = static_cast<float>(trace_left_ticks_) * MM_PER_TICK_LEFT;
+        s.enc_r_mm      = static_cast<float>(trace_right_ticks_) * MM_PER_TICK_RIGHT;
+        const bool saturated =
+            std::fabs(left_volts) >= MAX_VOLTAGE || std::fabs(right_volts) >= MAX_VOLTAGE;
+        uint16_t events = 0;
+        events |= encoder_rotation ? RunLog::ENCODER_ROTATION : 0;
+        events |= latest_wall_state_.left_wall ? RunLog::WALL_LEFT : 0;
+        events |= latest_wall_state_.front_wall ? RunLog::WALL_FRONT : 0;
+        events |= latest_wall_state_.right_wall ? RunLog::WALL_RIGHT : 0;
+        events |= saturated ? RunLog::VOLTS_SATURATED : 0;
+        events |= forward_.active() ? RunLog::FORWARD_ACTIVE : 0;
+        events |= rotation_.active() ? RunLog::ROTATION_ACTIVE : 0;
+        s.events = events;
+        run_log_->record(s);
     }
 }
 
-void Motion::start_trace(uint16_t decimation)
+void Motion::start_trace(uint16_t period_ms)
 {
-    trace_active_     = false;
-    trace_count_      = 0;
-    trace_next_       = 0;
-    trace_tick_       = 0;
-    trace_decimation_ = decimation > 0 ? decimation : 1;
-    trace_active_     = true;
+    issue(Command::Op::StartTrace, static_cast<float>(period_ms));
 }
 
 void Motion::stop_trace()
 {
-    trace_active_ = false;
-}
-
-uint16_t Motion::traceCount() const
-{
-    return trace_count_;
-}
-
-uint16_t Motion::traceDtMs() const
-{
-    return static_cast<uint16_t>(trace_decimation_ * 1000.0f / LOOP_FREQUENCY_HZ);
-}
-
-const Motion::TraceSample& Motion::traceSample(uint16_t index) const
-{
-    // Oldest sample first.
-    return trace_[(trace_next_ + TRACE_CAPACITY - trace_count_ + index) % TRACE_CAPACITY];
+    issue(Command::Op::StopTrace);
 }
 
 float Motion::wallSteeringAdjustment(float fwd_velocity_mmps, float rot_velocity_degps)
@@ -803,24 +816,23 @@ float Motion::headingHoldAdjustment(float fwd_velocity_mmps, float rot_velocity_
 
 void Motion::stop()
 {
-    drivetrain_->stop();
+    issue(Command::Op::Stop);
 }
 
 void Motion::disable_drive()
 {
-    clear_heading_hold();
-    drivetrain_->stop();
+    issue(Command::Op::DisableDrive);
 }
 
 void Motion::emergency_stop()
 {
-    reset_drive_system();
-    disable_drive();
+    issue(Command::Op::EmergencyStop);
+    imu_->reset(); // main-loop side, as in reset_drive_system()
 }
 
 bool Motion::wait_until_position(float position_mm, uint32_t timeout_ms)
 {
-    const uint32_t start_ms = to_ms_since_boot(get_absolute_time());
+    const uint32_t start_ms = hal::time::nowMs();
 
     while (position() < position_mm - kPositionToleranceMm)
     {
@@ -829,10 +841,10 @@ bool Motion::wait_until_position(float position_mm, uint32_t timeout_ms)
             LOG_ERROR("Motion: wait_until_position timeout target_mm="
                       << position_mm << " position_mm=" << position()
                       << " velocity_mmps=" << velocity());
-            drivetrain_->stop();
+            issue(Command::Op::Stop);
             return false;
         }
-        sleep_ms(2);
+        hal::time::sleepMs(2);
     }
 
     return true;
@@ -852,4 +864,244 @@ bool Motion::wait_until_distance(float distance_mm, uint32_t timeout_ms)
 void Motion::wait_until_distance(float distance_mm)
 {
     (void)wait_until_distance(distance_mm, kDefaultMotionWaitTimeoutMs);
+}
+
+// === Command latch ===
+
+void Motion::issue(Command::Op op, float a, float b, float c, float d)
+{
+    hal::irq::Lock lock;
+    if (latch_count_ == LATCH_CAPACITY)
+    {
+        // More commands than one tick should ever need: the tick has stalled
+        // or this is a burst. Apply the backlog here; the lock keeps the tick
+        // out, so it still lands whole and in order.
+        ++latch_overflows_;
+        applyPendingCommands();
+    }
+    latch_[latch_count_++] = Command{op, a, b, c, d};
+}
+
+void Motion::applyPendingCommands()
+{
+    for (uint8_t i = 0; i < latch_count_; i++)
+        applyCommand(latch_[i]);
+    latch_count_ = 0;
+}
+
+bool Motion::drivetrainResetQueued() const
+{
+    for (uint8_t i = 0; i < latch_count_; i++)
+    {
+        const Command::Op op = latch_[i].op;
+        if (op == Command::Op::ResetDriveSystem || op == Command::Op::EmergencyStop ||
+            op == Command::Op::ResetDriveControl || op == Command::Op::BeginSequence)
+            return true;
+    }
+    return false;
+}
+
+Motion::View Motion::view() const
+{
+    hal::irq::Lock  lock;
+    View            v{forward_,
+                      rotation_,
+                      steering_mode_,
+                      heading_hold_enabled_,
+                      heading_hold_target_yaw_deg_,
+                      line_steering_adjustment_degps_,
+                      line_steering_valid_,
+                      motion_sequence_active_};
+    const Commanded state{v.fwd,
+                          v.rot,
+                          v.steering_mode,
+                          v.heading_hold_enabled,
+                          v.heading_hold_target_yaw_deg,
+                          v.line_steering_adjustment_degps,
+                          v.line_steering_valid,
+                          v.motion_sequence_active};
+    for (uint8_t i = 0; i < latch_count_; i++)
+        applyCommanded(latch_[i], state);
+    return v;
+}
+
+void Motion::applyCommanded(const Command& command, const Commanded& state)
+{
+    using Op = Command::Op;
+    switch (command.op)
+    {
+        case Op::ResetDriveSystem:
+        case Op::EmergencyStop:
+        case Op::BeginSequence:
+        case Op::EndSequence:
+            state.motion_sequence_active      = command.op == Op::BeginSequence;
+            state.heading_hold_enabled        = false;
+            state.heading_hold_target_yaw_deg = 0.0f;
+            if (command.op != Op::EndSequence)
+                state.steering_mode = tof_wall::SteeringMode::STEERING_OFF;
+            [[fallthrough]];
+        case Op::ResetDriveControl:
+            state.fwd.reset();
+            state.rot.reset();
+            state.line_steering_adjustment_degps = 0.0f;
+            state.line_steering_valid            = false;
+            break;
+        case Op::StartMove:
+            state.fwd.start(command.a, state.fwd.velocity(), command.b, command.c, command.d);
+            break;
+        case Op::StartTurn:
+        case Op::SmoothArc:
+            state.rot.start(command.a, state.rot.velocity(), command.b, command.c, command.d);
+            break;
+        case Op::SpinTurn:
+            state.rot.reset();
+            state.rot.start(command.a, command.b, 0.0f, command.c);
+            break;
+        case Op::ResetRotation:
+            state.rot.reset();
+            break;
+        case Op::StopAt:
+            state.fwd.start(command.a - state.fwd.position(), state.fwd.velocity(),
+                            std::fabs(state.fwd.velocity()), 0.0f, state.fwd.acceleration());
+            break;
+        case Op::StopAfter:
+            state.fwd.start(command.a, state.fwd.velocity(), std::fabs(state.fwd.velocity()), 0.0f,
+                            state.fwd.acceleration());
+            break;
+        case Op::StopForward:
+            state.fwd.stop(command.a);
+            break;
+        case Op::SetPosition:
+            state.fwd.setPosition(command.a);
+            break;
+        case Op::AdjustPosition:
+            state.fwd.adjustPosition(command.a);
+            break;
+        case Op::SetTargetVelocity:
+            state.fwd.setTargetSpeed(command.a);
+            break;
+        case Op::SetFinalVelocity:
+            state.fwd.setFinalSpeed(command.a);
+            break;
+        case Op::ExtendMove:
+            state.fwd.extendTarget(command.a);
+            break;
+        case Op::ForwardAbort:
+            state.fwd.reset();
+            break;
+        case Op::SetHeadingHold:
+            state.heading_hold_enabled        = true;
+            state.heading_hold_target_yaw_deg = command.a;
+            break;
+        case Op::ClearHeadingHold:
+        case Op::DisableDrive:
+            state.heading_hold_enabled        = false;
+            state.heading_hold_target_yaw_deg = 0.0f;
+            break;
+        case Op::SetSteeringMode:
+            state.steering_mode = static_cast<tof_wall::SteeringMode>(static_cast<int>(command.a));
+            break;
+        case Op::SetLineSteering:
+            state.line_steering_valid            = command.b != 0.0f;
+            state.line_steering_adjustment_degps = state.line_steering_valid ? command.a : 0.0f;
+            break;
+        case Op::ClearLineSteering:
+            state.line_steering_adjustment_degps = 0.0f;
+            state.line_steering_valid            = false;
+            break;
+        case Op::ForwardSettled:
+        case Op::Stop:
+        case Op::StartTrace:
+        case Op::StopTrace:
+        case Op::ResetWallSteeringStats:
+            break;
+    }
+}
+
+void Motion::applyCommand(const Command& command)
+{
+    applyCommanded(command, Commanded{forward_, rotation_, steering_mode_, heading_hold_enabled_,
+                                      heading_hold_target_yaw_deg_, line_steering_adjustment_degps_,
+                                      line_steering_valid_, motion_sequence_active_});
+
+    // The rest of each command: the drivetrain, controllers and diagnostics
+    // that main-loop reads never need to see ahead of the tick.
+    using Op = Command::Op;
+    switch (command.op)
+    {
+        case Op::ResetDriveSystem:
+        case Op::EmergencyStop:
+        case Op::BeginSequence:
+            latest_heading_hold_error_deg_ = 0.0f;
+            [[fallthrough]];
+        case Op::ResetDriveControl:
+            drivetrain_->stop();
+            drivetrain_->reset();
+            resetControlHistory();
+            break;
+        case Op::EndSequence:
+            drivetrain_->stop();
+            resetControlHistory();
+            latest_heading_hold_error_deg_ = 0.0f;
+            break;
+        case Op::SmoothArc:
+            encoder_rotation_ticks_ = UINT16_MAX;
+            break;
+        case Op::ForwardAbort:
+            drivetrain_->stop();
+            [[fallthrough]];
+        case Op::ForwardSettled:
+            forward_controller_.reset();
+            prev_left_cmd_vel_mmps_  = 0.0f;
+            prev_right_cmd_vel_mmps_ = 0.0f;
+            break;
+        case Op::SetHeadingHold:
+            latest_heading_hold_error_deg_ =
+                utils::wrapAngle180(heading_hold_target_yaw_deg_ - yaw_deg());
+            break;
+        case Op::DisableDrive:
+            drivetrain_->stop();
+            [[fallthrough]];
+        case Op::ClearHeadingHold:
+            latest_heading_hold_error_deg_        = 0.0f;
+            latest_heading_hold_adjustment_degps_ = 0.0f;
+            break;
+        case Op::SetSteeringMode:
+            side_error_prev_norm_             = 0.0f;
+            side_error_prev_valid_            = false;
+            latest_steering_adjustment_degps_ = 0.0f;
+            break;
+        case Op::Stop:
+            drivetrain_->stop();
+            break;
+        case Op::StartTrace:
+            trace_left_ticks_  = 0;
+            trace_right_ticks_ = 0;
+            if (run_log_ != nullptr)
+                run_log_->start(static_cast<uint16_t>(command.a));
+            break;
+        case Op::StopTrace:
+            if (run_log_ != nullptr)
+                run_log_->stop();
+            break;
+        case Op::ResetWallSteeringStats:
+            clearWallSteeringStats();
+            break;
+        // Fully applied by applyCommanded(); listed so a new Op trips -Wswitch.
+        case Op::StartMove:
+        case Op::StartTurn:
+        case Op::SpinTurn:
+        case Op::ResetRotation:
+        case Op::StopAt:
+        case Op::StopAfter:
+        case Op::StopForward:
+        case Op::SetPosition:
+        case Op::AdjustPosition:
+        case Op::SetTargetVelocity:
+        case Op::SetFinalVelocity:
+        case Op::ExtendMove:
+        case Op::SetLineSteering:
+        case Op::ClearLineSteering:
+            break;
+    }
 }

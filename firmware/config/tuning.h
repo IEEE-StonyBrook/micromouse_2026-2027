@@ -17,6 +17,10 @@
 #ifndef CONFIG_TUNING_H
 #define CONFIG_TUNING_H
 
+#if defined(STM32_BUILD)
+// The STM32 mouse's motor model and feedforward (UNVERIFIED placeholders).
+#include "config/mouse_stm32.h"
+#else
 // ===================== Motor Model ===================== //
 // Forward (linear) motor model — from OL + STEP trials.
 #define MOTOR_KM 317.06f // mm/s per volt  (steady-state gain)
@@ -35,6 +39,7 @@
 #define FORWARD_KSR 0.5701f           // Right static friction (V)
 #define FORWARD_KAL 0.0002194f        // Left  V/(mm/s^2)   = Tm/kM
 #define FORWARD_KAR 0.0002194f        // Right V/(mm/s^2)
+#endif
 
 // ================ Forward PD Controller ================ //
 // Mazerunner-core / motorlab formulation:
@@ -123,7 +128,9 @@
 
 // Error filter + predictive lookahead (substitutes for physical sensor
 // mounting offset ahead of the wheel axle).
-#define LINE_ERROR_FILTER_ALPHA 0.45f
+// The filter gain is per tick, so it is tuned at one rate and converted for
+// others (lineErrorFilterAlpha() in control/line_follower.h).
+#define LINE_ERROR_FILTER_ALPHA_500HZ 0.45f
 #define LINE_LOOKAHEAD_TIME_S   0.035f
 
 // Speed scheduling on |error|: target_v = TARGET - BRAKE * |e_filt|,

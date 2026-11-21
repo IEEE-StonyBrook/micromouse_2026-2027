@@ -3,17 +3,15 @@
 #include "common/bluetooth_stdio.h"
 #include "common/utils.h"
 #include "config/config.h"
+#include "driver_lab/board_io.h"
 #include "drivers/battery.h"
 #include "drivers/encoder.h"
 #include "drivers/imu.h"
 #include "drivers/line_sensor.h"
 #include "drivers/motor.h"
 #include "drivers/tof.h"
-
-#include "hardware/gpio.h"
-#include "hardware/i2c.h"
-#include "hardware/uart.h"
-#include "pico/stdlib.h"
+#include "hal/console.h"
+#include "hal/time.h"
 
 #include <algorithm>
 #include <cctype>
@@ -59,7 +57,7 @@ static const char* DRIVERLAB_VERSION = "DRIVERLAB v3.0 (Jurababa, standalone)";
 
 namespace
 {
-// Convert a duration in milliseconds to a number of 500 Hz loop ticks.
+// Convert a duration in milliseconds to a number of loop ticks.
 // Equivalent to ms * LOOP_FREQUENCY_HZ / 1000, but written in the rounding-
 // safe form `(ms * Hz + 999) / 1000` so a 1 ms request never floors to 0.
 inline uint32_t msToLoops(uint32_t ms)
@@ -71,15 +69,6 @@ inline uint32_t msToLoops(uint32_t ms)
 inline float loopsToSeconds(int loops)
 {
     return loops * LOOP_INTERVAL_S;
-}
-
-inline float normalizeYawDelta(float delta)
-{
-    while (delta > 180.0f)
-        delta -= 360.0f;
-    while (delta < -180.0f)
-        delta += 360.0f;
-    return delta;
 }
 
 const char* linePathsText(uint8_t paths_mask, char* buffer, size_t buffer_size)
@@ -121,13 +110,8 @@ const char* yesNo(bool value)
 bool keyPressed()
 {
     bool pressed = false;
-    while (getchar_timeout_us(0) != PICO_ERROR_TIMEOUT)
+    while (hal::console::getcNonBlocking() >= 0)
         pressed = true;
-    while (uart_is_readable(uart0))
-    {
-        uart_getc(uart0);
-        pressed = true;
-    }
     return pressed;
 }
 
@@ -176,11 +160,12 @@ void DriverLab::init()
     forward_pid_.setOutputLimit(MAX_VOLTAGE);
     rotation_pid_.setOutputLimit(MAX_VOLTAGE);
 
-    printf("\n%s\n", DRIVERLAB_VERSION);
-    printf("Loop frequency: %.0f Hz (forward PD), %.0f Hz (rotation PD, IMU-fed)\n",
-           LOOP_FREQUENCY_HZ, LOOP_FREQUENCY_HZ);
-    printf("Using mm/s units (MM_PER_TICK = %.4f)\n", MM_PER_TICK);
-    printf("Type '?' for help\n\n");
+    hal::console::printFormat("\n%s\n", DRIVERLAB_VERSION);
+    hal::console::printFormat(
+        "Loop frequency: %.0f Hz (forward PD), %.0f Hz (rotation PD, IMU-fed)\n", LOOP_FREQUENCY_HZ,
+        LOOP_FREQUENCY_HZ);
+    hal::console::printFormat("Using mm/s units (MM_PER_TICK = %.4f)\n", MM_PER_TICK);
+    hal::console::printFormat("Type '?' for help\n\n");
     printPrompt();
 }
 
@@ -207,8 +192,8 @@ void DriverLab::sampleEncoders()
     dl_right_history_total_ -= dl_right_history_[dl_averager_index_];
     dl_left_history_total_ += d_left;
     dl_right_history_total_ += d_right;
-    dl_left_history_[dl_averager_index_]  = static_cast<int8_t>(d_left);
-    dl_right_history_[dl_averager_index_] = static_cast<int8_t>(d_right);
+    dl_left_history_[dl_averager_index_]  = static_cast<EncoderHistoryDelta>(d_left);
+    dl_right_history_[dl_averager_index_] = static_cast<EncoderHistoryDelta>(d_right);
     dl_averager_index_                    = (dl_averager_index_ + 1) % ENCODER_AVERAGER_LENGTH;
 
     constexpr float inv_avg = 1.0f / static_cast<float>(ENCODER_AVERAGER_LENGTH);
@@ -272,7 +257,7 @@ float DriverLab::feedforwardVolts(float speed_mmps, float accel_mmps2, bool left
 }
 
 // ============================================================================
-// tick() — called every 500 Hz from main.cpp
+// tick() — called every 500 Hz from main_pico.cpp
 // ============================================================================
 
 void DriverLab::tick()
@@ -347,13 +332,13 @@ float DriverLab::batteryVoltage() const
 // when-i-begin-driverlab-cryptic-duckling plan.
 void DriverLab::beginCountdown(const char* trial_name, TrialState next)
 {
-    printf("\n=== %s ===\n", trial_name);
-    printf("Battery: %.2f V\n", batteryVoltage());
+    hal::console::printFormat("\n=== %s ===\n", trial_name);
+    hal::console::printFormat("Battery: %.2f V\n", batteryVoltage());
     BluetoothStdio::resetDiagnostics();
     countdown_.seconds_remaining = 3;
     countdown_.tick_in_second    = 0;
     countdown_.next_state        = next;
-    printf("Starting in %d...\n", countdown_.seconds_remaining);
+    hal::console::printFormat("Starting in %d...\n", countdown_.seconds_remaining);
     trial_ = TrialState::Countdown;
 }
 
@@ -368,11 +353,11 @@ void DriverLab::tickCountdown()
 
     if (countdown_.seconds_remaining > 0)
     {
-        printf("Starting in %d...\n", countdown_.seconds_remaining);
+        hal::console::printFormat("Starting in %d...\n", countdown_.seconds_remaining);
         return;
     }
 
-    printf("GO!\n\n");
+    hal::console::printFormat("GO!\n\n");
 
     switch (countdown_.next_state)
     {
@@ -408,8 +393,8 @@ void DriverLab::tickCountdown()
 
 void DriverLab::startOpenLoopTrial(float max_v, float step_v, uint32_t settle_ms)
 {
-    printf("Max voltage: %.2f V, Step: %.2f V, Settle: %lu ms\n", max_v, step_v,
-           static_cast<unsigned long>(settle_ms));
+    hal::console::printFormat("Max voltage: %.2f V, Step: %.2f V, Settle: %lu ms\n", max_v, step_v,
+                              static_cast<unsigned long>(settle_ms));
 
     ol_.max_voltage     = max_v;
     ol_.step_voltage    = step_v;
@@ -465,8 +450,8 @@ void DriverLab::armOpenLoop()
 
 void DriverLab::tickOpenLoop()
 {
-    constexpr int   SKIP_SAMPLES        = 10; // 20 ms transient skip at 500 Hz
-    constexpr int   OUTPUT_EVERY        = 5;  // CSV row every 5th retained sample
+    constexpr int   SKIP_SAMPLES        = LOOP_TICKS(0.020f); // 20 ms transient skip
+    constexpr int   OUTPUT_EVERY        = LOOP_TICKS(0.010f); // CSV row every 10 ms
     constexpr float MIN_SPEED_THRESHOLD = 10.0f;
 
     // Trailing-window velocity from the oldest sample in the ring buffer.
@@ -525,7 +510,7 @@ void DriverLab::tickOpenLoop()
         const int kept = ol_.step_loop_count - SKIP_SAMPLES;
         if (kept % OUTPUT_EVERY == 0)
         {
-            const uint32_t now_ms = to_ms_since_boot(get_absolute_time());
+            const uint32_t now_ms = hal::time::nowMs();
             reporter_.reportOpenLoopStereo(now_ms, ol_.current_voltage, left_v, right_v, left_speed,
                                            right_speed, imu_->robot_angle());
         }
@@ -536,8 +521,8 @@ void DriverLab::tickOpenLoop()
         return;
 
     // ------------------------ end of step ------------------------
-    // Average last 10 retained samples = steady-state.
-    const size_t avg_count = std::min(ol_.step_left_speeds.size(), size_t(10));
+    // Average the last 20 ms of retained samples = steady-state.
+    const size_t avg_count = std::min(ol_.step_left_speeds.size(), size_t(LOOP_TICKS(0.020f)));
     float        left_ss = 0.0f, right_ss = 0.0f;
     if (avg_count > 0)
     {
@@ -707,13 +692,16 @@ void DriverLab::finishOpenLoop()
 
     settings_.recalculateDerived();
 
-    printf("\n=== OL Results ===\n");
-    printf("Combined: kM=%.2f mm/s/V, kS=%.4f V (%d points)\n", kM_calc, kS_calc, n_combined);
-    printf("Left:     kM=%.2f mm/s/V, kS=%.4f V (%d points)\n", kM_L, kS_L, n_left);
-    printf("Right:    kM=%.2f mm/s/V, kS=%.4f V (%d points)\n", kM_R, kS_R, n_right);
-    printf("  -> kV = %.7f V/(mm/s)\n", settings_.kV);
-    printf("  -> kA = %.7f V/(mm/s^2)\n", settings_.kA);
-    printf("Yaw drift: %.2f deg\n\n", imu_->robot_angle());
+    hal::console::printFormat("\n=== OL Results ===\n");
+    hal::console::printFormat("Combined: kM=%.2f mm/s/V, kS=%.4f V (%d points)\n", kM_calc, kS_calc,
+                              n_combined);
+    hal::console::printFormat("Left:     kM=%.2f mm/s/V, kS=%.4f V (%d points)\n", kM_L, kS_L,
+                              n_left);
+    hal::console::printFormat("Right:    kM=%.2f mm/s/V, kS=%.4f V (%d points)\n", kM_R, kS_R,
+                              n_right);
+    hal::console::printFormat("  -> kV = %.7f V/(mm/s)\n", settings_.kV);
+    hal::console::printFormat("  -> kA = %.7f V/(mm/s^2)\n", settings_.kA);
+    hal::console::printFormat("Yaw drift: %.2f deg\n\n", imu_->robot_angle());
     printBluetoothDiagnostics();
     printPrompt();
 
@@ -726,8 +714,8 @@ void DriverLab::finishOpenLoop()
 
 void DriverLab::startStepTrial(float volts, uint32_t duration_ms)
 {
-    printf("Step voltage: %.2f V, Duration: %lu ms\n", volts,
-           static_cast<unsigned long>(duration_ms));
+    hal::console::printFormat("Step voltage: %.2f V, Duration: %lu ms\n", volts,
+                              static_cast<unsigned long>(duration_ms));
 
     step_.voltage        = volts;
     step_.duration_loops = static_cast<int>(msToLoops(duration_ms));
@@ -772,7 +760,7 @@ void DriverLab::tickStep()
         return;
     }
 
-    constexpr int SKIP_SAMPLES = 5; // 10 ms warm-up so the first VEL_WIN samples are valid
+    constexpr int SKIP_SAMPLES = StepTrial::VEL_WIN; // 10 ms warm-up: VEL_WIN samples valid
 
     // Trailing-window velocity from the oldest sample in the ring buffer.
     float win_left = 0.0f, win_right = 0.0f;
@@ -804,7 +792,7 @@ void DriverLab::tickStep()
     }
 
     // CSV emission stays gated by the reporter — independent 10 ms cadence.
-    const uint32_t now_ms = to_ms_since_boot(get_absolute_time());
+    const uint32_t now_ms = hal::time::nowMs();
     if (reporter_.isTimeToReport(now_ms))
         reporter_.reportStep(now_ms, step_.voltage, speed, pos);
 
@@ -818,7 +806,7 @@ void DriverLab::finishStep()
     const int n = static_cast<int>(step_.speeds.size());
     if (n < 10)
     {
-        printf("\nNot enough samples to calculate Tm\n");
+        hal::console::printFormat("\nNot enough samples to calculate Tm\n");
         printBluetoothDiagnostics();
         printPrompt();
         trial_ = TrialState::Idle;
@@ -859,30 +847,31 @@ void DriverLab::finishStep()
         }
     }
 
-    printf("\n=== Step Response Results ===\n");
-    printf("Steady-state speed: %.1f mm/s\n", v_final);
-    printf("63.2%% threshold:    %.1f mm/s\n", threshold);
+    hal::console::printFormat("\n=== Step Response Results ===\n");
+    hal::console::printFormat("Steady-state speed: %.1f mm/s\n", v_final);
+    hal::console::printFormat("63.2%% threshold:    %.1f mm/s\n", threshold);
 
     if (found && tm_calculated > 0.001f && tm_calculated < 2.0f)
     {
         settings_.tm = tm_calculated;
         settings_.td = tm_calculated; // Jurababa: Td = Tm uniformly (see tuning.h:52-59)
         settings_.recalculateDerived();
-        printf("Tm = %.5f s  (motor time constant)\n", settings_.tm);
-        printf("  -> kA = %.7f V/(mm/s^2)\n", settings_.kA);
-        printf("  -> Td = %.5f s  (= Tm)\n", settings_.td);
-        printf("  -> kP = %.5f, kD = %.5f  (recomputed)\n", settings_.kP, settings_.kD);
+        hal::console::printFormat("Tm = %.5f s  (motor time constant)\n", settings_.tm);
+        hal::console::printFormat("  -> kA = %.7f V/(mm/s^2)\n", settings_.kA);
+        hal::console::printFormat("  -> Td = %.5f s  (= Tm)\n", settings_.td);
+        hal::console::printFormat("  -> kP = %.5f, kD = %.5f  (recomputed)\n", settings_.kP,
+                                  settings_.kD);
     }
     else
     {
-        printf("Tm: could not determine (speed may not have settled)\n");
+        hal::console::printFormat("Tm: could not determine (speed may not have settled)\n");
         if (!found)
-            printf("  Speed never reached 63.2%% of final value\n");
+            hal::console::printFormat("  Speed never reached 63.2%% of final value\n");
         else
-            printf("  Tm = %.5f s (out of valid range)\n", tm_calculated);
+            hal::console::printFormat("  Tm = %.5f s (out of valid range)\n", tm_calculated);
     }
 
-    printf("Samples: %d\n\n", n);
+    hal::console::printFormat("Samples: %d\n\n", n);
     printBluetoothDiagnostics();
     printPrompt();
     trial_ = TrialState::Idle;
@@ -894,12 +883,13 @@ void DriverLab::finishStep()
 
 void DriverLab::startMoveTrial(float distance, float speed, float accel, int mode)
 {
-    printf("Distance: %.1f mm, Speed: %.1f mm/s, Accel: %.1f mm/s^2\n", distance, speed, accel);
+    hal::console::printFormat("Distance: %.1f mm, Speed: %.1f mm/s, Accel: %.1f mm/s^2\n", distance,
+                              speed, accel);
     const char* mode_label = mode == 0   ? "FULL_CONTROL (FF+PD)"
                              : mode == 1 ? "NO_FF (PD only)"
                              : mode == 2 ? "ONLY_FF"
                                          : "(unknown)";
-    printf("Mode: %d (%s)\n", mode, mode_label);
+    hal::console::printFormat("Mode: %d (%s)\n", mode, mode_label);
 
     move_.distance_mm     = distance;
     move_.top_speed       = speed;
@@ -940,8 +930,9 @@ void DriverLab::armMove()
     // shared ctrl_v (PID is computed once and added equally to both sides).
     // set_pos / actual_pos are logged for offline tracking-error inspection
     // but not plotted by default — same as MotorLab.
-    printf("time_ms,set_pos,actual_pos,set_speed,actual_speed,ff_v_left,ff_v_right,ctrl_v,"
-           "total_v_left,total_v_right,left_speed,right_speed\n");
+    hal::console::printFormat(
+        "time_ms,set_pos,actual_pos,set_speed,actual_speed,ff_v_left,ff_v_right,ctrl_v,"
+        "total_v_left,total_v_right,left_speed,right_speed\n");
 
     trial_ = TrialState::Move;
 }
@@ -985,16 +976,16 @@ void DriverLab::tickMove()
     if (abs_volts > move_.max_volts)
         move_.max_volts = abs_volts;
 
-    const uint32_t now_ms = to_ms_since_boot(get_absolute_time());
+    const uint32_t now_ms = hal::time::nowMs();
     if (reporter_.isTimeToReport(now_ms))
     {
         const uint32_t elapsed    = now_ms - reporter_.startTime();
         const float    set_pos    = forward_profile_.position();
         const float    actual_pos = (left_position_mm_ + right_position_mm_) * 0.5f;
-        printf("%lu,%.2f,%.2f,%.2f,%.2f,%.3f,%.3f,%.3f,%.3f,%.3f,%.2f,%.2f\n",
-               static_cast<unsigned long>(elapsed), set_pos, actual_pos, set_speed, actual_speed,
-               ff_left, ff_right, pid_output, left_v, right_v, left_velocity_mmps_,
-               right_velocity_mmps_);
+        hal::console::printFormat("%lu,%.2f,%.2f,%.2f,%.2f,%.3f,%.3f,%.3f,%.3f,%.3f,%.2f,%.2f\n",
+                                  static_cast<unsigned long>(elapsed), set_pos, actual_pos,
+                                  set_speed, actual_speed, ff_left, ff_right, pid_output, left_v,
+                                  right_v, left_velocity_mmps_, right_velocity_mmps_);
         reporter_.incrementSampleCount();
     }
 
@@ -1014,34 +1005,39 @@ void DriverLab::finishMove()
     const float avg_speed_error =
         (move_.diag_count > 0) ? (move_.sum_speed_error / move_.diag_count) : 0.0f;
 
-    printf("\n=== Move Trial Complete ===\n");
-    printf("Samples: %lu\n", static_cast<unsigned long>(reporter_.sampleCount()));
-    printf("\n--- Diagnostics ---\n");
-    printf("  Final position error: %+.2f mm\n", final_pos_error);
-    printf("  Max position error:   %.2f mm\n", move_.max_pos_error);
-    printf("  Max speed error:      %.1f mm/s\n", move_.max_speed_error);
-    printf("  Avg speed error:      %.1f mm/s\n", avg_speed_error);
-    printf("  Max motor volts:      %.2f V\n", move_.max_volts);
-    printf("\n--- Tuning Tips ---\n");
+    hal::console::printFormat("\n=== Move Trial Complete ===\n");
+    hal::console::printFormat("Samples: %lu\n",
+                              static_cast<unsigned long>(reporter_.sampleCount()));
+    hal::console::printFormat("\n--- Diagnostics ---\n");
+    hal::console::printFormat("  Final position error: %+.2f mm\n", final_pos_error);
+    hal::console::printFormat("  Max position error:   %.2f mm\n", move_.max_pos_error);
+    hal::console::printFormat("  Max speed error:      %.1f mm/s\n", move_.max_speed_error);
+    hal::console::printFormat("  Avg speed error:      %.1f mm/s\n", avg_speed_error);
+    hal::console::printFormat("  Max motor volts:      %.2f V\n", move_.max_volts);
+    hal::console::printFormat("\n--- Tuning Tips ---\n");
     if (move_.mode == 0 || move_.mode == 2)
     {
         if (avg_speed_error > 20.0f)
-            printf("  ! Steady-state error high: kV may be wrong (run OL to recalibrate)\n");
+            hal::console::printFormat(
+                "  ! Steady-state error high: kV may be wrong (run OL to recalibrate)\n");
         if (move_.max_speed_error > move_.top_speed * 0.3f)
-            printf("  ! Large transient error: increase kA or reduce acceleration\n");
+            hal::console::printFormat(
+                "  ! Large transient error: increase kA or reduce acceleration\n");
     }
     if (move_.mode == 1 || move_.mode == 2)
     {
         if (move_.max_volts > MAX_VOLTAGE * 0.8f)
-            printf("  ! Near voltage saturation: reduce kP or lower speed/accel\n");
+            hal::console::printFormat(
+                "  ! Near voltage saturation: reduce kP or lower speed/accel\n");
         if (move_.max_pos_error > 10.0f)
-            printf("  ! Position drift > 10mm: increase kP\n");
+            hal::console::printFormat("  ! Position drift > 10mm: increase kP\n");
     }
     if (std::fabs(final_pos_error) > 5.0f)
-        printf("  ! Stopping error > 5mm: check deceleration phase\n");
+        hal::console::printFormat("  ! Stopping error > 5mm: check deceleration phase\n");
     if (move_.max_speed_error < move_.top_speed * 0.1f && std::fabs(final_pos_error) < 3.0f)
-        printf("  Looks good! Speed tracking within 10%%, position error < 3mm.\n");
-    printf("\n");
+        hal::console::printFormat(
+            "  Looks good! Speed tracking within 10%%, position error < 3mm.\n");
+    hal::console::printFormat("\n");
     printBluetoothDiagnostics();
     printPrompt();
     trial_ = TrialState::Idle;
@@ -1053,8 +1049,9 @@ void DriverLab::finishMove()
 
 void DriverLab::startTurnTrial(float degrees, float omega, float alpha)
 {
-    printf("Angle: %.1f deg, Speed: %.1f deg/s, Accel: %.1f deg/s^2\n", degrees, omega, alpha);
-    printf("TURN_KP: %.4f, TURN_KD: %.4f\n", settings_.turnKP, settings_.turnKD);
+    hal::console::printFormat("Angle: %.1f deg, Speed: %.1f deg/s, Accel: %.1f deg/s^2\n", degrees,
+                              omega, alpha);
+    hal::console::printFormat("TURN_KP: %.4f, TURN_KD: %.4f\n", settings_.turnKP, settings_.turnKD);
 
     turn_.degrees              = degrees;
     turn_.top_omega            = omega;
@@ -1084,8 +1081,9 @@ void DriverLab::armTurn()
     turn_.old_right_speed_mmps = 0.0f;
 
     reporter_.begin();
-    printf("time_ms,set_omega,set_alpha,actual_yaw,actual_omega,error,rot_pd_v,left_ff_v,"
-           "right_ff_v,left_v,right_v\n");
+    hal::console::printFormat(
+        "time_ms,set_omega,set_alpha,actual_yaw,actual_omega,error,rot_pd_v,left_ff_v,"
+        "right_ff_v,left_v,right_v\n");
 
     trial_ = TrialState::Turn;
 }
@@ -1147,14 +1145,14 @@ void DriverLab::tickTurn()
             turn_.peak_overshoot_deg = overshoot;
     }
 
-    const uint32_t now_ms = to_ms_since_boot(get_absolute_time());
+    const uint32_t now_ms = hal::time::nowMs();
     if (reporter_.isTimeToReport(now_ms))
     {
         const uint32_t elapsed = now_ms - reporter_.startTime();
-        printf("%lu,%.2f,%.2f,%.2f,%.2f,%.2f,%.3f,%.3f,%.3f,%.3f,%.3f\n",
-               static_cast<unsigned long>(elapsed), signed_set_omega, signed_set_alpha, actual_yaw,
-               actual_omega, rot_error, rot_output, left_ff_volts, right_ff_volts, left_volts,
-               right_volts);
+        hal::console::printFormat("%lu,%.2f,%.2f,%.2f,%.2f,%.2f,%.3f,%.3f,%.3f,%.3f,%.3f\n",
+                                  static_cast<unsigned long>(elapsed), signed_set_omega,
+                                  signed_set_alpha, actual_yaw, actual_omega, rot_error, rot_output,
+                                  left_ff_volts, right_ff_volts, left_volts, right_volts);
         reporter_.incrementSampleCount();
     }
 
@@ -1171,27 +1169,28 @@ void DriverLab::finishTurn()
 
     const float final_error = turn_.degrees - imu_->robot_angle();
 
-    printf("\n=== Turn Trial Complete ===\n");
-    printf("Samples: %lu\n", static_cast<unsigned long>(reporter_.sampleCount()));
-    printf("\n--- Diagnostics ---\n");
-    printf("  Final error:     %+.2f deg\n", final_error);
-    printf("  Peak overshoot:  %.2f deg (%.1f%%)\n", turn_.peak_overshoot_deg,
-           (std::fabs(turn_.degrees) > 0.1f)
-               ? (turn_.peak_overshoot_deg / std::fabs(turn_.degrees) * 100.0f)
-               : 0.0f);
-    printf("  Max yaw error:   %.2f deg\n", turn_.max_yaw_error);
-    printf("  Max motor volts: %.2f V\n", turn_.max_volts);
-    printf("\n--- Tuning Tips ---\n");
+    hal::console::printFormat("\n=== Turn Trial Complete ===\n");
+    hal::console::printFormat("Samples: %lu\n",
+                              static_cast<unsigned long>(reporter_.sampleCount()));
+    hal::console::printFormat("\n--- Diagnostics ---\n");
+    hal::console::printFormat("  Final error:     %+.2f deg\n", final_error);
+    hal::console::printFormat("  Peak overshoot:  %.2f deg (%.1f%%)\n", turn_.peak_overshoot_deg,
+                              (std::fabs(turn_.degrees) > 0.1f)
+                                  ? (turn_.peak_overshoot_deg / std::fabs(turn_.degrees) * 100.0f)
+                                  : 0.0f);
+    hal::console::printFormat("  Max yaw error:   %.2f deg\n", turn_.max_yaw_error);
+    hal::console::printFormat("  Max motor volts: %.2f V\n", turn_.max_volts);
+    hal::console::printFormat("\n--- Tuning Tips ---\n");
     if (turn_.peak_overshoot_deg > std::fabs(turn_.degrees) * 0.10f)
-        printf("  ! Overshoot > 10%%: increase turnKD or decrease turnKP\n");
+        hal::console::printFormat("  ! Overshoot > 10%%: increase turnKD or decrease turnKP\n");
     if (std::fabs(final_error) > 3.0f)
-        printf("  ! Final error > 3 deg: increase turnKP\n");
+        hal::console::printFormat("  ! Final error > 3 deg: increase turnKP\n");
     if (turn_.max_volts > MAX_VOLTAGE * 0.9f)
-        printf("  ! Near voltage saturation: reduce speed or lower turnKP\n");
+        hal::console::printFormat("  ! Near voltage saturation: reduce speed or lower turnKP\n");
     if (turn_.peak_overshoot_deg < 1.0f && std::fabs(final_error) < 2.0f &&
         turn_.max_volts < MAX_VOLTAGE * 0.7f)
-        printf("  Looks good! Gains are well-tuned for this speed.\n");
-    printf("\n");
+        hal::console::printFormat("  Looks good! Gains are well-tuned for this speed.\n");
+    hal::console::printFormat("\n");
     printBluetoothDiagnostics();
     printPrompt();
     trial_ = TrialState::Idle;
@@ -1203,8 +1202,8 @@ void DriverLab::finishTurn()
 
 void DriverLab::startTurnOpenLoopTrial(float max_v, float step_v, uint32_t settle_ms)
 {
-    printf("Max diff: %.2f V, Step: %.2f V, Settle: %lu ms\n", max_v, step_v,
-           static_cast<unsigned long>(settle_ms));
+    hal::console::printFormat("Max diff: %.2f V, Step: %.2f V, Settle: %lu ms\n", max_v, step_v,
+                              static_cast<unsigned long>(settle_ms));
 
     tol_.max_voltage     = max_v;
     tol_.step_voltage    = step_v;
@@ -1243,7 +1242,9 @@ void DriverLab::armTurnOpenLoop()
 
 void DriverLab::tickTurnOpenLoop()
 {
-    constexpr int   SKIP_SAMPLES        = 20; // 40 ms transient skip
+    constexpr int   SKIP_SAMPLES        = LOOP_TICKS(0.040f); // 40 ms transient skip
+    constexpr int   TAIL_SAMPLES        = LOOP_TICKS(0.040f); // steady-state tail, 40 ms
+    constexpr int   REPORT_EVERY        = LOOP_TICKS(0.020f); // report every 20 ms
     constexpr float MIN_OMEGA_THRESHOLD = 5.0f;
     // 200 ms inter-step pause so the body stops spinning before the next
     // diff voltage arms.
@@ -1287,9 +1288,9 @@ void DriverLab::tickTurnOpenLoop()
         tol_.step_omegas_enc.push_back(encoderOmegaDegps());
 
         const int kept = tol_.step_loop_count - SKIP_SAMPLES;
-        if (kept % 10 == 0)
+        if (kept % REPORT_EVERY == 0)
         {
-            const uint32_t now_ms = to_ms_since_boot(get_absolute_time());
+            const uint32_t now_ms = hal::time::nowMs();
             reporter_.reportTurnOpenLoop(now_ms, tol_.current_voltage, cur_yaw, omega);
         }
     }
@@ -1300,7 +1301,7 @@ void DriverLab::tickTurnOpenLoop()
 
     // ------------------------ end of step ------------------------
     // Average tail = steady-state omega.
-    const size_t avg_count = std::min(tol_.step_omegas.size(), size_t(20));
+    const size_t avg_count = std::min(tol_.step_omegas.size(), size_t(TAIL_SAMPLES));
     float        omega_ss  = 0.0f;
     if (avg_count > 0)
     {
@@ -1330,7 +1331,7 @@ void DriverLab::tickTurnOpenLoop()
         }
     }
 
-    const float omega_ss_enc = tailMean(tol_.step_omegas_enc, 20);
+    const float omega_ss_enc = tailMean(tol_.step_omegas_enc, TAIL_SAMPLES);
     tol_.omega_steady_enc.push_back(omega_ss_enc);
     if (std::fabs(omega_ss_enc) > MIN_OMEGA_THRESHOLD)
     {
@@ -1399,10 +1400,11 @@ void DriverLab::finishTurnOpenLoop()
     for (float t : tol_.rot_tm_samples_enc)
         rot_tm_enc += t / static_cast<float>(tol_.rot_tm_samples_enc.size());
 
-    printf("\n=== TURN-OL encoder yaw ===\n");
-    printf("ROT_KM (encoder) = %.2f deg/s/V (%d points)\n", rot_kM_enc, n_pts_enc);
+    hal::console::printFormat("\n=== TURN-OL encoder yaw ===\n");
+    hal::console::printFormat("ROT_KM (encoder) = %.2f deg/s/V (%d points)\n", rot_kM_enc,
+                              n_pts_enc);
     if (rot_tm_enc > 0.0f)
-        printf("ROT_TM (encoder, coarse) = %.5f s\n", rot_tm_enc);
+        hal::console::printFormat("ROT_TM (encoder, coarse) = %.5f s\n", rot_tm_enc);
 
 #if ROT_FEEDBACK_ENCODER
     // The rotation PD reads encoder yaw, so its plant is the encoder one.
@@ -1423,19 +1425,21 @@ void DriverLab::finishTurnOpenLoop()
         settings_.recalculateRotation();
     }
 
-    printf("\n=== TURN-OL Results (%s, used for gains) ===\n",
-           ROT_FEEDBACK_ENCODER ? "encoder" : "IMU");
-    printf("ROT_KM = %.2f deg/s/V (%d points)\n", rot_kM, n_pts);
+    hal::console::printFormat("\n=== TURN-OL Results (%s, used for gains) ===\n",
+                              ROT_FEEDBACK_ENCODER ? "encoder" : "IMU");
+    hal::console::printFormat("ROT_KM = %.2f deg/s/V (%d points)\n", rot_kM, n_pts);
     if (rot_tm_calc > 0.0f)
-        printf("ROT_TM (coarse) = %.5f s  (run TURN-STEP for a cleaner value)\n", rot_tm_calc);
+        hal::console::printFormat("ROT_TM (coarse) = %.5f s  (run TURN-STEP for a cleaner value)\n",
+                                  rot_tm_calc);
     if (ol_ok)
     {
-        printf("  -> turnKP = %.5f, turnKD = %.5f  (recomputed)\n", settings_.turnKP,
-               settings_.turnKD);
+        hal::console::printFormat("  -> turnKP = %.5f, turnKD = %.5f  (recomputed)\n",
+                                  settings_.turnKP, settings_.turnKD);
     }
     else
     {
-        printf("  ! Regression failed -- keeping previous rot_kM/turnKP/turnKD\n");
+        hal::console::printFormat(
+            "  ! Regression failed -- keeping previous rot_kM/turnKP/turnKD\n");
     }
     printBluetoothDiagnostics();
     printPrompt();
@@ -1448,8 +1452,8 @@ void DriverLab::finishTurnOpenLoop()
 
 void DriverLab::startTurnStepTrial(float diff_v, uint32_t duration_ms)
 {
-    printf("Diff voltage: %.2f V, Duration: %lu ms\n", diff_v,
-           static_cast<unsigned long>(duration_ms));
+    hal::console::printFormat("Diff voltage: %.2f V, Duration: %lu ms\n", diff_v,
+                              static_cast<unsigned long>(duration_ms));
 
     tstep_.diff_voltage   = diff_v;
     tstep_.duration_loops = static_cast<int>(msToLoops(duration_ms));
@@ -1510,7 +1514,7 @@ void DriverLab::tickTurnStep()
     tstep_.enc_omegas.push_back(encoderOmegaDegps());
 
     // CSV emission stays gated by the reporter — independent 10 ms cadence.
-    const uint32_t now_ms = to_ms_since_boot(get_absolute_time());
+    const uint32_t now_ms = hal::time::nowMs();
     if (reporter_.isTimeToReport(now_ms))
         reporter_.reportTurnStep(now_ms, tstep_.diff_voltage, cur_yaw, omega);
 
@@ -1524,7 +1528,7 @@ void DriverLab::finishTurnStep()
     const int n = static_cast<int>(tstep_.omegas.size());
     if (n < 10)
     {
-        printf("\nNot enough samples to compute ROT_TM\n");
+        hal::console::printFormat("\nNot enough samples to compute ROT_TM\n");
         printBluetoothDiagnostics();
         printPrompt();
         trial_ = TrialState::Idle;
@@ -1543,7 +1547,8 @@ void DriverLab::finishTurnStep()
 
     if (std::fabs(omega_ss) < 5.0f)
     {
-        printf("\nSteady-state omega too small (%.2f deg/s) -- increase diff voltage.\n", omega_ss);
+        hal::console::printFormat(
+            "\nSteady-state omega too small (%.2f deg/s) -- increase diff voltage.\n", omega_ss);
         printBluetoothDiagnostics();
         printPrompt();
         trial_ = TrialState::Idle;
@@ -1573,39 +1578,39 @@ void DriverLab::finishTurnStep()
     // 8-tap encoder averager still adds ~8 ms, as it does for Motion's PD.
     const float omega_ss_enc = tailMean(tstep_.enc_omegas, tstep_.enc_omegas.size() / 5);
     const float rot_tm_enc   = riseTime632(tstep_.enc_times_s, tstep_.enc_omegas, omega_ss_enc);
-    printf("\n=== TURN-STEP encoder yaw ===\n");
-    printf("Steady-state omega (encoder): %.1f deg/s\n", omega_ss_enc);
+    hal::console::printFormat("\n=== TURN-STEP encoder yaw ===\n");
+    hal::console::printFormat("Steady-state omega (encoder): %.1f deg/s\n", omega_ss_enc);
     if (rot_tm_enc > 0.0f)
-        printf("ROT_TM (encoder) = %.5f s\n", rot_tm_enc);
+        hal::console::printFormat("ROT_TM (encoder) = %.5f s\n", rot_tm_enc);
     else
-        printf("ROT_TM (encoder): could not determine\n");
+        hal::console::printFormat("ROT_TM (encoder): could not determine\n");
 #if ROT_FEEDBACK_ENCODER
     // The rotation PD reads encoder yaw, so its plant is the encoder one.
     found       = rot_tm_enc > 0.0f;
     rot_tm_calc = rot_tm_enc;
 #endif
 
-    printf("\n=== TURN-STEP Results (%s, used for gains) ===\n",
-           ROT_FEEDBACK_ENCODER ? "encoder" : "IMU");
-    printf("Steady-state omega: %.1f deg/s\n", omega_ss);
-    printf("63.2%% threshold:   %.1f deg/s\n", threshold);
+    hal::console::printFormat("\n=== TURN-STEP Results (%s, used for gains) ===\n",
+                              ROT_FEEDBACK_ENCODER ? "encoder" : "IMU");
+    hal::console::printFormat("Steady-state omega: %.1f deg/s\n", omega_ss);
+    hal::console::printFormat("63.2%% threshold:   %.1f deg/s\n", threshold);
 
     if (found && rot_tm_calc > 0.001f && rot_tm_calc < 1.0f)
     {
         settings_.rot_tm = rot_tm_calc;
         settings_.rot_td = rot_tm_calc; // Jurababa: Td = Tm uniformly (see tuning.h:52-59)
         settings_.recalculateRotation();
-        printf("ROT_TM = %.5f s\n", settings_.rot_tm);
-        printf("  -> ROT_TD = %.5f s\n", settings_.rot_td);
-        printf("  -> turnKP = %.5f, turnKD = %.5f  (recomputed)\n", settings_.turnKP,
-               settings_.turnKD);
+        hal::console::printFormat("ROT_TM = %.5f s\n", settings_.rot_tm);
+        hal::console::printFormat("  -> ROT_TD = %.5f s\n", settings_.rot_td);
+        hal::console::printFormat("  -> turnKP = %.5f, turnKD = %.5f  (recomputed)\n",
+                                  settings_.turnKP, settings_.turnKD);
     }
     else
     {
-        printf("ROT_TM: could not determine (omega may not have settled)\n");
+        hal::console::printFormat("ROT_TM: could not determine (omega may not have settled)\n");
     }
 
-    printf("Samples: %d\n\n", n);
+    hal::console::printFormat("Samples: %d\n\n", n);
     printBluetoothDiagnostics();
     printPrompt();
     trial_ = TrialState::Idle;
@@ -1617,12 +1622,16 @@ void DriverLab::printBluetoothDiagnostics()
     if (bt.dropped_bytes == 0 && bt.suppressed_csv_lines == 0 && bt.max_depth < bt.ring_size / 2)
         return;
 
-    printf("--- Bluetooth TX ---\n");
-    printf("  CSV interval:      %lu ms\n", static_cast<unsigned long>(bt.csv_interval_ms));
-    printf("  Ring depth/max:    %lu/%lu bytes\n", static_cast<unsigned long>(bt.depth),
-           static_cast<unsigned long>(bt.max_depth));
-    printf("  Suppressed rows:   %lu\n", static_cast<unsigned long>(bt.suppressed_csv_lines));
-    printf("  Dropped bytes:     %lu\n\n", static_cast<unsigned long>(bt.dropped_bytes));
+    hal::console::printFormat("--- Bluetooth TX ---\n");
+    hal::console::printFormat("  CSV interval:      %lu ms\n",
+                              static_cast<unsigned long>(bt.csv_interval_ms));
+    hal::console::printFormat("  Ring depth/max:    %lu/%lu bytes\n",
+                              static_cast<unsigned long>(bt.depth),
+                              static_cast<unsigned long>(bt.max_depth));
+    hal::console::printFormat("  Suppressed rows:   %lu\n",
+                              static_cast<unsigned long>(bt.suppressed_csv_lines));
+    hal::console::printFormat("  Dropped bytes:     %lu\n\n",
+                              static_cast<unsigned long>(bt.dropped_bytes));
 }
 
 // ============================================================================
@@ -1655,16 +1664,8 @@ int DriverLab::readSerialLine()
 {
     while (true)
     {
-        int  c         = getchar_timeout_us(0); // USB
-        bool from_uart = false;
-
-        if (c == PICO_ERROR_TIMEOUT && uart_is_readable(uart0))
-        {
-            c         = uart_getc(uart0);
-            from_uart = true;
-        }
-
-        if (c == PICO_ERROR_TIMEOUT)
+        const int c = hal::console::getcNonBlocking(); // USB, then HC-05 UART
+        if (c < 0)
             return 0;
 
         char ch = static_cast<char>(c);
@@ -1672,7 +1673,7 @@ int DriverLab::readSerialLine()
         if (ch == '\n' || ch == '\r')
         {
             if (echo_enabled_)
-                printf("\n");
+                hal::console::printFormat("\n");
             if (input_index_ > 0)
                 saveToHistory();
             history_nav_idx_ = -1;
@@ -1686,7 +1687,7 @@ int DriverLab::readSerialLine()
                 input_index_--;
                 input_buffer_[input_index_] = '\0';
                 if (echo_enabled_)
-                    printf("\b \b");
+                    hal::console::printFormat("\b \b");
             }
             continue;
         }
@@ -1695,7 +1696,7 @@ int DriverLab::readSerialLine()
         {
             ch = static_cast<char>(toupper(ch));
             if (echo_enabled_)
-                putchar(ch);
+                hal::console::write(&ch, 1);
             if (input_index_ < DRIVERLAB_INPUT_BUFFER_SIZE - 1)
             {
                 input_buffer_[input_index_++] = ch;
@@ -1729,7 +1730,7 @@ void DriverLab::executeLine(const char* line)
 
 DriverLabArgs DriverLab::tokenize()
 {
-    DriverLabArgs args  = {0};
+    DriverLabArgs args  = {};
     char*         token = strtok(input_buffer_, " ,=");
     while (token != nullptr && args.argc < DRIVERLAB_MAX_ARGC)
     {
@@ -1844,12 +1845,12 @@ void DriverLab::executeCommand(const DriverLabArgs& args)
         if (args.argc > 1 && strcmp(args.argv[1], "OFF") == 0)
         {
             echo_enabled_ = false;
-            printf("Echo disabled\n");
+            hal::console::printFormat("Echo disabled\n");
         }
         else
         {
             echo_enabled_ = true;
-            printf("Echo enabled\n");
+            hal::console::printFormat("Echo enabled\n");
         }
     }
     else if (strcmp(cmd, "R") == 0)
@@ -1859,7 +1860,7 @@ void DriverLab::executeCommand(const DriverLabArgs& args)
     else if (cmd[0] >= '1' && cmd[0] <= '9' && strlen(cmd) <= 2)
         executeHistorySelection(atoi(cmd));
     else
-        printf("Unknown command: %s (type '?' for help)\n", cmd);
+        hal::console::printFormat("Unknown command: %s (type '?' for help)\n", cmd);
 }
 
 void DriverLab::clearInput()
@@ -1870,7 +1871,7 @@ void DriverLab::clearInput()
 
 void DriverLab::printPrompt()
 {
-    printf("> ");
+    hal::console::printFormat("> ");
 }
 
 bool DriverLab::parseFloat(const DriverLabArgs& args, int index, float min_val, float max_val,
@@ -1882,7 +1883,7 @@ bool DriverLab::parseFloat(const DriverLabArgs& args, int index, float min_val, 
     const float val = static_cast<float>(atof(args.argv[index]));
     if (val < min_val || val > max_val)
     {
-        printf("Value out of range [%.4f, %.4f]\n", min_val, max_val);
+        hal::console::printFormat("Value out of range [%.4f, %.4f]\n", min_val, max_val);
         return false;
     }
     result = val;
@@ -1895,44 +1896,56 @@ bool DriverLab::parseFloat(const DriverLabArgs& args, int index, float min_val, 
 
 void DriverLab::cmdHelp()
 {
-    printf("\n");
-    printf("=== TRIALS (run in order) ===\n");
-    printf("  OL   [max step settle_ms]      Voltage sweep    (default: 4 1 500)\n");
-    printf("  STEP [volts duration_ms]        Step response    (default: 3 1000)\n");
-    printf("  MOVE [mm mm/s mm/s^2 mode]      Forward motion   (default: 480 200 500 0)\n");
-    printf("    mode: 0=FULL_CONTROL (FF+PD)  1=NO_FF (PD only, stress)  2=ONLY_FF\n");
-    printf("       mode: 0=FF only, 1=PD only, 2=FF+PD\n");
-    printf("  TURN [deg deg/s deg/s^2]        Turn in place    (default: 90 240 800)\n");
-    printf("       +deg=CCW(left), -deg=CW(right)\n");
-    printf("  TURNOL  [max step settle_ms]    Rotation OL sweep  (default: 3 0.5 800)\n");
-    printf("  TURNSTEP [diff_v duration_ms]   Rotation step      (default: 1.5 1000)\n");
-    printf("\n");
-    printf("=== TUNING (set/get, omit val to read) ===\n");
-    printf("  Motor:  KM [val]  TM [val]\n");
-    printf("  FF:     BIAS [V]  SPEEDFF [val]  ACCFF [val]\n");
-    printf("  Fwd PD: ZETA [val]  TD [val]  KP [val]  KD [val]\n");
-    printf("  Rot PD: TURN_KP [val]  TURN_KD [val]\n");
-    printf("\n");
-    printf("=== SENSORS ===\n");
-    printf("  BAT  ENC  LENC  RENC  ENCRESET\n");
-    printf("  IMU  IMUVEL  IMURESET\n");
-    printf("  LTOF  FTOF  RTOF\n");
-    printf("  LSPOS/LINPOS       Line raw bits, paths, position, on-line state\n");
-    printf("  LSINT/LININTER     Current paths plus latest intersection event\n");
-    printf("  Continuous: IMUCON/TOFCON/LSCONT(LINCON)/ENCCON [ms] [interval]\n");
-    printf("\n");
-    printf("=== OTHER ===\n");
-    printf("  V [volts]  X(stop)  GPIO  SETTINGS  INIT  EXPORT  ID\n");
-    printf("  BTLOG [ms|RESET]    Bluetooth CSV interval/diagnostics (default: 50 ms)\n");
-    printf("\n");
+    hal::console::printFormat("\n");
+    hal::console::printFormat("=== TRIALS (run in order) ===\n");
+    hal::console::printFormat(
+        "  OL   [max step settle_ms]      Voltage sweep    (default: 4 1 500)\n");
+    hal::console::printFormat(
+        "  STEP [volts duration_ms]        Step response    (default: 3 1000)\n");
+    hal::console::printFormat(
+        "  MOVE [mm mm/s mm/s^2 mode]      Forward motion   (default: 480 200 500 0)\n");
+    hal::console::printFormat(
+        "    mode: 0=FULL_CONTROL (FF+PD)  1=NO_FF (PD only, stress)  2=ONLY_FF\n");
+    hal::console::printFormat("       mode: 0=FF only, 1=PD only, 2=FF+PD\n");
+    hal::console::printFormat(
+        "  TURN [deg deg/s deg/s^2]        Turn in place    (default: 90 240 800)\n");
+    hal::console::printFormat("       +deg=CCW(left), -deg=CW(right)\n");
+    hal::console::printFormat(
+        "  TURNOL  [max step settle_ms]    Rotation OL sweep  (default: 3 0.5 800)\n");
+    hal::console::printFormat(
+        "  TURNSTEP [diff_v duration_ms]   Rotation step      (default: 1.5 1000)\n");
+    hal::console::printFormat("\n");
+    hal::console::printFormat("=== TUNING (set/get, omit val to read) ===\n");
+    hal::console::printFormat("  Motor:  KM [val]  TM [val]\n");
+    hal::console::printFormat("  FF:     BIAS [V]  SPEEDFF [val]  ACCFF [val]\n");
+    hal::console::printFormat("  Fwd PD: ZETA [val]  TD [val]  KP [val]  KD [val]\n");
+    hal::console::printFormat("  Rot PD: TURN_KP [val]  TURN_KD [val]\n");
+    hal::console::printFormat("\n");
+    hal::console::printFormat("=== SENSORS ===\n");
+    hal::console::printFormat("  BAT  ENC  LENC  RENC  ENCRESET\n");
+    hal::console::printFormat("  IMU  IMUVEL  IMURESET\n");
+    hal::console::printFormat("  LTOF  FTOF  RTOF\n");
+    hal::console::printFormat(
+        "  LSPOS/LINPOS       Line raw bits, paths, position, on-line state\n");
+    hal::console::printFormat(
+        "  LSINT/LININTER     Current paths plus latest intersection event\n");
+    hal::console::printFormat(
+        "  Continuous: IMUCON/TOFCON/LSCONT(LINCON)/ENCCON [ms] [interval]\n");
+    hal::console::printFormat("\n");
+    hal::console::printFormat("=== OTHER ===\n");
+    hal::console::printFormat("  V [volts]  X(stop)  GPIO  SETTINGS  INIT  EXPORT  ID\n");
+    hal::console::printFormat(
+        "  BTLOG [ms|RESET]    Bluetooth CSV interval/diagnostics (default: 50 ms)\n");
+    hal::console::printFormat("\n");
 }
 
 void DriverLab::cmdId()
 {
-    printf("%s\n", DRIVERLAB_VERSION);
-    printf("Loop: %.0f Hz (%.1f ms)\n", LOOP_FREQUENCY_HZ, LOOP_INTERVAL_S * 1000.0f);
-    printf("Max voltage: %.1f V\n", MAX_VOLTAGE);
-    printf("Encoder: %.4f mm/tick\n", MM_PER_TICK);
+    hal::console::printFormat("%s\n", DRIVERLAB_VERSION);
+    hal::console::printFormat("Loop: %.0f Hz (%.1f ms)\n", LOOP_FREQUENCY_HZ,
+                              LOOP_INTERVAL_S * 1000.0f);
+    hal::console::printFormat("Max voltage: %.1f V\n", MAX_VOLTAGE);
+    hal::console::printFormat("Encoder: %.4f mm/tick\n", MM_PER_TICK);
 }
 
 void DriverLab::cmdSettings()
@@ -1943,7 +1956,7 @@ void DriverLab::cmdSettings()
 void DriverLab::cmdInitSettings()
 {
     settings_.initDefaults();
-    printf("Settings reset to defaults\n");
+    hal::console::printFormat("Settings reset to defaults\n");
 }
 
 void DriverLab::cmdSetKm(const DriverLabArgs& args)
@@ -1962,13 +1975,13 @@ void DriverLab::cmdSetKm(const DriverLabArgs& args)
             settings_.kM_R = val;
         }
         settings_.recalculateDerived();
-        printf("kM = %.2f (%s)\n", settings_.kM,
-               propagate ? "kM_L=kM_R propagated, derived updated"
-                         : "per-motor preserved, derived updated");
+        hal::console::printFormat("kM = %.2f (%s)\n", settings_.kM,
+                                  propagate ? "kM_L=kM_R propagated, derived updated"
+                                            : "per-motor preserved, derived updated");
     }
     else if (args.argc == 1)
     {
-        printf("kM = %.2f\n", settings_.kM);
+        hal::console::printFormat("kM = %.2f\n", settings_.kM);
     }
 }
 
@@ -1980,11 +1993,11 @@ void DriverLab::cmdSetTm(const DriverLabArgs& args)
         settings_.tm = val;
         settings_.td = val / 2.0f;
         settings_.recalculateDerived();
-        printf("Tm = %.5f (Td and derived updated)\n", settings_.tm);
+        hal::console::printFormat("Tm = %.5f (Td and derived updated)\n", settings_.tm);
     }
     else if (args.argc == 1)
     {
-        printf("Tm = %.5f\n", settings_.tm);
+        hal::console::printFormat("Tm = %.5f\n", settings_.tm);
     }
 }
 
@@ -1995,11 +2008,11 @@ void DriverLab::cmdSetZeta(const DriverLabArgs& args)
     {
         settings_.zeta = val;
         settings_.recalculatePD();
-        printf("zeta = %.5f (Kp, Kd updated)\n", settings_.zeta);
+        hal::console::printFormat("zeta = %.5f (Kp, Kd updated)\n", settings_.zeta);
     }
     else if (args.argc == 1)
     {
-        printf("zeta = %.5f\n", settings_.zeta);
+        hal::console::printFormat("zeta = %.5f\n", settings_.zeta);
     }
 }
 
@@ -2010,11 +2023,11 @@ void DriverLab::cmdSetTd(const DriverLabArgs& args)
     {
         settings_.td = val;
         settings_.recalculatePD();
-        printf("Td = %.5f (Kp, Kd updated)\n", settings_.td);
+        hal::console::printFormat("Td = %.5f (Kp, Kd updated)\n", settings_.td);
     }
     else if (args.argc == 1)
     {
-        printf("Td = %.5f\n", settings_.td);
+        hal::console::printFormat("Td = %.5f\n", settings_.td);
     }
 }
 
@@ -2024,11 +2037,11 @@ void DriverLab::cmdSetKp(const DriverLabArgs& args)
     if (parseFloat(args, 1, 0.0f, 10.0f, val))
     {
         settings_.kP = val;
-        printf("kP = %.7f (manual override)\n", settings_.kP);
+        hal::console::printFormat("kP = %.7f (manual override)\n", settings_.kP);
     }
     else if (args.argc == 1)
     {
-        printf("kP = %.7f\n", settings_.kP);
+        hal::console::printFormat("kP = %.7f\n", settings_.kP);
     }
 }
 
@@ -2038,11 +2051,11 @@ void DriverLab::cmdSetKd(const DriverLabArgs& args)
     if (parseFloat(args, 1, 0.0f, 10.0f, val))
     {
         settings_.kD = val;
-        printf("kD = %.7f (manual override)\n", settings_.kD);
+        hal::console::printFormat("kD = %.7f (manual override)\n", settings_.kD);
     }
     else if (args.argc == 1)
     {
-        printf("kD = %.7f\n", settings_.kD);
+        hal::console::printFormat("kD = %.7f\n", settings_.kD);
     }
 }
 
@@ -2058,12 +2071,12 @@ void DriverLab::cmdSetBiasFF(const DriverLabArgs& args)
             settings_.kS_L = val;
             settings_.kS_R = val;
         }
-        printf("kS = %.5f V (%s)\n", settings_.kS,
-               propagate ? "kS_L=kS_R propagated" : "per-motor preserved");
+        hal::console::printFormat("kS = %.5f V (%s)\n", settings_.kS,
+                                  propagate ? "kS_L=kS_R propagated" : "per-motor preserved");
     }
     else if (args.argc == 1)
     {
-        printf("kS = %.5f V\n", settings_.kS);
+        hal::console::printFormat("kS = %.5f V\n", settings_.kS);
     }
 }
 
@@ -2087,12 +2100,13 @@ void DriverLab::cmdSetSpeedFF(const DriverLabArgs& args)
         {
             settings_.kV = val;
         }
-        printf("kV = %.7f V/(mm/s) (kM=%.2f, kA=%.7f, %s)\n", settings_.kV, settings_.kM,
-               settings_.kA, propagate ? "kM_L=kM_R propagated" : "per-motor preserved");
+        hal::console::printFormat("kV = %.7f V/(mm/s) (kM=%.2f, kA=%.7f, %s)\n", settings_.kV,
+                                  settings_.kM, settings_.kA,
+                                  propagate ? "kM_L=kM_R propagated" : "per-motor preserved");
     }
     else if (args.argc == 1)
     {
-        printf("kV = %.7f V/(mm/s) [= 1/Km]\n", settings_.kV);
+        hal::console::printFormat("kV = %.7f V/(mm/s) [= 1/Km]\n", settings_.kV);
     }
 }
 
@@ -2108,57 +2122,60 @@ void DriverLab::cmdSetAccFF(const DriverLabArgs& args)
             settings_.kA_L = val;
             settings_.kA_R = val;
         }
-        printf("kA = %.7f V/(mm/s^2) (%s)\n", settings_.kA,
-               propagate ? "kA_L=kA_R propagated" : "per-motor preserved");
+        hal::console::printFormat("kA = %.7f V/(mm/s^2) (%s)\n", settings_.kA,
+                                  propagate ? "kA_L=kA_R propagated" : "per-motor preserved");
     }
     else if (args.argc == 1)
     {
-        printf("kA = %.7f V/(mm/s^2) [= Tm/Km]\n", settings_.kA);
+        hal::console::printFormat("kA = %.7f V/(mm/s^2) [= Tm/Km]\n", settings_.kA);
     }
 }
 
 void DriverLab::cmdBattery()
 {
-    printf("Battery: %.2f V (ADC: %u)\n", battery_->voltage(), battery_->raw_adc());
+    hal::console::printFormat("Battery: %.2f V (ADC: %u)\n", battery_->voltage(),
+                              battery_->raw_adc());
 }
 
 void DriverLab::cmdEncoders()
 {
-    printf("Position:\n");
+    hal::console::printFormat("Position:\n");
     if (left_encoder_)
     {
         const float left_mm = left_encoder_->ticks() * MM_PER_TICK_LEFT;
-        printf("  Left:  %ld ticks = %.1f mm\n", static_cast<long>(left_encoder_->ticks()),
-               left_mm);
+        hal::console::printFormat("  Left:  %ld ticks = %.1f mm\n",
+                                  static_cast<long>(left_encoder_->ticks()), left_mm);
     }
     else
     {
-        printf("  Left:  N/A (not connected)\n");
+        hal::console::printFormat("  Left:  N/A (not connected)\n");
     }
     if (right_encoder_)
     {
         const float right_mm = right_encoder_->ticks() * MM_PER_TICK_RIGHT;
-        printf("  Right: %ld ticks = %.1f mm\n", static_cast<long>(right_encoder_->ticks()),
-               right_mm);
+        hal::console::printFormat("  Right: %ld ticks = %.1f mm\n",
+                                  static_cast<long>(right_encoder_->ticks()), right_mm);
     }
     else
     {
-        printf("  Right: N/A (not connected)\n");
+        hal::console::printFormat("  Right: N/A (not connected)\n");
     }
 
-    printf("Velocity (cached, last tick):\n");
-    printf("  Avg: %.1f mm/s\n", (left_velocity_mmps_ + right_velocity_mmps_) / 2.0f);
-    printf("  L: %.1f mm/s  R: %.1f mm/s\n", left_velocity_mmps_, right_velocity_mmps_);
+    hal::console::printFormat("Velocity (cached, last tick):\n");
+    hal::console::printFormat("  Avg: %.1f mm/s\n",
+                              (left_velocity_mmps_ + right_velocity_mmps_) / 2.0f);
+    hal::console::printFormat("  L: %.1f mm/s  R: %.1f mm/s\n", left_velocity_mmps_,
+                              right_velocity_mmps_);
 }
 
 void DriverLab::cmdYaw()
 {
-    printf("Yaw: %.2f deg\n", imu_->robot_angle());
+    hal::console::printFormat("Yaw: %.2f deg\n", imu_->robot_angle());
 }
 
 void DriverLab::cmdYawVel()
 {
-    printf("Angular velocity: %.2f deg/s\n", imu_->robot_omega());
+    hal::console::printFormat("Angular velocity: %.2f deg/s\n", imu_->robot_omega());
 }
 
 void DriverLab::cmdYawContinuous(const DriverLabArgs& args)
@@ -2173,65 +2190,66 @@ void DriverLab::cmdYawContinuous(const DriverLabArgs& args)
     if (interval_ms < 10)
         interval_ms = 10;
 
-    printf("\n=== Continuous Yaw (duration: %lu ms, interval: %lu ms) ===\n",
-           static_cast<unsigned long>(duration_ms), static_cast<unsigned long>(interval_ms));
-    printf("Time(ms)  Yaw(deg)  Omega(deg/s)\n");
+    hal::console::printFormat("\n=== Continuous Yaw (duration: %lu ms, interval: %lu ms) ===\n",
+                              static_cast<unsigned long>(duration_ms),
+                              static_cast<unsigned long>(interval_ms));
+    hal::console::printFormat("Time(ms)  Yaw(deg)  Omega(deg/s)\n");
 
-    const uint32_t start_time = to_ms_since_boot(get_absolute_time());
+    const uint32_t start_time = hal::time::nowMs();
     uint32_t       elapsed    = 0;
-    printf("(press any key to stop)\n");
+    hal::console::printFormat("(press any key to stop)\n");
     keyPressed(); // discard the LF that trails the command's CR
     while (elapsed < duration_ms)
     {
         if (keyPressed())
         {
-            printf("=== Stopped ===\n");
+            hal::console::printFormat("=== Stopped ===\n");
             return;
         }
-        elapsed = to_ms_since_boot(get_absolute_time()) - start_time;
+        elapsed = hal::time::nowMs() - start_time;
         // IMU is ISR-driven; just read.
-        printf("%7lu  %8.2f  %8.2f\n", static_cast<unsigned long>(elapsed), imu_->robot_angle(),
-               imu_->robot_omega());
-        sleep_ms(interval_ms);
+        hal::console::printFormat("%7lu  %8.2f  %8.2f\n", static_cast<unsigned long>(elapsed),
+                                  imu_->robot_angle(), imu_->robot_omega());
+        hal::time::sleepMs(interval_ms);
     }
-    printf("=== Done ===\n");
+    hal::console::printFormat("=== Done ===\n");
 }
 
 void DriverLab::cmdYawReset()
 {
     imu_->reset();
-    printf("Yaw and angular velocity reset to 0\n");
+    hal::console::printFormat("Yaw and angular velocity reset to 0\n");
 }
 
 void DriverLab::cmdLeftTof()
 {
     if (left_tof_ != nullptr)
-        printf("Left ToF: %.0f mm\n", left_tof_->get_distance());
+        hal::console::printFormat("Left ToF: %.0f mm\n", left_tof_->get_distance());
     else
-        printf("Left ToF not available\n");
+        hal::console::printFormat("Left ToF not available\n");
 }
 
 void DriverLab::cmdFrontTof()
 {
     if (front_tof_ != nullptr)
-        printf("Front ToF: %.0f mm\n", front_tof_->get_distance());
+        hal::console::printFormat("Front ToF: %.0f mm\n", front_tof_->get_distance());
     else
-        printf("Front ToF not available\n");
+        hal::console::printFormat("Front ToF not available\n");
 }
 
 void DriverLab::cmdRightTof()
 {
     if (right_tof_ != nullptr)
-        printf("Right ToF: %.0f mm\n", right_tof_->get_distance());
+        hal::console::printFormat("Right ToF: %.0f mm\n", right_tof_->get_distance());
     else
-        printf("Right ToF not available\n");
+        hal::console::printFormat("Right ToF not available\n");
 }
 
 void DriverLab::cmdTofContinuous(const DriverLabArgs& args)
 {
     if (left_tof_ == nullptr && front_tof_ == nullptr && right_tof_ == nullptr)
     {
-        printf("ToF sensors not available\n");
+        hal::console::printFormat("ToF sensors not available\n");
         return;
     }
 
@@ -2244,52 +2262,56 @@ void DriverLab::cmdTofContinuous(const DriverLabArgs& args)
     if (interval_ms < 10)
         interval_ms = 10;
 
-    printf("\n=== Continuous ToF (duration: %lu ms, interval: %lu ms) ===\n",
-           static_cast<unsigned long>(duration_ms), static_cast<unsigned long>(interval_ms));
-    printf("Time(ms)  Left(mm)  Front(mm)  Right(mm)\n");
+    hal::console::printFormat("\n=== Continuous ToF (duration: %lu ms, interval: %lu ms) ===\n",
+                              static_cast<unsigned long>(duration_ms),
+                              static_cast<unsigned long>(interval_ms));
+    hal::console::printFormat("Time(ms)  Left(mm)  Front(mm)  Right(mm)\n");
 
-    const uint32_t start_time = to_ms_since_boot(get_absolute_time());
+    const uint32_t start_time = hal::time::nowMs();
     uint32_t       elapsed    = 0;
-    printf("(press any key to stop)\n");
+    hal::console::printFormat("(press any key to stop)\n");
     keyPressed(); // discard the LF that trails the command's CR
     while (elapsed < duration_ms)
     {
         if (keyPressed())
         {
-            printf("=== Stopped ===\n");
+            hal::console::printFormat("=== Stopped ===\n");
             return;
         }
-        elapsed                = to_ms_since_boot(get_absolute_time()) - start_time;
+        elapsed                = hal::time::nowMs() - start_time;
         const float left_dist  = (left_tof_ != nullptr) ? left_tof_->get_distance() : 0.0f;
         const float front_dist = (front_tof_ != nullptr) ? front_tof_->get_distance() : 0.0f;
         const float right_dist = (right_tof_ != nullptr) ? right_tof_->get_distance() : 0.0f;
-        printf("%7lu  %8.0f  %9.0f  %8.0f\n", static_cast<unsigned long>(elapsed), left_dist,
-               front_dist, right_dist);
-        sleep_ms(interval_ms);
+        hal::console::printFormat("%7lu  %8.0f  %9.0f  %8.0f\n",
+                                  static_cast<unsigned long>(elapsed), left_dist, front_dist,
+                                  right_dist);
+        hal::time::sleepMs(interval_ms);
     }
-    printf("=== Done ===\n");
+    hal::console::printFormat("=== Done ===\n");
 }
 
 void DriverLab::cmdLeftEncoder()
 {
     if (!left_encoder_)
     {
-        printf("Left encoder not connected\n");
+        hal::console::printFormat("Left encoder not connected\n");
         return;
     }
     const float left_mm = left_encoder_->ticks() * MM_PER_TICK_LEFT;
-    printf("Left: %.2f mm (%ld ticks)\n", left_mm, static_cast<long>(left_encoder_->ticks()));
+    hal::console::printFormat("Left: %.2f mm (%ld ticks)\n", left_mm,
+                              static_cast<long>(left_encoder_->ticks()));
 }
 
 void DriverLab::cmdRightEncoder()
 {
     if (!right_encoder_)
     {
-        printf("Right encoder not connected\n");
+        hal::console::printFormat("Right encoder not connected\n");
         return;
     }
     const float right_mm = right_encoder_->ticks() * MM_PER_TICK_RIGHT;
-    printf("Right: %.2f mm (%ld ticks)\n", right_mm, static_cast<long>(right_encoder_->ticks()));
+    hal::console::printFormat("Right: %.2f mm (%ld ticks)\n", right_mm,
+                              static_cast<long>(right_encoder_->ticks()));
 }
 
 void DriverLab::cmdEncoderReset()
@@ -2305,7 +2327,7 @@ void DriverLab::cmdEncoderReset()
     resetEncoderMA();
     left_velocity_mmps_  = 0.0f;
     right_velocity_mmps_ = 0.0f;
-    printf("Encoders reset to 0\n");
+    hal::console::printFormat("Encoders reset to 0\n");
 }
 
 void DriverLab::cmdEncoderContinuous(const DriverLabArgs& args)
@@ -2319,28 +2341,30 @@ void DriverLab::cmdEncoderContinuous(const DriverLabArgs& args)
     if (interval_ms < 10)
         interval_ms = 10;
 
-    printf("\n=== Continuous Encoders (duration: %lu ms, interval: %lu ms) ===\n",
-           static_cast<unsigned long>(duration_ms), static_cast<unsigned long>(interval_ms));
-    printf("Time(ms)  Left(mm)  Right(mm)\n");
+    hal::console::printFormat(
+        "\n=== Continuous Encoders (duration: %lu ms, interval: %lu ms) ===\n",
+        static_cast<unsigned long>(duration_ms), static_cast<unsigned long>(interval_ms));
+    hal::console::printFormat("Time(ms)  Left(mm)  Right(mm)\n");
 
-    const uint32_t start_time = to_ms_since_boot(get_absolute_time());
+    const uint32_t start_time = hal::time::nowMs();
     uint32_t       elapsed    = 0;
-    printf("(press any key to stop)\n");
+    hal::console::printFormat("(press any key to stop)\n");
     keyPressed(); // discard the LF that trails the command's CR
     while (elapsed < duration_ms)
     {
         if (keyPressed())
         {
-            printf("=== Stopped ===\n");
+            hal::console::printFormat("=== Stopped ===\n");
             return;
         }
-        elapsed              = to_ms_since_boot(get_absolute_time()) - start_time;
+        elapsed              = hal::time::nowMs() - start_time;
         const float left_mm  = left_encoder_ ? left_encoder_->ticks() * MM_PER_TICK_LEFT : 0.0f;
         const float right_mm = right_encoder_ ? right_encoder_->ticks() * MM_PER_TICK_RIGHT : 0.0f;
-        printf("%7lu  %8.2f  %8.2f\n", static_cast<unsigned long>(elapsed), left_mm, right_mm);
-        sleep_ms(interval_ms);
+        hal::console::printFormat("%7lu  %8.2f  %8.2f\n", static_cast<unsigned long>(elapsed),
+                                  left_mm, right_mm);
+        hal::time::sleepMs(interval_ms);
     }
-    printf("=== Done ===\n");
+    hal::console::printFormat("=== Done ===\n");
 }
 
 void DriverLab::cmdOpenLoop(const DriverLabArgs& args)
@@ -2431,11 +2455,11 @@ void DriverLab::cmdSetRotZeta(const DriverLabArgs& args)
     {
         settings_.rot_zeta = val;
         settings_.recalculateRotation();
-        printf("rot_zeta = %.5f (turnKP, turnKD updated)\n", settings_.rot_zeta);
+        hal::console::printFormat("rot_zeta = %.5f (turnKP, turnKD updated)\n", settings_.rot_zeta);
     }
     else if (args.argc == 1)
     {
-        printf("rot_zeta = %.5f\n", settings_.rot_zeta);
+        hal::console::printFormat("rot_zeta = %.5f\n", settings_.rot_zeta);
     }
 }
 
@@ -2446,11 +2470,11 @@ void DriverLab::cmdSetRotTd(const DriverLabArgs& args)
     {
         settings_.rot_td = val;
         settings_.recalculateRotation();
-        printf("rot_td = %.5f (turnKP, turnKD updated)\n", settings_.rot_td);
+        hal::console::printFormat("rot_td = %.5f (turnKP, turnKD updated)\n", settings_.rot_td);
     }
     else if (args.argc == 1)
     {
-        printf("rot_td = %.5f\n", settings_.rot_td);
+        hal::console::printFormat("rot_td = %.5f\n", settings_.rot_td);
     }
 }
 
@@ -2460,11 +2484,11 @@ void DriverLab::cmdSetTurnKp(const DriverLabArgs& args)
     if (parseFloat(args, 1, 0.0f, 10.0f, val))
     {
         settings_.turnKP = val;
-        printf("TURN_KP = %.4f\n", settings_.turnKP);
+        hal::console::printFormat("TURN_KP = %.4f\n", settings_.turnKP);
     }
     else if (args.argc == 1)
     {
-        printf("TURN_KP = %.4f\n", settings_.turnKP);
+        hal::console::printFormat("TURN_KP = %.4f\n", settings_.turnKP);
     }
 }
 
@@ -2474,11 +2498,11 @@ void DriverLab::cmdSetTurnKd(const DriverLabArgs& args)
     if (parseFloat(args, 1, 0.0f, 10.0f, val))
     {
         settings_.turnKD = val;
-        printf("TURN_KD = %.4f\n", settings_.turnKD);
+        hal::console::printFormat("TURN_KD = %.4f\n", settings_.turnKD);
     }
     else if (args.argc == 1)
     {
-        printf("TURN_KD = %.4f\n", settings_.turnKD);
+        hal::console::printFormat("TURN_KD = %.4f\n", settings_.turnKD);
     }
 }
 
@@ -2486,7 +2510,7 @@ void DriverLab::cmdVoltage(const DriverLabArgs& args)
 {
     if (args.argc < 2)
     {
-        printf("Usage: V <voltage>\n");
+        hal::console::printFormat("Usage: V <voltage>\n");
         return;
     }
     float volts = static_cast<float>(atof(args.argv[1]));
@@ -2495,14 +2519,14 @@ void DriverLab::cmdVoltage(const DriverLabArgs& args)
     if (volts < -MAX_VOLTAGE)
         volts = -MAX_VOLTAGE;
     setMotorVoltage(volts);
-    printf("Applied %.2f V to both motors\n", volts);
+    hal::console::printFormat("Applied %.2f V to both motors\n", volts);
 }
 
 void DriverLab::cmdVoltageLeft(const DriverLabArgs& args)
 {
     if (args.argc < 2)
     {
-        printf("Usage: VL <voltage>\n");
+        hal::console::printFormat("Usage: VL <voltage>\n");
         return;
     }
     float volts = static_cast<float>(atof(args.argv[1]));
@@ -2511,14 +2535,14 @@ void DriverLab::cmdVoltageLeft(const DriverLabArgs& args)
     if (volts < -MAX_VOLTAGE)
         volts = -MAX_VOLTAGE;
     setLeftMotorVoltage(volts);
-    printf("Applied %.2f V to LEFT motor only\n", volts);
+    hal::console::printFormat("Applied %.2f V to LEFT motor only\n", volts);
 }
 
 void DriverLab::cmdVoltageRight(const DriverLabArgs& args)
 {
     if (args.argc < 2)
     {
-        printf("Usage: VR <voltage>\n");
+        hal::console::printFormat("Usage: VR <voltage>\n");
         return;
     }
     float volts = static_cast<float>(atof(args.argv[1]));
@@ -2527,14 +2551,14 @@ void DriverLab::cmdVoltageRight(const DriverLabArgs& args)
     if (volts < -MAX_VOLTAGE)
         volts = -MAX_VOLTAGE;
     setRightMotorVoltage(volts);
-    printf("Applied %.2f V to RIGHT motor only\n", volts);
+    hal::console::printFormat("Applied %.2f V to RIGHT motor only\n", volts);
 }
 
 void DriverLab::cmdStop()
 {
     stopMotors();
     trial_ = TrialState::Idle; // abort any active trial
-    printf("Motors stopped (any trial aborted)\n");
+    hal::console::printFormat("Motors stopped (any trial aborted)\n");
     printBluetoothDiagnostics();
 }
 
@@ -2545,7 +2569,7 @@ void DriverLab::cmdBtLog(const DriverLabArgs& args)
         if (strcmp(args.argv[1], "RESET") == 0)
         {
             BluetoothStdio::resetDiagnostics();
-            printf("Bluetooth TX diagnostics reset\n");
+            hal::console::printFormat("Bluetooth TX diagnostics reset\n");
         }
         else
         {
@@ -2553,25 +2577,28 @@ void DriverLab::cmdBtLog(const DriverLabArgs& args)
             const long ms_val = strtol(args.argv[1], &end, 10);
             if (end == args.argv[1] || *end != '\0' || ms_val < 0 || ms_val > 1000)
             {
-                printf("Usage: BTLOG [0..1000|RESET]  (0 = full-rate Bluetooth CSV)\n");
+                hal::console::printFormat(
+                    "Usage: BTLOG [0..1000|RESET]  (0 = full-rate Bluetooth CSV)\n");
                 return;
             }
 
             BluetoothStdio::setCsvIntervalMs(static_cast<uint32_t>(ms_val));
-            printf("Bluetooth CSV interval set to %lu ms", static_cast<unsigned long>(ms_val));
+            hal::console::printFormat("Bluetooth CSV interval set to %lu ms",
+                                      static_cast<unsigned long>(ms_val));
             if (ms_val == 0)
-                printf(" (full-rate)");
-            printf("\n");
+                hal::console::printFormat(" (full-rate)");
+            hal::console::printFormat("\n");
         }
     }
 
     const BluetoothStdio::Diagnostics bt = BluetoothStdio::diagnostics();
-    printf("BT TX: csv_interval=%lu ms, depth=%lu/%lu, max_depth=%lu, suppressed_rows=%lu, "
-           "dropped_bytes=%lu\n",
-           static_cast<unsigned long>(bt.csv_interval_ms), static_cast<unsigned long>(bt.depth),
-           static_cast<unsigned long>(bt.ring_size), static_cast<unsigned long>(bt.max_depth),
-           static_cast<unsigned long>(bt.suppressed_csv_lines),
-           static_cast<unsigned long>(bt.dropped_bytes));
+    hal::console::printFormat(
+        "BT TX: csv_interval=%lu ms, depth=%lu/%lu, max_depth=%lu, suppressed_rows=%lu, "
+        "dropped_bytes=%lu\n",
+        static_cast<unsigned long>(bt.csv_interval_ms), static_cast<unsigned long>(bt.depth),
+        static_cast<unsigned long>(bt.ring_size), static_cast<unsigned long>(bt.max_depth),
+        static_cast<unsigned long>(bt.suppressed_csv_lines),
+        static_cast<unsigned long>(bt.dropped_bytes));
 }
 
 void DriverLab::cmdExport()
@@ -2583,9 +2610,9 @@ void DriverLab::cmdExport()
     // wrong duty constants that persist into every future maze run.
     if (battery_volts < 5.0f)
     {
-        printf("EXPORT: battery reads %.2f V — below 2S floor (5.0 V). "
-               "Pack disconnected or filter not yet settled. Refusing.\n",
-               battery_volts);
+        hal::console::printFormat("EXPORT: battery reads %.2f V — below 2S floor (5.0 V). "
+                                  "Pack disconnected or filter not yet settled. Refusing.\n",
+                                  battery_volts);
         return;
     }
 
@@ -2598,69 +2625,79 @@ void DriverLab::cmdExport()
     const float kal_duty = settings_.kA_L / battery_volts;
     const float kar_duty = settings_.kA_R / battery_volts;
 
-    printf("\n");
-    printf("// ============================================================\n");
-    printf("// DriverLab Export - Copy to tuning.h\n");
-    printf("// Calibrated at battery voltage: %.2f V\n", battery_volts);
-    printf("// ============================================================\n");
-    printf("\n");
-    printf("// Feedforward constants (duty-based, per-motor)\n");
-    printf("#define FORWARD_KVL %.6ff  // Left velocity gain (duty per mm/s)\n", kvl_duty);
-    printf("#define FORWARD_KVR %.6ff  // Right velocity gain (duty per mm/s)\n", kvr_duty);
-    printf("#define FORWARD_KSL %.3ff     // Left static friction (duty)\n", ksl_duty);
-    printf("#define FORWARD_KSR %.3ff     // Right static friction (duty)\n", ksr_duty);
-    printf("\n");
-    printf("// Acceleration feedforward (per-motor, derived from Tm / kM_L|R)\n");
-    printf("#define FORWARD_KAL %.7ff  // Left accel gain (duty per mm/s^2)\n", kal_duty);
-    printf("#define FORWARD_KAR %.7ff  // Right accel gain (duty per mm/s^2)\n", kar_duty);
-    printf("\n");
-    printf("// Raw DriverLab values (for reference):\n");
-    printf("//   kM_combined = %.2f mm/s/V\n", settings_.kM);
-    printf("//   kM_L = %.2f mm/s/V, kM_R = %.2f mm/s/V\n", settings_.kM_L, settings_.kM_R);
-    printf("//   kS_L = %.3f V, kS_R = %.3f V\n", settings_.kS_L, settings_.kS_R);
-    printf("//   kA_L = %.7f V/(mm/s^2), kA_R = %.7f V/(mm/s^2)\n", settings_.kA_L, settings_.kA_R);
-    printf("//   Tm = %.5f s\n", settings_.tm);
-    printf("\n");
-    printf("// Rotation plant model (from TURN-OL + TURN-STEP)\n");
-    printf("#define ROT_KM %.2ff   // deg/s per volt of differential drive\n", settings_.rot_kM);
-    printf("#define ROT_TM %.5ff // seconds -- rotational time constant\n", settings_.rot_tm);
-    printf("// ROT_KP / ROT_KD are now formula-derived in tuning.h.\n");
-    printf("// Resulting gains: turnKP = %.4f, turnKD = %.4f\n", settings_.turnKP,
-           settings_.turnKD);
-    printf("// ============================================================\n");
-    printf("\n");
+    hal::console::printFormat("\n");
+    hal::console::printFormat("// ============================================================\n");
+    hal::console::printFormat("// DriverLab Export - Copy to tuning.h\n");
+    hal::console::printFormat("// Calibrated at battery voltage: %.2f V\n", battery_volts);
+    hal::console::printFormat("// ============================================================\n");
+    hal::console::printFormat("\n");
+    hal::console::printFormat("// Feedforward constants (duty-based, per-motor)\n");
+    hal::console::printFormat("#define FORWARD_KVL %.6ff  // Left velocity gain (duty per mm/s)\n",
+                              kvl_duty);
+    hal::console::printFormat("#define FORWARD_KVR %.6ff  // Right velocity gain (duty per mm/s)\n",
+                              kvr_duty);
+    hal::console::printFormat("#define FORWARD_KSL %.3ff     // Left static friction (duty)\n",
+                              ksl_duty);
+    hal::console::printFormat("#define FORWARD_KSR %.3ff     // Right static friction (duty)\n",
+                              ksr_duty);
+    hal::console::printFormat("\n");
+    hal::console::printFormat(
+        "// Acceleration feedforward (per-motor, derived from Tm / kM_L|R)\n");
+    hal::console::printFormat("#define FORWARD_KAL %.7ff  // Left accel gain (duty per mm/s^2)\n",
+                              kal_duty);
+    hal::console::printFormat("#define FORWARD_KAR %.7ff  // Right accel gain (duty per mm/s^2)\n",
+                              kar_duty);
+    hal::console::printFormat("\n");
+    hal::console::printFormat("// Raw DriverLab values (for reference):\n");
+    hal::console::printFormat("//   kM_combined = %.2f mm/s/V\n", settings_.kM);
+    hal::console::printFormat("//   kM_L = %.2f mm/s/V, kM_R = %.2f mm/s/V\n", settings_.kM_L,
+                              settings_.kM_R);
+    hal::console::printFormat("//   kS_L = %.3f V, kS_R = %.3f V\n", settings_.kS_L,
+                              settings_.kS_R);
+    hal::console::printFormat("//   kA_L = %.7f V/(mm/s^2), kA_R = %.7f V/(mm/s^2)\n",
+                              settings_.kA_L, settings_.kA_R);
+    hal::console::printFormat("//   Tm = %.5f s\n", settings_.tm);
+    hal::console::printFormat("\n");
+    hal::console::printFormat("// Rotation plant model (from TURN-OL + TURN-STEP)\n");
+    hal::console::printFormat("#define ROT_KM %.2ff   // deg/s per volt of differential drive\n",
+                              settings_.rot_kM);
+    hal::console::printFormat("#define ROT_TM %.5ff // seconds -- rotational time constant\n",
+                              settings_.rot_tm);
+    hal::console::printFormat("// ROT_KP / ROT_KD are now formula-derived in tuning.h.\n");
+    hal::console::printFormat("// Resulting gains: turnKP = %.4f, turnKD = %.4f\n",
+                              settings_.turnKP, settings_.turnKD);
+    hal::console::printFormat("// ============================================================\n");
+    hal::console::printFormat("\n");
 }
 
 void DriverLab::cmdGpioDiag(const DriverLabArgs& args)
 {
     (void)args;
-    printf("\n=== Raw GPIO Diagnostic ===\n");
-    printf("Reading GP%d (channel A) and GP%d (channel B)\n", PIN_ENCODER_R_A, PIN_ENCODER_R_B);
-    printf("Slowly spin right wheel and watch for changes\n");
-    printf("Both pins should toggle. If only one changes -> wiring issue\n\n");
+    hal::console::printFormat("\n=== Raw GPIO Diagnostic ===\n");
+    hal::console::printFormat("Reading GP%d (channel A) and GP%d (channel B)\n", PIN_ENCODER_R_A,
+                              PIN_ENCODER_R_B);
+    hal::console::printFormat("Slowly spin right wheel and watch for changes\n");
+    hal::console::printFormat("Both pins should toggle. If only one changes -> wiring issue\n\n");
 
-    gpio_init(PIN_ENCODER_R_A);
-    gpio_set_dir(PIN_ENCODER_R_A, GPIO_IN);
-    gpio_pull_up(PIN_ENCODER_R_A);
-    gpio_init(PIN_ENCODER_R_B);
-    gpio_set_dir(PIN_ENCODER_R_B, GPIO_IN);
-    gpio_pull_up(PIN_ENCODER_R_B);
+    driver_lab_board::setupRightEncoderPinsRaw();
 
-    printf("Sample  GP%d(A)  GP%d(B)  State\n", PIN_ENCODER_R_A, PIN_ENCODER_R_B);
-    printf("------  ------  ------  -----\n");
+    hal::console::printFormat("Sample  GP%d(A)  GP%d(B)  State\n", PIN_ENCODER_R_A,
+                              PIN_ENCODER_R_B);
+    hal::console::printFormat("------  ------  ------  -----\n");
 
     for (int i = 0; i < 100; i++)
     {
-        const bool pin_a = gpio_get(PIN_ENCODER_R_A);
-        const bool pin_b = gpio_get(PIN_ENCODER_R_B);
-        const int  state = (pin_a ? 2 : 0) | (pin_b ? 1 : 0);
-        printf("%6d     %d       %d      %d\n", i, pin_a, pin_b, state);
-        sleep_ms(100);
+        bool pin_a = false;
+        bool pin_b = false;
+        driver_lab_board::readRightEncoderPins(pin_a, pin_b);
+        const int state = (pin_a ? 2 : 0) | (pin_b ? 1 : 0);
+        hal::console::printFormat("%6d     %d       %d      %d\n", i, pin_a, pin_b, state);
+        hal::time::sleepMs(100);
     }
 
-    printf("\n=== Analysis ===\n");
-    printf("Expected: Both columns toggle between 0 and 1 as wheel spins\n");
-    printf("Expected: State cycles through 0->1->3->2->0 (or reverse)\n");
+    hal::console::printFormat("\n=== Analysis ===\n");
+    hal::console::printFormat("Expected: Both columns toggle between 0 and 1 as wheel spins\n");
+    hal::console::printFormat("Expected: State cycles through 0->1->3->2->0 (or reverse)\n");
 }
 
 // ============================================================================
@@ -2671,7 +2708,7 @@ void DriverLab::cmdLinePosition()
 {
     if (line_sensor_ == nullptr)
     {
-        printf("Line sensor not available\n");
+        hal::console::printFormat("Line sensor not available\n");
         return;
     }
     line_sensor_->read();
@@ -2679,20 +2716,21 @@ void DriverLab::cmdLinePosition()
     const bool  on_line  = line_sensor_->on_line();
     char        paths_buffer[4];
     char        bits_buffer[LINE_SENSOR_COUNT + 1];
-    printf("Line sensor:\n");
-    printf("  raw=0x%02X active=0x%02X bits X8..X1 [%s] paths=%s position=%.2f "
-           "on_line=%s\n",
-           line_sensor_->rawByte(), line_sensor_->activeMask(),
-           lineBitsText(line_sensor_->activeMask(), bits_buffer, sizeof(bits_buffer)),
-           linePathsText(line_sensor_->currentPathsMask(), paths_buffer, sizeof(paths_buffer)),
-           position, yesNo(on_line));
+    hal::console::printFormat("Line sensor:\n");
+    hal::console::printFormat(
+        "  raw=0x%02X active=0x%02X bits X8..X1 [%s] paths=%s position=%.2f "
+        "on_line=%s\n",
+        line_sensor_->rawByte(), line_sensor_->activeMask(),
+        lineBitsText(line_sensor_->activeMask(), bits_buffer, sizeof(bits_buffer)),
+        linePathsText(line_sensor_->currentPathsMask(), paths_buffer, sizeof(paths_buffer)),
+        position, yesNo(on_line));
 }
 
 void DriverLab::cmdLineIntersection()
 {
     if (line_sensor_ == nullptr)
     {
-        printf("Line sensor not available\n");
+        hal::console::printFormat("Line sensor not available\n");
         return;
     }
     line_sensor_->read();
@@ -2700,21 +2738,23 @@ void DriverLab::cmdLineIntersection()
     char                                current_paths[4];
     char                                event_paths[4];
     char                                bits_buffer[LINE_SENSOR_COUNT + 1];
-    printf("Line intersection:\n");
-    printf("  current: raw=0x%02X active=0x%02X bits X8..X1 [%s] paths=%s\n",
-           line_sensor_->rawByte(), line_sensor_->activeMask(),
-           lineBitsText(line_sensor_->activeMask(), bits_buffer, sizeof(bits_buffer)),
-           linePathsText(line_sensor_->currentPathsMask(), current_paths, sizeof(current_paths)));
-    printf("  event: valid=%s paths=%s peak=0x%02X dt=%lums\n", yesNo(event.valid),
-           linePathsText(event.paths_mask, event_paths, sizeof(event_paths)), event.raw_peak_mask,
-           static_cast<unsigned long>(event.elapsed_ms));
+    hal::console::printFormat("Line intersection:\n");
+    hal::console::printFormat(
+        "  current: raw=0x%02X active=0x%02X bits X8..X1 [%s] paths=%s\n", line_sensor_->rawByte(),
+        line_sensor_->activeMask(),
+        lineBitsText(line_sensor_->activeMask(), bits_buffer, sizeof(bits_buffer)),
+        linePathsText(line_sensor_->currentPathsMask(), current_paths, sizeof(current_paths)));
+    hal::console::printFormat("  event: valid=%s paths=%s peak=0x%02X dt=%lums\n",
+                              yesNo(event.valid),
+                              linePathsText(event.paths_mask, event_paths, sizeof(event_paths)),
+                              event.raw_peak_mask, static_cast<unsigned long>(event.elapsed_ms));
 }
 
 void DriverLab::cmdLineContinuous(const DriverLabArgs& args)
 {
     if (line_sensor_ == nullptr)
     {
-        printf("Line sensor not available\n");
+        hal::console::printFormat("Line sensor not available\n");
         return;
     }
 
@@ -2727,23 +2767,26 @@ void DriverLab::cmdLineContinuous(const DriverLabArgs& args)
     if (interval_ms < 10)
         interval_ms = 10;
 
-    printf("\n=== Continuous Line Sensor (duration: %lu ms, interval: %lu ms) ===\n",
-           static_cast<unsigned long>(duration_ms), static_cast<unsigned long>(interval_ms));
-    printf("Legend: Bits are active probes left-to-right X8..X1, #=line, .=background\n");
-    printf("Time(ms)  Raw   Active  Bits      Position  OnLine  Paths  Event  Peak   EventMs\n");
+    hal::console::printFormat(
+        "\n=== Continuous Line Sensor (duration: %lu ms, interval: %lu ms) ===\n",
+        static_cast<unsigned long>(duration_ms), static_cast<unsigned long>(interval_ms));
+    hal::console::printFormat(
+        "Legend: Bits are active probes left-to-right X8..X1, #=line, .=background\n");
+    hal::console::printFormat(
+        "Time(ms)  Raw   Active  Bits      Position  OnLine  Paths  Event  Peak   EventMs\n");
 
-    const uint32_t start_time = to_ms_since_boot(get_absolute_time());
+    const uint32_t start_time = hal::time::nowMs();
     uint32_t       elapsed    = 0;
-    printf("(press any key to stop)\n");
+    hal::console::printFormat("(press any key to stop)\n");
     keyPressed(); // discard the LF that trails the command's CR
     while (elapsed < duration_ms)
     {
         if (keyPressed())
         {
-            printf("=== Stopped ===\n");
+            hal::console::printFormat("=== Stopped ===\n");
             return;
         }
-        elapsed = to_ms_since_boot(get_absolute_time()) - start_time;
+        elapsed = hal::time::nowMs() - start_time;
         line_sensor_->read();
         const float                         position = line_sensor_->get_position();
         const bool                          on_line  = line_sensor_->on_line();
@@ -2751,7 +2794,7 @@ void DriverLab::cmdLineContinuous(const DriverLabArgs& args)
         char                                current_paths[4];
         char                                event_paths[4];
         char                                bits_buffer[LINE_SENSOR_COUNT + 1];
-        printf(
+        hal::console::printFormat(
             "%7lu  0x%02X  0x%02X  %-8s  %8.2f  %6s  %5s  %5s  0x%02X  %7lu\n",
             static_cast<unsigned long>(elapsed), line_sensor_->rawByte(),
             line_sensor_->activeMask(),
@@ -2760,9 +2803,9 @@ void DriverLab::cmdLineContinuous(const DriverLabArgs& args)
             linePathsText(line_sensor_->currentPathsMask(), current_paths, sizeof(current_paths)),
             linePathsText(event.paths_mask, event_paths, sizeof(event_paths)), event.raw_peak_mask,
             static_cast<unsigned long>(event.elapsed_ms));
-        sleep_ms(interval_ms);
+        hal::time::sleepMs(interval_ms);
     }
-    printf("=== Done ===\n");
+    hal::console::printFormat("=== Done ===\n");
 }
 
 // ============================================================================
@@ -2791,12 +2834,12 @@ void DriverLab::cmdRepeat()
 {
     if (history_count_ == 0)
     {
-        printf("No command history\n");
+        hal::console::printFormat("No command history\n");
         return;
     }
     const int last_idx = (history_write_idx_ - 1 + DRIVERLAB_HISTORY_SIZE) % DRIVERLAB_HISTORY_SIZE;
     strncpy(input_buffer_, history_[last_idx], DRIVERLAB_INPUT_BUFFER_SIZE);
-    printf("Repeating: %s\n", input_buffer_);
+    hal::console::printFormat("Repeating: %s\n", input_buffer_);
 
     DriverLabArgs args = tokenize();
     if (args.argc > 0)
@@ -2807,32 +2850,33 @@ void DriverLab::cmdHistory()
 {
     if (history_count_ == 0)
     {
-        printf("No command history\n");
+        hal::console::printFormat("No command history\n");
         return;
     }
-    printf("Command History:\n");
+    hal::console::printFormat("Command History:\n");
     const int oldest =
         (history_write_idx_ - history_count_ + DRIVERLAB_HISTORY_SIZE) % DRIVERLAB_HISTORY_SIZE;
     for (int i = 0; i < history_count_; i++)
     {
         const int idx = (oldest + i) % DRIVERLAB_HISTORY_SIZE;
-        printf("  %d: %s\n", i + 1, history_[idx]);
+        hal::console::printFormat("  %d: %s\n", i + 1, history_[idx]);
     }
-    printf("Type number (1-%d) and press Enter to execute\n", history_count_);
+    hal::console::printFormat("Type number (1-%d) and press Enter to execute\n", history_count_);
 }
 
 void DriverLab::executeHistorySelection(int selection)
 {
     if (selection < 1 || selection > history_count_)
     {
-        printf("Invalid selection: %d (valid range: 1-%d)\n", selection, history_count_);
+        hal::console::printFormat("Invalid selection: %d (valid range: 1-%d)\n", selection,
+                                  history_count_);
         return;
     }
     const int oldest =
         (history_write_idx_ - history_count_ + DRIVERLAB_HISTORY_SIZE) % DRIVERLAB_HISTORY_SIZE;
     const int idx = (oldest + selection - 1) % DRIVERLAB_HISTORY_SIZE;
     strncpy(input_buffer_, history_[idx], DRIVERLAB_INPUT_BUFFER_SIZE);
-    printf("Executing: %s\n", input_buffer_);
+    hal::console::printFormat("Executing: %s\n", input_buffer_);
 
     DriverLabArgs args = tokenize();
     if (args.argc > 0)
@@ -2846,44 +2890,33 @@ void DriverLab::executeHistorySelection(int selection)
 void DriverLab::cmdDirTest(const DriverLabArgs& args)
 {
     (void)args;
-    printf("\n=== Motor Direction Pin Test ===\n");
-    printf("This applies constant 30%% PWM and toggles DIR pins\n");
-    printf("Watch motors - they should alternate direction every 2 seconds\n");
-    printf("Press any key to stop\n\n");
+    hal::console::printFormat("\n=== Motor Direction Pin Test ===\n");
+    hal::console::printFormat("This applies constant 30%% PWM and toggles DIR pins\n");
+    hal::console::printFormat("Watch motors - they should alternate direction every 2 seconds\n");
+    hal::console::printFormat("Press any key to stop\n\n");
 
-    while (getchar_timeout_us(0) != PICO_ERROR_TIMEOUT)
+    while (hal::console::getcNonBlocking() >= 0)
         ;
-    while (uart_is_readable(uart0))
-        uart_getc(uart0);
-
-    const uint     left_slice    = pwm_gpio_to_slice_num(PIN_MOTOR_L_PWM);
-    const uint     left_channel  = pwm_gpio_to_channel(PIN_MOTOR_L_PWM);
-    const uint     right_slice   = pwm_gpio_to_slice_num(PIN_MOTOR_R_PWM);
-    const uint     right_channel = pwm_gpio_to_channel(PIN_MOTOR_R_PWM);
-    const uint16_t pwm_level     = static_cast<uint16_t>(PWM_WRAP * 0.3f);
 
     int cycle = 0;
     while (true)
     {
-        const int c = getchar_timeout_us(0);
-        if (c != PICO_ERROR_TIMEOUT)
+        if (hal::console::getcNonBlocking() >= 0)
         {
-            printf("\nStopped by user\n");
+            hal::console::printFormat("\nStopped by user\n");
             break;
         }
 
         const bool dir_state = (cycle % 2 == 0);
-        printf("Cycle %d: DIR_L=%d, DIR_R=%d\n", cycle + 1, dir_state, dir_state);
+        hal::console::printFormat("Cycle %d: DIR_L=%d, DIR_R=%d\n", cycle + 1, dir_state,
+                                  dir_state);
         cycle++;
 
-        gpio_put(PIN_MOTOR_L_DIR, dir_state);
-        gpio_put(PIN_MOTOR_R_DIR, dir_state);
-        pwm_set_chan_level(left_slice, left_channel, pwm_level);
-        pwm_set_chan_level(right_slice, right_channel, pwm_level);
+        driver_lab_board::driveMotorsRaw(dir_state, 0.3f);
 
-        sleep_ms(2000);
+        hal::time::sleepMs(2000);
     }
 
     stopMotors();
-    printf("=== Test Complete ===\n");
+    hal::console::printFormat("=== Test Complete ===\n");
 }

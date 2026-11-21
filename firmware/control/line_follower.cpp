@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "common/log.h"
+#include "hal/time.h"
 
 namespace
 {
@@ -105,7 +106,7 @@ void LineFollower::startFollowing()
     turn_done_ = true;
     resetControlHistory();
     route_index_       = 0;
-    const uint32_t now = to_ms_since_boot(get_absolute_time());
+    const uint32_t now = hal::time::nowMs();
     last_line_seen_ms_ = now;
     line_seen_         = true;
 
@@ -158,7 +159,7 @@ void LineFollower::update(float dt)
 
 void LineFollower::followLine(float dt)
 {
-    const uint32_t now_ms       = to_ms_since_boot(get_absolute_time());
+    const uint32_t now_ms       = hal::time::nowMs();
     const bool     line_present = line_sensor_->on_line();
 
     // Position update — sensor's get_position() already holds last-known
@@ -225,7 +226,7 @@ void LineFollower::followLine(float dt)
     else if (line_present)
     {
         filtered_line_error_ +=
-            LINE_ERROR_FILTER_ALPHA * (latest_line_error_ - filtered_line_error_);
+            lineErrorFilterAlpha(LOOP_FREQUENCY_HZ) * (latest_line_error_ - filtered_line_error_);
     }
 
     const float de_dt = (filtered_line_error_ - prev_line_error_) / dt;
@@ -310,7 +311,7 @@ bool LineFollower::isIntersectionDetected()
 {
     bool current = line_sensor_->intersectionEvent().valid;
 
-    uint32_t now_ms = to_ms_since_boot(get_absolute_time());
+    uint32_t now_ms = hal::time::nowMs();
 
     // Rising edge with debounce
     if (current && !prev_intersection_ &&
@@ -432,7 +433,7 @@ void LineFollower::stop()
     // Freeze run end before resetControlHistory wipes derived state, so the
     // CLI can still print a debrief from runDurationMs() / peak* accessors.
     if (run_start_ms_ != 0 && run_end_ms_ == 0)
-        run_end_ms_ = to_ms_since_boot(get_absolute_time());
+        run_end_ms_ = hal::time::nowMs();
 
     state_ = State::Stopping;
     motion_->clear_line_steering_adjustment();
@@ -681,7 +682,7 @@ uint32_t LineFollower::runDurationMs() const
 {
     if (run_start_ms_ == 0)
         return 0;
-    const uint32_t end = (run_end_ms_ != 0) ? run_end_ms_ : to_ms_since_boot(get_absolute_time());
+    const uint32_t end = (run_end_ms_ != 0) ? run_end_ms_ : hal::time::nowMs();
     return end - run_start_ms_;
 }
 

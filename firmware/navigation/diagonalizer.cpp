@@ -92,7 +92,7 @@ void executeMove(const std::vector<std::string>& moves, int& i, std::ostringstre
             }
             else if (three_block == MovementBlock::FLF)
             {
-                appendSequence("L45#F#L45#FH#L45#FH#GFM#", out);
+                appendSequence("L45#F#L45#FH#L45#FH#GMF#", out);
                 prev_block = MovementBlock::F;
                 i += 2;
                 return;

@@ -56,6 +56,7 @@ class MazeMouse
     int                mazeHeight();
     Cell*              cellAt(int x, int y);
     std::vector<Cell*> cellNeighbors(Cell* cell, bool include_diagonal = false);
+    int                cellNeighbors(Cell* cell, bool include_diagonal, std::array<Cell*, 8>& out);
     void               resetPathfinding();
     void               setMazeMask(MazeMask mask);
     MazeMask           mazeMask() const;

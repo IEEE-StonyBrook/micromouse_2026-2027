@@ -2,7 +2,11 @@
 #define COMMON_LOG_H
 
 #include <cstdint>
+// STM32: no <iostream>. Its std::cout drags newlib's wide-character stdio
+// into the link; log.cpp prints with printf there instead.
+#if !defined(STM32_BUILD)
 #include <iostream>
+#endif
 #include <sstream>
 #include <string>
 

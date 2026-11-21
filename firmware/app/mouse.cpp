@@ -12,12 +12,12 @@
 #include <vector>
 
 #ifndef SIMULATOR_BUILD
-#include "pico/stdlib.h"
-
 #include "app/leds.h"
 #include "config/motion.h"
 #include "control/motion.h"
+#include "control/run_log.h"
 #include "drivers/beacon_ir.h"
+#include "hal/time.h"
 #endif
 #include "common/log.h"
 #include "common/tof_wall_utils.h"
@@ -26,6 +26,7 @@
 #include "config/smooth_turn.h"
 #include "maze/maze.h"
 #include "maze/maze_mouse.h"
+#include "maze/route_proof.h"
 #include "navigation/a_star.h"
 #include "navigation/diagonalizer.h"
 #include "navigation/path_converter.h"
@@ -126,9 +127,27 @@ constexpr uint32_t kMousePositionWaitTimeoutMs = 3000;
 
 bool timedOut(uint32_t start_ms, uint32_t timeout_ms)
 {
-    return timeout_ms > 0 &&
-           static_cast<uint32_t>(to_ms_since_boot(get_absolute_time()) - start_ms) >= timeout_ms;
+    return timeout_ms > 0 && static_cast<uint32_t>(hal::time::nowMs() - start_ms) >= timeout_ms;
 }
+#endif
+
+// Caps on exploring to prove the best route on the way home, one leg per cell
+// driven: 192 cells at search speed is about 86 s, and 90 s bounds the real
+// clock. The stall cap gives up after 130 cells (about 58 s) in which the
+// known route got no shorter: on the corpus most proofs that run that long
+// only confirm the route the search already found. The caps cost 4 of 50
+// optimal speed runs and keep the longest way home under 300 cells.
+constexpr RouteProofCaps ROUTE_PROOF_CAPS = {/*max_legs=*/192, /*max_ms=*/90000,
+                                             /*max_stall_legs=*/130};
+// While proving, drive over known exits unless that is this many cells longer
+// than the route with unknown walls open: every unexplored cell crossed is
+// time spent sensing a cell the proof did not ask for.
+constexpr int KNOWN_ROUTE_DETOUR_CELLS = 4;
+#ifdef SIMULATOR_BUILD
+// The simulator has no clock worth reading, so time a proof leg as one cell at
+// search speed: 180 mm / 400 mm/s = 450 ms.
+constexpr uint32_t ROUTE_PROOF_LEG_MS =
+    static_cast<uint32_t>(CELL_SIZE_MM * 1000.0f / ROBOT_MAX_SEARCH_SPEED_MMPS);
 #endif
 
 void logSearchStepInfo(const std::string& message)
@@ -362,7 +381,7 @@ template <typename Done> bool Mouse::pollUntil(Done done, uint32_t timeout_ms, c
     // mazerunner-core's `delay(2)` wait loops. Halt or timeout stops the drive.
     if (motion_ == nullptr)
         return false;
-    const uint32_t start_ms = to_ms_since_boot(get_absolute_time());
+    const uint32_t start_ms = hal::time::nowMs();
     while (!done())
     {
         serviceSensors();
@@ -380,7 +399,7 @@ template <typename Done> bool Mouse::pollUntil(Done done, uint32_t timeout_ms, c
             motion_->emergency_stop();
             return false;
         }
-        sleep_ms(2);
+        hal::time::sleepMs(2);
     }
     return !haltRequested();
 #else
@@ -555,7 +574,7 @@ void Mouse::moveForwardHalf()
     }
 #endif
     // Half-cell physical moves do not advance the logical maze cell. Diagonal
-    // sequences use GMF/GFM when the virtual mouse should move to the next cell.
+    // sequences use GMF when the virtual mouse should move to the next cell.
 }
 
 bool Mouse::move_mm(float distance_mm)
@@ -860,11 +879,11 @@ void Mouse::stationary_turn(const std::string& target_heading, int half_steps)
     // sensing point at search speed.
     if (!stopAtCentre() || !adjustPosition())
         return;
+#ifndef SIMULATOR_BUILD
     // At a dead end, reverse until the body is centred in the cell (read off
     // the front wall), the spot with room to spin; the axle then ends up
     // BODY_CENTRE_AHEAD_OF_AXLE_MM past the centre on the new heading.
     float start_mm = HALF_CELL_MM;
-#ifndef SIMULATOR_BUILD
     if (half_steps == 4 && !run_on_simulator && motion_ != nullptr &&
         tof_wall::wallFront(motion_->frontDistance()))
     {
@@ -1113,7 +1132,7 @@ bool Mouse::stopAtCentre()
     // is. 500 ms from the start of the approach, as in mazerunner.
     motion_->move(distance_mm, ROBOT_MAX_SEARCH_SPEED_MMPS, STOP_AT_CENTRE_FRONT_SPEED_MMPS,
                   ROBOT_SEARCH_ACCEL_MMPS2);
-    const uint32_t start_ms  = to_ms_since_boot(get_absolute_time());
+    const uint32_t start_ms  = hal::time::nowMs();
     bool           by_sensor = false;
     if (!pollUntil(
             [&]
@@ -1352,6 +1371,18 @@ bool Mouse::search_to(const std::vector<std::array<int, 2>>& goals)
     int                             goal_extra_steps   = 0;
     constexpr int                   kMaxGoalExtraSteps = 2;
 
+    // Way home with route proof: target unexplored cells on an optimistic best
+    // start-to-goal route until it is proven or a cap is spent.
+    const bool going_home = goals.size() == 1 && goals[0] == start_cell_;
+    bool       proving    = route_proof_ && going_home && !goal_cells_.empty();
+    int        proof_legs = 0;
+    // The known route's length and the leg it last got shorter, for the stall cap.
+    int proof_known_cells = RouteBounds::NO_ROUTE;
+    int proof_gain_leg    = 0;
+#ifndef SIMULATOR_BUILD
+    const uint32_t proof_start_ms = hal::time::nowMs();
+#endif
+
     int step = 1;
     while (true)
     {
@@ -1361,10 +1392,49 @@ bool Mouse::search_to(const std::vector<std::array<int, 2>>& goals)
             return false;
 
         update_map();
+        if (route_proof_)
+            markKnownCellsExplored(*maze_mouse_);
 
+        if (proving)
+        {
+#ifdef SIMULATOR_BUILD
+            const uint32_t proof_ms = static_cast<uint32_t>(proof_legs) * ROUTE_PROOF_LEG_MS;
+#else
+            const uint32_t proof_ms = static_cast<uint32_t>(hal::time::nowMs() - proof_start_ms);
+#endif
+            const RouteBounds bounds = routeBounds(*maze_mouse_, start_cell_, goal_cells_);
+            if (bounds.known_cells != proof_known_cells)
+            {
+                proof_known_cells = bounds.known_cells;
+                proof_gain_leg    = proof_legs;
+            }
+            std::vector<std::array<int, 2>> unproven;
+            if (keepProving(bounds, proof_legs, proof_ms, proof_legs - proof_gain_leg,
+                            ROUTE_PROOF_CAPS))
+                unproven = unprovenRouteCells(*maze_mouse_, start_cell_, goal_cells_);
+            if (unproven.empty())
+            {
+                proving = false;
+                targets = goals;
+                LOG_INFO("search_to: route " +
+                         std::string(bounds.proven() ? "proven" : "unproven") +
+                         " known_cells=" + std::to_string(bounds.known_cells) +
+                         " optimistic_cells=" + std::to_string(bounds.optimistic_cells) + " legs=" +
+                         std::to_string(proof_legs) + " proof_ms=" + std::to_string(proof_ms));
+            }
+            else
+            {
+                targets = unproven;
+                ++proof_legs;
+            }
+        }
+
+        // While proving, passing through the start is not arriving home.
         bool reached_goal = false;
         for (const auto& goal : goals)
         {
+            if (proving)
+                break;
             if (current->x() == goal[0] && current->y() == goal[1])
             {
                 reached_goal = true;
@@ -1420,11 +1490,25 @@ bool Mouse::search_to(const std::vector<std::array<int, 2>>& goals)
         }
 
         AStar a_star(maze_mouse_);
-        // Way home: take an unexplored route unless it is ~1.5x longer.
-        if (goals.size() == 1 && goals[0] == start_cell_)
+        // Way home: take an unexplored route unless it is ~1.5x longer. Route
+        // proof picks its own cells to explore, so it prefers known exits.
+        if (going_home && !route_proof_)
             a_star.set_explored_cell_cost(0.5f);
         std::vector<Cell*> cell_path = a_star.cellPath(targets, /*diagonals=*/false,
                                                        /*pass_goals=*/true);
+        if (going_home && route_proof_ && !cell_path.empty())
+        {
+            maze_mouse_->setMazeMask(MASK_CLOSED);
+            AStar known_a_star(maze_mouse_);
+            known_a_star.set_quiet(true); // no known route is normal; cell_path stands
+            std::vector<Cell*> known_path = known_a_star.cellPath(targets, /*diagonals=*/false,
+                                                                  /*pass_goals=*/true);
+            maze_mouse_->setMazeMask(MASK_OPEN);
+            if (!known_path.empty() &&
+                static_cast<int>(known_path.size()) <=
+                    static_cast<int>(cell_path.size()) + KNOWN_ROUTE_DETOUR_CELLS)
+                cell_path = known_path;
+        }
         if (cell_path.empty())
         {
             LOG_ERROR("search_to: no path found from (" + std::to_string(current->x()) + "," +
@@ -1779,15 +1863,7 @@ bool Mouse::turn_to_face(const std::string& heading)
 void Mouse::blink(int count)
 {
 #ifndef SIMULATOR_BUILD
-    gpio_init(PICO_DEFAULT_LED_PIN);
-    gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
-    for (int i = 0; i < count; ++i)
-    {
-        gpio_put(PICO_DEFAULT_LED_PIN, 1);
-        sleep_ms(100);
-        gpio_put(PICO_DEFAULT_LED_PIN, 0);
-        sleep_ms(100);
-    }
+    board_led::blink(count);
 #else
     (void)count;
 #endif
@@ -2101,59 +2177,51 @@ bool Mouse::test_SS90E(bool turn_left)
 void Mouse::print_turn_trace(float target_yaw_deg)
 {
 #ifndef SIMULATOR_BUILD
-    // One CSV row per trace sample, paced to the Bluetooth UART: the 4 KB TX
-    // ring holds ~60 rows, so an unpaced dump drops the rest. haltRequested()
+    // Read only a stopped log: the control tick would overwrite the ring
+    // under the dump.
+    RunLog& log = runLog();
+    log.stop();
+    // One CSV row per sample, paced to the Bluetooth UART: the 4 KB TX ring
+    // holds ~60 rows, so an unpaced dump drops the rest. haltRequested()
     // drains the console; a ~75 byte row takes ~6.5 ms at 115200 baud.
-    const uint16_t count = motion_->traceCount();
-    LOG_INFO("TRACE n="
-             << count << " dt_ms=" << motion_->traceDtMs()
-             << " cols=t_ms,target_deg,yaw_deg,rot_err_deg,rot_v,hold_err_deg,"
-                "wall_degps,hold_degps,fwd_mmps,left_mmps,right_mmps,left_v,right_v,enc,tof_l_mm,"
-                "tof_f_mm,tof_r_mm,pos_mm");
+    // Each sample is unpacked into a local copy and formatted into `row`,
+    // both on the stack in SRAM: on the STM32 the log sits in CCM, which the
+    // console's TX DMA cannot read.
+    const uint16_t count = log.count();
+    const uint16_t dt_ms = log.dtMs();
+    char           header[RunLog::HEADER_BYTES];
+    log.formatHeader(header, sizeof(header));
+    LOG_INFO(header);
     Log::drainBluetooth();
     for (uint16_t i = 0; i < count; ++i)
     {
-        const Motion::TraceSample& s = motion_->traceSample(i);
-        char                       row[160];
-        std::snprintf(row, sizeof(row),
-                      "T,%d,%.1f,%.1f,%.2f,%.2f,%.2f,%.1f,%.1f,%.0f,%.0f,%.0f,%.2f,%.2f,%d,%.0f,%."
-                      "0f,%.0f,%.1f",
-                      i * motion_->traceDtMs(), static_cast<double>(s.target_deg),
-                      static_cast<double>(s.yaw_deg), static_cast<double>(s.rot_error_deg),
-                      static_cast<double>(s.rot_volts), static_cast<double>(s.hold_err_deg),
-                      static_cast<double>(s.wall_degps), static_cast<double>(s.hold_degps),
-                      static_cast<double>(s.fwd_mmps), static_cast<double>(s.left_mmps),
-                      static_cast<double>(s.right_mmps), static_cast<double>(s.left_volts),
-                      static_cast<double>(s.right_volts), s.encoder_rotation ? 1 : 0,
-                      static_cast<double>(s.left_tof_mm), static_cast<double>(s.front_tof_mm),
-                      static_cast<double>(s.right_tof_mm), static_cast<double>(s.pos_mm));
+        char row[RunLog::ROW_BYTES];
+        RunLog::formatRow(row, sizeof(row), i, dt_ms, log.sample(i));
         LOG_INFO(row);
         for (int k = 0; k < 4; ++k)
         {
             if (haltRequested())
                 return;
-            sleep_ms(2);
+            hal::time::sleepMs(2);
         }
     }
     // The SS90E line reads yaw while the IMU still lags the arc by ~40 ms.
     // Score the turn 100 ms after the rotation profile reaches its target,
     // once that lag has drained. A NaN target (CLI TRACE) has no turn.
-    const uint16_t kSettleSamples   = 100 / motion_->traceDtMs();
+    const uint16_t settle_samples   = (100 + dt_ms - 1) / dt_ms; // at least 100 ms
     float          final_target_deg = 0.0f;
     for (uint16_t i = 0; i < count; ++i)
-        final_target_deg =
-            std::max(final_target_deg, std::fabs(motion_->traceSample(i).target_deg));
+        final_target_deg = std::max(final_target_deg, std::fabs(log.sample(i).target_deg));
     for (uint16_t i = 0; i < count && !std::isnan(target_yaw_deg); ++i)
     {
-        if (std::fabs(motion_->traceSample(i).target_deg) < final_target_deg - 0.2f)
+        if (std::fabs(log.sample(i).target_deg) < final_target_deg - 0.2f)
             continue;
-        const uint16_t j = i + kSettleSamples;
+        const uint16_t j = i + settle_samples;
         if (j < count)
         {
-            LOG_INFO(
-                "TRACE turn_yaw_error_settled="
-                << signedFixed1(normalizeYawDelta(target_yaw_deg - motion_->traceSample(j).yaw_deg))
-                << " at_ms=" << j * motion_->traceDtMs());
+            LOG_INFO("TRACE turn_yaw_error_settled="
+                     << signedFixed1(normalizeYawDelta(target_yaw_deg - log.sample(j).yaw_deg))
+                     << " at_ms=" << j * dt_ms);
         }
         break;
     }
@@ -2296,7 +2364,7 @@ void Mouse::conf_log_front_sensor()
     while (!motion_->move_finished() && !haltRequested())
     {
         front_sensor_track();
-        sleep_ms(TOF_MEASUREMENT_PERIOD_MS);
+        hal::time::sleepMs(TOF_MEASUREMENT_PERIOD_MS);
     }
     front_sensor_track();
     motion_->reset_drive_system();
@@ -2320,7 +2388,7 @@ void Mouse::conf_sensor_spin_calibrate()
     while (!motion_->turn_finished() && !haltRequested())
     {
         report_radial_track(false);
-        sleep_ms(TOF_MEASUREMENT_PERIOD_MS);
+        hal::time::sleepMs(TOF_MEASUREMENT_PERIOD_MS);
     }
     report_radial_track(false);
     motion_->reset_drive_system();
@@ -2363,7 +2431,7 @@ void Mouse::conf_edge_detection()
         }
         left_was_wall  = left_now;
         right_was_wall = right_now;
-        sleep_ms(TOF_MEASUREMENT_PERIOD_MS);
+        hal::time::sleepMs(TOF_MEASUREMENT_PERIOD_MS);
     }
     LOG_INFO("edge_detection: done left_logged=" + std::to_string(left_logged ? 1 : 0) +
              " right_logged=" + std::to_string(right_logged ? 1 : 0));
@@ -2542,10 +2610,8 @@ void Mouse::executeSequence(const std::string& sequence)
             continue;
         }
 
-        if (token == "GMF" || token == "GFM")
+        if (token == "GMF")
         {
-            if (token == "GFM")
-                LOG_ERROR("Mouse: Treating diagonalizer token GFM as GMF");
             ghostMoveForward(1);
             continue;
         }

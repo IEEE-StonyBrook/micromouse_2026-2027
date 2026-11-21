@@ -1,0 +1,206 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# One job per build or check, so new ones (host tests, maze corpus, other
+# targets) can be added as separate jobs without touching these.
+jobs:
+  pico-firmware:
+    name: Pico firmware
+    runs-on: ubuntu-24.04
+    env:
+      PICO_SDK_VERSION: 2.3.0
+      ARM_TOOLCHAIN_VERSION: 14.2.rel1
+      PICO_SDK_PATH: ${{ github.workspace }}/pico-sdk
+      PICO_TOOLCHAIN_PATH: ${{ github.workspace }}/arm-toolchain
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check out the Pico SDK
+        uses: actions/checkout@v7
+        with:
+          repository: raspberrypi/pico-sdk
+          ref: ${{ env.PICO_SDK_VERSION }}
+          path: pico-sdk
+          submodules: true
+
+      - name: Cache the Arm toolchain
+        id: toolchain-cache
+        uses: actions/cache@v6
+        with:
+          path: arm-toolchain
+          key: arm-gnu-toolchain-${{ env.ARM_TOOLCHAIN_VERSION }}-x86_64-arm-none-eabi
+
+      - name: Download the Arm toolchain
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        run: |
+          url="https://developer.arm.com/-/media/Files/downloads/gnu/${ARM_TOOLCHAIN_VERSION}/binrel/arm-gnu-toolchain-${ARM_TOOLCHAIN_VERSION}-x86_64-arm-none-eabi.tar.xz"
+          mkdir -p "$PICO_TOOLCHAIN_PATH"
+          curl -fsSL "$url" | tar -xJ --strip-components=1 -C "$PICO_TOOLCHAIN_PATH"
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ninja-build
+
+      - name: Configure
+        run: cmake -S . -B build-pico -G Ninja
+
+      - name: Build
+        run: ninja -C build-pico
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: jurababa-uf2
+          path: build-pico/Jurababa.uf2
+          if-no-files-found: error
+
+  sim:
+    name: Simulator bot
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build
+        run: make -C sim
+
+  host-checks:
+    name: Host tests and ISR check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Host tests
+        run: make -C tests
+
+      # The physics sim's tests run inside the host tests; this checks the
+      # CLI builds and every scenario finishes.
+      - name: Physics sim scenarios
+        run: |
+          make -C tests physim
+          for s in straight10 ip90 ss90; do
+            tests/physim --scenario "$s" > /dev/null
+          done
+
+      - name: Physics sim GUI server
+        run: python3 -m unittest discover -s tools/physim_gui -v
+
+      # The TRACE parser, and command and volts replay on the capture fixture.
+      - name: Real-vs-sim trace tools
+        run: python3 -m unittest tools/test_tracelog.py -v
+
+      - name: No logging or heap in ISR context
+        run: python3 tools/check_isr_logging.py
+
+      - name: Main loop changes Motion tick state only through the latch
+        run: python3 tools/check_motion_latch.py
+
+      - name: No Pico SDK includes in platform-neutral code
+        run: python3 tools/check_sdk_free.py
+
+  stm32-firmware:
+    name: STM32 firmware
+    runs-on: ubuntu-24.04
+    env:
+      ARM_TOOLCHAIN_VERSION: 14.2.rel1
+      ARM_TOOLCHAIN_PATH: ${{ github.workspace }}/arm-toolchain
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Cache the Arm toolchain
+        id: toolchain-cache
+        uses: actions/cache@v6
+        with:
+          path: arm-toolchain
+          key: arm-gnu-toolchain-${{ env.ARM_TOOLCHAIN_VERSION }}-x86_64-arm-none-eabi
+
+      - name: Download the Arm toolchain
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        run: |
+          url="https://developer.arm.com/-/media/Files/downloads/gnu/${ARM_TOOLCHAIN_VERSION}/binrel/arm-gnu-toolchain-${ARM_TOOLCHAIN_VERSION}-x86_64-arm-none-eabi.tar.xz"
+          mkdir -p "$ARM_TOOLCHAIN_PATH"
+          curl -fsSL "$url" | tar -xJ --strip-components=1 -C "$ARM_TOOLCHAIN_PATH"
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ninja-build
+
+      - name: Configure
+        run: cmake -S . -B build-stm32 -G Ninja -DJURABABA_PLATFORM=stm32
+
+      # The build also runs tools/check_stm32_layout.py on the ELF.
+      - name: Build
+        run: ninja -C build-stm32
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: jurababa-stm32
+          path: |
+            build-stm32/Jurababa_stm32.elf
+            build-stm32/Jurababa_stm32.hex
+            build-stm32/Jurababa_stm32.map
+          if-no-files-found: error
+
+  maze-corpus:
+    name: Sim bot maze corpus
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build the sim bot
+        run: make -C sim
+
+      - name: Test the runner
+        run: python3 -m unittest discover -s sim/runner -v
+
+      - name: Run the maze corpus
+        run: >-
+          python3 sim/runner/runner.py
+          --baseline sim/mazes/baseline.json --min-optimal 0.9
+          --json maze-results.json --csv maze-results.csv
+
+      - name: Compare the time and length route planners
+        run: python3 sim/runner/runner.py --compare-planners
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: maze-results
+          path: maze-results.*
+          if-no-files-found: ignore
+
+  esp32-bridge:
+    name: ESP32 bridge
+    runs-on: ubuntu-24.04
+    env:
+      PLATFORMIO_VERSION: 6.2.0
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Cache PlatformIO packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.platformio
+          key: platformio-${{ env.PLATFORMIO_VERSION }}-${{ hashFiles('esp32/platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: pip install "platformio==${PLATFORMIO_VERSION}"
+
+      - name: Bridge logic tests
+        run: pio test -d esp32 -e native
+
+      - name: Build the ESP32-C3 firmware
+        run: pio run -d esp32 -e esp32c3
+
+      - name: BLE transport tests
+        run: python3 -m unittest discover -s tools -p 'test_*.py' -v

@@ -49,8 +49,10 @@ void Drivetrain::reset()
     left_velocity_mmps_  = 0.0f;
     right_velocity_mmps_ = 0.0f;
 
-    fwd_change_mm_  = 0.0f;
-    rot_change_deg_ = 0.0f;
+    fwd_change_mm_    = 0.0f;
+    rot_change_deg_   = 0.0f;
+    left_step_ticks_  = 0;
+    right_step_ticks_ = 0;
 }
 
 float Drivetrain::position(WheelSide side)
@@ -115,6 +117,8 @@ void Drivetrain::update()
         d_right            = static_cast<int>(curr_right - prev_right_ticks_);
         prev_right_ticks_  = curr_right;
     }
+    left_step_ticks_  = d_left;
+    right_step_ticks_ = d_right;
 
     // 8-tap moving averager — drop the oldest sample at this index, add the
     // newest. Mirrors ukmars/motorlab/src/encoders.h::update(). Both the PD's
@@ -124,8 +128,8 @@ void Drivetrain::update()
     right_history_total_ -= right_history_[averager_index_];
     left_history_total_ += d_left;
     right_history_total_ += d_right;
-    left_history_[averager_index_]  = static_cast<int8_t>(d_left);
-    right_history_[averager_index_] = static_cast<int8_t>(d_right);
+    left_history_[averager_index_]  = static_cast<EncoderHistoryDelta>(d_left);
+    right_history_[averager_index_] = static_cast<EncoderHistoryDelta>(d_right);
     averager_index_                 = (averager_index_ + 1) % ENCODER_AVERAGER_LENGTH;
 
     constexpr float inv_avg = 1.0f / static_cast<float>(ENCODER_AVERAGER_LENGTH);
@@ -141,7 +145,9 @@ void Drivetrain::update()
 
 void Drivetrain::setVoltage(float left_volts, float right_volts)
 {
-    float batt = batteryVoltage();
+    float batt   = batteryVoltage();
+    left_volts_  = left_volts;
+    right_volts_ = right_volts;
     left_motor_->set_motor_volts(left_volts, batt);
     right_motor_->set_motor_volts(right_volts, batt);
 }
@@ -157,6 +163,8 @@ float Drivetrain::batteryVoltage() const
 
 void Drivetrain::stop()
 {
+    left_volts_  = 0.0f;
+    right_volts_ = 0.0f;
     left_motor_->stop();
     right_motor_->stop();
 }

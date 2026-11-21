@@ -3,6 +3,9 @@
 #include <math.h>
 
 #include "common/log.h"
+#include "hardware/gpio.h"
+#include "hardware/irq.h"
+#include "hardware/uart.h"
 
 IMU* IMU::imu_instance_ = nullptr;
 

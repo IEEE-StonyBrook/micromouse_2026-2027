@@ -49,7 +49,9 @@ A control loop should fail gracefully, not heroically.
 
 ### Loop dt: use `LOOP_FREQUENCY_HZ`, never measure it
 
-`dt_s` is `LOOP_INTERVAL_S = 1 / LOOP_FREQUENCY_HZ` (500 Hz). Keep it that way:
+`dt_s` is `LOOP_INTERVAL_S = 1 / LOOP_FREQUENCY_HZ`. The rate is per platform,
+set in the board config (`config/board_pico.h`: 500 Hz, `config/board_stm32.h`:
+1 kHz, picked by `config/board.h`). Keep it that way:
 
 1. **Determinism.** The main loop paces with `sleep_until(next_tick)`, so the
    interval *is* `LOOP_INTERVAL_S` by construction.
@@ -57,12 +59,19 @@ A control loop should fail gracefully, not heroically.
    its own measurement noise.
 3. **Correctness.** kP, kD, kV and kA were derived against the design dt.
 
+Never write a tick count as a bare number. Write the duration and convert it
+with `LOOP_TICKS(seconds)` (an averager window, a settle time, a report
+cadence), and scale per-tick differences by `LOOP_FREQUENCY_HZ`, as the PID
+D-term does. A per-tick filter gain is tuned at one rate and converted, as
+`lineErrorFilterAlpha()` does. Then a new rate keeps the same tuning, and
+`make -C tests` checks it by running the suite at 500 Hz and 1 kHz.
+
 A loop running long is a loop to fix — remove blocking calls, use cooperative
 state machines, keep `sleep_ms` out of trial bodies — not a dt to measure.
 
 Sensor sample rates are separate. The IMU emits packets at exactly 100 Hz and
 its omega cache uses `IMU_PACKET_HZ`, computed once per packet in the UART ISR.
-That is the IMU's true cadence; using 500 Hz there would alias the signal.
+That is the IMU's true cadence; using the loop rate there would alias the signal.
 
 ## Multicore — `firmware/app/*`
 

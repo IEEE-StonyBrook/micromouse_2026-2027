@@ -5,14 +5,15 @@
 #ifndef CONFIG_GEOMETRY_H
 #define CONFIG_GEOMETRY_H
 
+#if defined(STM32_BUILD)
+// The STM32 mouse: its wheels, encoders and tick sizes (UNVERIFIED placeholders).
+#include "config/mouse_stm32.h"
+#else
 // ===================== Wheels ===================== //
 // Driven, not Q: hand pushes skid the geared wheels and lose up to 6% of ticks.
 #define WHEEL_DIAMETER_MM                                                                          \
     37.0f                   // Mean of 2 ruler-checked PATH FFFFF runs: 36.9, 37.0 (calipers: 37.2)
 #define WHEEL_BASE_MM 80.4f // 84.3 IMU-checked at 38.8 wheel, scaled with it: keeps deg/tick
-
-// ===================== Body ===================== //
-#define ROBOT_LENGTH_MM 93.2f // Back edge to nose, ruler; a wall-to-wall push travels span - this
 
 // ===================== Encoder ===================== //
 #define ENCODER_CPR 12     // Counts per motor shaft revolution
@@ -30,6 +31,11 @@
 // two wheels to differ. Until calibrated both use the tyre-diameter estimate.
 #define MM_PER_TICK_LEFT  MM_PER_TICK_NOMINAL
 #define MM_PER_TICK_RIGHT MM_PER_TICK_NOMINAL
+#endif
+
+// ===================== Body ===================== //
+#define ROBOT_LENGTH_MM 93.2f // Back edge to nose, ruler; a wall-to-wall push travels span - this
+
 // Mean of the two, for logs and printouts only.
 #define MM_PER_TICK           ((MM_PER_TICK_LEFT + MM_PER_TICK_RIGHT) / 2.0f)
 #define DEG_PER_MM_DIFFERENCE (180.0f / (3.14159265f * WHEEL_BASE_MM))

@@ -50,10 +50,12 @@ never reaches up.
 
 ```text
 app/ → control/, maze/, navigation/
-control/ → drivers/, config/
+control/ → drivers/, config/, hal/
 navigation/ → maze/
 maze/ → config/
-drivers/ → config/
+drivers/ → config/, hal/
+hal/pico/ → Pico SDK
+hal/stm32/ → libopencm3
 ```
 
 What each layer is allowed to know:
@@ -65,7 +67,88 @@ What each layer is allowed to know:
 | `control/` | velocity, acceleration, PID, profiles, pose, kinematics | maze solving |
 | `maze/` | cells, directions, walls, coordinates, mouse pose | motors, sensors |
 | `navigation/` | flood fill, A*, goals, cell paths, L/F/R conversion | physical sensors |
-| `app/` | wiring the above together, CLI, Bluetooth, multicore | — |
+| `hal/` | platform-neutral interfaces (time, critical section, reset cause, peripheral handles, console, SPI, flash); backends in `hal/pico/`, `hal/stm32/` and `hal/host/` | robot logic |
+| `app/` | wiring the above together, CLI, Bluetooth, the control timer; board-specific halves (Bluetooth UART, BOOTSEL, LEDs) in `app/pico/` behind headers in `app/` | — |
+
+Only `hal/pico/`, the driver `.cpp` files, `app/pico/`, `driver_lab/pico/`
+(DriverLab's raw-pin diagnostics, behind `driver_lab/board_io.h`) and
+`main_pico.cpp` may include the Pico SDK, and only `hal/stm32/` and
+`main_stm32.cpp` may include libopencm3. `python3 tools/check_sdk_free.py`
+enforces this, and `make -C tests` compiles the platform-neutral code,
+`app/*.cpp` and `driver_lab/*.cpp` included, against `hal/host`. App and
+DriverLab code read the clock and sleep through `hal::time` and print through
+`hal::console`, never the SDK.
+
+`make -C tests` also builds and runs `tests/host_tests`, the doctest unit tests
+(`tests/*_test.cpp`) for Profile, PID, Drivetrain, Motion, the maze parser,
+the console HAL, the LSM6DSR driver (against a fake SPI register map) and the
+STM32 bring-up logic. It runs them twice: at the Pico's 500 Hz, then rebuilt at
+the STM32's 1 kHz (`-DHOST_LOOP_FREQUENCY_HZ=1000.0f`), where
+`rate_trajectory_test.cpp` checks that a profile move and a closed-loop
+straight match the 500 Hz run. Each STM32 driver keeps its arithmetic and
+state machines in libopencm3-free headers in `hal/stm32/` (`clock_plan.h`,
+`clock_startup.h`, `counter_extender.h`, `spin_wait.h`, `console_rings.h`, `flash_layout.h`,
+`reset_flags.h`, `watchdog_plan.h`) that the host tests include; only the thin register glue is untested off
+target. The flash store (`common/flash_store.h`, two A/B slots in sectors 1-2)
+and board identity (`common/board_identity.h`) are platform-neutral and run
+against `hal/host/memory_flash.h`, which can cut power at any word:
+`flash_store_test.cpp` cuts every word of a save and checks the old or the new
+record always loads. The next-boot reset verdict (`common/reset_report.h`:
+the reset cause plus the breadcrumb, `common/breadcrumb.h`) is platform-neutral
+too and tested in `reset_report_test.cpp`.
+The STM32's DRV8874 motor drivers sit behind `drivers/motor_bridge.h`
+(platform-neutral, against `hal/h_bridge.h`; the register glue is
+`hal/stm32/h_bridge.*`): zero duty brakes, a second braked or `sleep()`
+drops nSLEEP, a command given asleep waits out tWAKE and is never lost, and
+IPROPI counts become amps. It is built disarmed: until `arm()` it stays
+asleep and drops every command, and `disarm()` cuts and sleeps at once.
+`motor_bridge_test.cpp` runs it on a fake port.
+The IR emitter self-test (`common/emitter_check.h`) is platform-neutral
+too: it fires each emitter of an `IrBank` alone, builds
+the dark-subtracted 4x4 crosstalk matrix and judges it (a receiver under 100
+counts from its own emitter is weak; another emitter lifting it by over 25 %
+of that leaks), tested in `emitter_check_test.cpp` against
+`tests/fakes/fake_ir_bank.h`.
+`tests/fakes/` stands in for the Motor, Encoder and IMU drivers on the host and
+adds a first-order two-wheel plant, so control changes can be tested without a
+mouse. `tests/sim/` grows that into a physics sim: a DC-motor, two-wheel
+plant with knobs for motor friction (kS), wheel slip, encoder resolution, gyro
+noise and bias, a floor seam and a pinned wheel, tested in `physim_test.cpp` and
+`crash_physim_test.cpp`. `make -C tests physim` builds a CLI
+(`tests/physim --scenario straight10|ip90|ss90 ...`) that prints a CSV trace.
+`python3 tools/physim_gui/server.py` builds it, serves a browser GUI for it on
+127.0.0.1:8765 and opens the page: a top-down view, time-synced charts, knobs,
+A/B comparison and demo story presets. Edit the stories in
+`tools/physim_gui/presets_spec.json`, then rerun the server with
+`--make-presets` to refresh `presets.js`, the page's offline fallback; its
+tests run with `python3 -m unittest discover -s tools/physim_gui`.
+Real against sim: `python3 tools/tracelog.py tools/logs/latest.log [--csv
+out.csv] [--json out.json] [--compare sim.log]` parses every TRACE dump in a
+serial_term capture (old and extended headers, by column name) and
+dead-reckons it. `tests/physim --script "FFRFFLF 600 3000 SMOOTH" --format
+trace` drives the Pico's `PATH` on an open floor through the real Motion and
+prints the same TRACE (plus `true_dist_mm,true_yaw_deg`); `tests/physim
+--replay-volts latest.log` holds the logged volts on the plant open loop and
+prints its RMS wheel-speed gap, so plant error shows apart from the
+controller's; `--emit-pico-trace` wraps output as a capture.
+`tools/fixtures/path_ffrfflf_capture.log` is an off-nominal sim run standing
+in for the mouse (`python3 -m unittest tools/test_tracelog.py`).
+physim names, segments and prints its traces through the firmware's own
+`RunLog` (`set_header()`, `set_segment()`, `formatHeader()`), so its headers
+match the mouse's. The GUI's **Real vs sim** page
+(`http://127.0.0.1:8765/realsim.html`, linked from the stories page) loads
+a capture (`tools/logs/*.log` and `tools/fixtures/*.log` from the server's
+`GET /logs`, or a dropped or picked file), and `POST /realsim` parses it
+with `tracelog.py` and runs both replays with the slider knobs: it overlays
+the dead-reckoned paths on the cell grid, wheel speeds, volts, yaw, an
+encoder-vs-gyro yaw-rate slip check and a per-segment table with RMSEs.
+The command replay is aligned on the first FORWARD/ROTATION_ACTIVE sample
+(optionally nudged by cross-correlation). It needs the server; it has no
+offline fallback. To capture a real run: put the mouse on an open floor
+against a back wall, run `python3 tools/serial_term.py`, type
+`PATH FFRFFLF 400 2000` and then `TRACE`; the session lands in
+`tools/logs/latest.log`, which the page opens first.
+Add a test case to a `*_test.cpp` file; the Makefile picks new files up.
 
 Run `ls firmware/<layer>` for the current file list; it is authoritative and
 this document is not.
@@ -75,10 +158,38 @@ this document is not.
 Selected at startup: **press `M` within 3 seconds for DriverLab, otherwise
 Normal Mode starts automatically.** Keep that behaviour.
 
-**Normal Mode** is the competition mode, across both cores:
+**Normal Mode** is the competition mode. It runs on Core 0 only (the UKMARS
+single-core shape); Core 1 is unused:
 
-- Core 0 — path planning, maze algorithms, Bluetooth, high-level decisions.
-- Core 1 — motor control, sensor updates, the control loop at `LOOP_FREQUENCY_HZ` (500 Hz).
+- A repeating hardware timer in `main_pico.cpp` calls `Motion::update()` at
+  `LOOP_FREQUENCY_HZ`: encoders, forward and rotation PD, motors. The rate is
+  per platform, set in `config/board_pico.h` (500 Hz) or `config/board_stm32.h`
+  (1 kHz); express any tick count as a time with `LOOP_TICKS(seconds)`.
+- The main loop (`cli.loop()`) handles serial and Bluetooth I/O, polls the
+  ToFs at 50 Hz, and runs path planning, maze algorithms and high-level decisions.
+
+**Run log.** `control/run_log.h` keeps what the tick did during a run: one
+int16-packed sample every 8 ms (20 ms for a search), 1680 in a ring, about
+13 s at 8 ms. PATH, the fast path, SEARCH, the search menu and SMOOTH RUN
+arm it through the CLI's `arm_trace()`/`name_trace()`, which also set the
+header: a run counter, the battery voltage and the command with its
+resolved parameters (`PATH FFRFF speed=600 accel=3000 ... smooth=0 raw=0`).
+PATH arms before its start advance and stops at the end, so the ring holds
+the whole run. `TRACE` (Pico) and `log` (STM32) dump it through
+`RunLog::formatHeader()`/`formatRow()`:
+
+```text
+TRACE n=<n> dt_ms=<dt> cols=<cols> run=<id> loop_hz=<hz> batt_v=<v.vv> wrapped=<0|1> cmd="<text>"
+T,<t_ms>,...,pos_mm,enc_l_mm,enc_r_mm,ev
+```
+
+`enc_l_mm`/`enc_r_mm` are each wheel's encoder distance since the trace
+started; `ev` bits 0-6 are `RunLog::Event`, bits 8-13 the PATH segment
+(1-based as PATH prints it, 0 for the start advance, mod 64), bit 15 a
+clipped field; `wrapped=1` means the ring overwrote the run's start. Keep
+the header keys in order and only insert columns: parsers go by name. The
+log is logging only: nothing that sets the motor volts may read it
+(`rate_test.cpp` checks the volts match bit for bit with it armed).
 
 **DriverLab Mode** is a single-core calibration and characterisation tool:
 open-loop voltage sweeps, step response, PID tuning, and export of
@@ -87,7 +198,7 @@ open-loop voltage sweeps, step response, PID tuning, and export of
 DriverLab is standalone. It owns its own time-based profiles
 (`DriverLabProfile`), its own `PID` instances, and its trial state machines
 (OL, STEP, MOVE, TURN, TURN-OL, TURN-STEP), driven by one `tick()` per 500 Hz
-tick from `main.cpp`. It uses `Motor`, `Encoder`, `IMU`, `ToF` and `Battery`
+tick from `main_pico.cpp`. It uses `Motor`, `Encoder`, `IMU`, `ToF` and `Battery`
 directly — **the HAL drivers are the only seam** between DriverLab and the
 Robot/Motion stack. Keep `Motion` and `Drivetrain` out of DriverLab.
 
@@ -98,6 +209,41 @@ constants). Running them out of order gives numbers the later steps contradict.
 Trials are cooperative state machines: a trial records its parameters, sets
 motor voltages or arms a profile, and returns. The next tick advances it one
 step. That is what holds the loop period at exactly `1 / LOOP_FREQUENCY_HZ`.
+
+## Interrupt context
+
+No Log or heap in ISR context. Code reachable from the control tick
+(`Motion::update()` and everything it calls) or another interrupt handler never
+calls `LOG_*`, `printf`, or anything that builds a `std::string`, `new`s, or
+grows a container. Raise an atomic flag or counter there and report it from the
+main loop, as `Motor::reportBatteryFallback()` does. `python3
+tools/check_isr_logging.py` enforces this; add a function to its list when the
+control path starts calling it.
+
+**Main loop to tick.** Motion's public mutators (`start_move`, `set_position`,
+`reset_drive_system`, ...) never write the tick's state: each queues one
+command in Motion's latch under `hal::irq::Lock`, and `Motion::update()` applies
+the queue, in issue order, before anything else in the tick. Main-loop reads
+(`position()`, `move_finished()`, ...) see the live state with the queued
+commands applied, so code that reads straight after a command still sees it.
+Add a new mutator as a `Command::Op`; `python3 tools/check_motion_latch.py`
+fails if a main-loop function in `motion.cpp` writes tick-owned state.
+
+**Crash watchdog.** `control/crash_detector.*` trips on sustained voltage
+saturation (either wheel at ≥0.97·min(`MAX_VOLTAGE`, battery) for 100 ms),
+stall current at near-zero wheel speed (only where a board supplies a current
+reader; the Pico has none) or forward PD error that keeps growing. Thresholds
+are times in `config/motion.h` (`CRASH_*`). `Motion::update()` checks it every
+tick and, on a trip, cuts the motors itself (`Drivetrain::stop()`, then the
+optional cut hook, where a board calls `MotorBridge::sleep()`; its current
+reader is `MotorBridge::readAmps`) and holds them cut
+with the move frozen; the trip latches until `Motion::clear_crash()`. The main
+loop (`CommandLineInterface::reportCrash()`) prints the cause, flashes the
+cause code in orange on the LED and halts the run. `CRASH ON|OFF|CLEAR|INHIBIT
+ON|OFF|STATUS` drives it; `RESET` and re-arming COMP clear the latch. It
+starts **off on the Pico** (`CRASH_WATCHDOG_DEFAULT_ENABLED 0` in
+`config/board_pico.h`: the race-proven mouse keeps its behaviour unless armed
+with `CRASH ON`) and **on for STM32 builds** (`config/board_stm32.h`).
 
 ## Units
 
@@ -175,7 +321,87 @@ cmake .. -DPICO_SDK_PATH=/path/to/pico-sdk -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 make -j4
 ```
 
-Simulator: `cd sim && make`, producing `sim/bin/simulator`.
+STM32F405 bring-up firmware for the Adafruit Feather STM32F405 Express
+(pins and timers in `config/board_feather.h`): 168 MHz clock, 1 kHz TIM7
+tick, USART3 console at 1 Mbaud with `stats`, `flood`, `profile`, `arm`,
+`disarm`, `logfill` (fill the run log with a test pattern), `log` (dump it) and
+`motor` (driver state and current, `motor <l> <r>` duties, `motor sleep`;
+only where `board::MOTOR_DRIVERS_FITTED`, false on the Feather) and
+`emitters` (the IR crosstalk self-test; a stub with no emitters until the
+rev1 pins are known) commands, TIM3/TIM4 encoders and an LSM6DSR on SPI2. At boot it reads the
+chip UID and loads the board profile it saved in the flash store; an unknown
+board lists the presets (`config/board_profiles.h`) and refuses to arm until
+`profile <n>` saves one. The first line of `main()` drives every actuator
+output (motor driver inputs and nSLEEP, emitters, fan; `board::REV1_SAFE_OUTPUTS`)
+to its off level before the clocks start (`common/safe_outputs.h`). The one
+armed state is `MotorBridge`'s arm gate: `arm` sets it once the profile is
+known and the outputs are held off, `disarm` clears it and sleeps the drivers,
+and while disarmed every non-zero `motor`, `move` and `driverlab` is refused
+(`motor 0 0` and `motor sleep` still work). On the Feather `arm` only reports
+whether it may, so the board never sits armed and refuses a profile save.
+A damaged store shows as 2 LED flashes every 2 s,
+no usable record as 4. The run log (`control/run_log.h`, 63.9 KB of the
+64 KB) sits in CCM, which DMA cannot reach, so a dump formats the header
+and each row into an SRAM buffer before the console queues it. Each `move`
+traces itself for `log`.
+
+The tick runs the Pico's control path: `Motion::update()` over Drivetrain,
+with STM32 definitions of Motor (one DRV8874 through `MotorBridge`, so the
+arm gate holds), Encoder (a QuadCounter), IMU (the LSM6DSR's yaw, integrated
+over every 1666 Hz gyro sample) and Battery (the nominal pack until rev1's
+VBAT divider is known) in `drivers/stm32/`. The crash watchdog reads IPROPI
+through `MotorBridge::readAmps` and a trip sleeps the drivers. `move <mm>
+[<mm/s>]` runs a straight move and prints where it ended in mm and counts;
+`crash [on|off|clear]` drives the watchdog. A raw `motor <l> <r>` takes the
+motors from Motion (and from the watchdog) until the next `move`.
+`driverlab` (armed) hands the console to DriverLab until reset: the main loop
+runs `DriverLab::tick()` once per TIM7 tick and prints late ticks as `#`
+lines. OL and STEP are tick-driven; its blocking readouts outlast the 3 s
+watchdog and reset the board: give `YAWCON`, `ENCCON` and `TOFCON` a
+duration under about 2000 ms, and skip `GPIO` and `DIRTEST`. The new mouse's wheel, encoder and motor-model constants
+are in `config/mouse_stm32.h` and its wheel directions in
+`config/board_stm32.h`, all UNVERIFIED placeholders until DriverLab and a
+500 mm push measure them on the rev1 board.
+Separate build directory; needs an Arm GNU
+Toolchain with newlib, found through `ARM_TOOLCHAIN_PATH`,
+`PICO_TOOLCHAIN_PATH` or `PATH`:
+
+```bash
+cmake -S . -B build-stm32 -G Ninja -DJURABABA_PLATFORM=stm32
+ninja -C build-stm32
+```
+
+The build runs `tools/check_stm32_layout.py`, which fails if anything lands in
+flash sectors 1-2 (the flash store) or code starts before sector 3. Flash
+`Jurababa_stm32.hex` or the `.elf`, never a raw `.bin`: a `.bin` zero-fills
+the flash store.
+
+At boot the STM32 prints why it last reset, decoded from RCC_CSR (power-up,
+brownout, reset button, software, independent or window watchdog, low
+power), and what it was doing then: `Breadcrumb` keeps the last boot phase or
+console command in `.noinit` SRAM, which survives every reset but a power-off.
+An independent watchdog of at least 3 s (sized for the fastest 47 kHz LSI;
+about 4.4 s at 32 kHz) resets a hung main loop. Only the main loop feeds it,
+never the tick, and a flash-store erase feeds it just before its 500 ms stall.
+
+The brownout reset needs BOR level 3 (reset below about 2.7 V), set once per
+board in the option bytes. The firmware never writes option bytes; set it
+with STM32CubeProgrammer over SWD (or USB DFU with BOOT0 high), then confirm
+with `-ob displ`:
+
+```bash
+STM32_Programmer_CLI -c port=SWD -ob BOR_LEV=0   # FLASH_OPTCR BOR_LEV 00 = level 3
+```
+
+The option bytes survive reflashing and mass erase. At the factory default
+(BOR off) only the 1.8 V power-down reset catches a sag, which reads as a
+power-up, or a power fault if the breadcrumb survived.
+
+Simulator: `cd sim && make`, producing `sim/bin/Micromouse.out`.
+
+ESP32-C3 BLE bridge (the STM32 CLI over a Nordic UART Service; radio off while
+armed via ESP32 EN): see [`esp32/README.md`](esp32/README.md). Tests with
+`pio test -d esp32 -e native`, builds with `pio run -d esp32 -e esp32c3`.
 
 ## Reporting your work
 

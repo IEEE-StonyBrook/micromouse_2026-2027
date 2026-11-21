@@ -8,14 +8,17 @@ OUT = $(OUTDIR)/Micromouse.out
 SIM_SRCS = main.cpp
 
 # Firmware sources (algorithm code only, no hardware)
-MAZE_SRCS = ../firmware/maze/maze.cpp ../firmware/maze/maze_mouse.cpp
+MAZE_SRCS = ../firmware/maze/maze.cpp ../firmware/maze/maze_mouse.cpp \
+            ../firmware/maze/maze_setting.cpp ../firmware/maze/route_proof.cpp
 NAV_SRCS = ../firmware/navigation/flood_fill.cpp \
            ../firmware/navigation/a_star.cpp \
            ../firmware/navigation/path_utils.cpp \
+           ../firmware/navigation/route_planner.cpp \
+           ../firmware/navigation/run_time.cpp \
            ../firmware/navigation/path_converter.cpp \
            ../firmware/navigation/diagonalizer.cpp
 APP_SRCS = ../firmware/app/mouse.cpp
-COMMON_SRCS = ../firmware/common/log.cpp
+COMMON_SRCS = ../firmware/common/log.cpp ../firmware/common/breadcrumb.cpp
 
 # All sources
 SRCS = $(SIM_SRCS) $(MAZE_SRCS) $(NAV_SRCS) $(APP_SRCS) $(COMMON_SRCS)

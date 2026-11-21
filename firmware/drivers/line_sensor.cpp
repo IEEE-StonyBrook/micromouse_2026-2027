@@ -1,6 +1,9 @@
 #include "drivers/line_sensor.h"
 
 #include "common/log.h"
+#include "hal/pico/peripherals.h"
+#include "hardware/i2c.h"
+#include "pico/stdlib.h"
 
 namespace
 {
@@ -10,14 +13,14 @@ bool maskActive(uint8_t active_mask, uint8_t required_mask)
 }
 } // namespace
 
-LineSensor::LineSensor(i2c_inst_t* i2c, uint sda_pin, uint scl_pin, uint8_t addr)
-    : i2c_(i2c), sda_pin_(sda_pin), scl_pin_(scl_pin), addr_(addr)
+LineSensor::LineSensor(hal::I2cBus bus, unsigned sda_pin, unsigned scl_pin, uint8_t addr)
+    : bus_(bus), sda_pin_(sda_pin), scl_pin_(scl_pin), addr_(addr)
 {
 }
 
 void LineSensor::begin()
 {
-    i2c_init(i2c_, LINE_SENSOR_I2C_BAUD);
+    i2c_init(hal::pico::sdkI2c(bus_), LINE_SENSOR_I2C_BAUD);
 
     gpio_set_function(sda_pin_, GPIO_FUNC_I2C);
     gpio_set_function(scl_pin_, GPIO_FUNC_I2C);
@@ -29,9 +32,9 @@ void LineSensor::begin()
     uint8_t init_on[]  = {0x01, 0x01};
     uint8_t init_off[] = {0x01, 0x00};
 
-    i2c_write_blocking(i2c_, addr_, init_on, 2, false);
+    i2c_write_blocking(hal::pico::sdkI2c(bus_), addr_, init_on, 2, false);
     sleep_ms(100);
-    i2c_write_blocking(i2c_, addr_, init_off, 2, false);
+    i2c_write_blocking(hal::pico::sdkI2c(bus_), addr_, init_off, 2, false);
     sleep_ms(100);
 
     LOG_INFO("LineSensor: I2C initialized on SDA=" + std::to_string(sda_pin_) +
@@ -45,7 +48,7 @@ bool LineSensor::read()
     uint8_t buf = 0;
 
     // Write register address, then read data
-    int ret = i2c_write_blocking(i2c_, addr_, &reg, 1, true); // keep bus active
+    int ret = i2c_write_blocking(hal::pico::sdkI2c(bus_), addr_, &reg, 1, true); // keep bus active
     if (ret == PICO_ERROR_GENERIC)
     {
         LOG_DEBUG("LineSensor: I2C write reg failed");
@@ -53,7 +56,7 @@ bool LineSensor::read()
         return false;
     }
 
-    ret = i2c_read_blocking(i2c_, addr_, &buf, 1, false);
+    ret = i2c_read_blocking(hal::pico::sdkI2c(bus_), addr_, &buf, 1, false);
     if (ret == PICO_ERROR_GENERIC)
     {
         LOG_DEBUG("LineSensor: I2C read failed");

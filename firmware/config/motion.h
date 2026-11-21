@@ -5,40 +5,75 @@
 #ifndef CONFIG_MOTION_H
 #define CONFIG_MOTION_H
 
-// ===================== Control Loop ===================== //
-// Forward and rotation controllers run at 500 Hz, matching mazerunner-core /
-// motorlab. Jurababa's rotation feedback still comes from the 100 Hz BNO085
-// RVC stream; IMU::robot_rot_change() distributes the latest packet-rate yaw
-// delta into an equivalent per-500 Hz tick change so the controller keeps the
-// UKMARS single-rate shape without switching away from the IMU.
-#define LOOP_FREQUENCY_HZ 500.0f
-#define LOOP_INTERVAL_S   (1.0f / LOOP_FREQUENCY_HZ)
+#include "config/board.h"
 
-// 8-tap moving average over per-tick encoder deltas, applied in
-// Drivetrain::update() and DriverLab::sampleEncoders() to mirror
-// ukmars/motorlab/src/encoders.h:108. Adds ~16 ms phase lag at 500 Hz
-// in exchange for quantization rejection on the D-term and a clean plot
-// trace. Forward PD gains are tuned against this smoothed input.
+// ===================== Control Loop ===================== //
+// Forward and rotation controllers run at LOOP_FREQUENCY_HZ, set per platform
+// in the board config (500 Hz on the Pico, 1 kHz on the STM32), matching
+// mazerunner-core / motorlab's single-rate shape. The rotation PD reads
+// encoder yaw every tick (ROT_FEEDBACK_ENCODER below); the BNO085's yaw feeds
+// heading hold. With ROT_FEEDBACK_ENCODER 0 the PD reads the IMU instead, and
+// IMU::robot_rot_change() spreads each 100 Hz packet's yaw delta over the ticks.
+#define LOOP_INTERVAL_S (1.0f / LOOP_FREQUENCY_HZ)
+
+// Whole loop ticks in a duration (seconds), rounded to nearest. Anything that
+// counts ticks is written as a time and converted here, so a different loop
+// rate keeps the same timing. A compile-time constant when its argument is.
+#define LOOP_TICKS(seconds) (static_cast<int>((seconds) * LOOP_FREQUENCY_HZ + 0.5f))
+
+// 16 ms moving average over per-tick encoder deltas (8 taps at 500 Hz),
+// applied in Drivetrain::update() and DriverLab::sampleEncoders() to mirror
+// ukmars/motorlab/src/encoders.h:108. Adds ~7 ms group delay in exchange for
+// quantization rejection on the D-term and a clean plot trace. Forward PD
+// gains are tuned against this smoothed input.
 //
-// CAUTION (per Peter Harrison's encoders.h header): changing this length
+// CAUTION (per Peter Harrison's encoders.h header): changing this window
 // adds delay to the feedback loop and forces re-tuning of the forward
-// PD controller. Rotation PD uses the IMU, except during smooth-turn arcs
-// (see SMOOTH_TURN_ENCODER_HOLDOVER_MS), where it reads this averaged yaw.
-#define ENCODER_AVERAGER_LENGTH 8
+// PD controller. The rotation PD reads this averaged yaw too
+// (ROT_FEEDBACK_ENCODER), so the same caution applies to its gains.
+#define ENCODER_AVERAGER_WINDOW_S 0.016f
+#define ENCODER_AVERAGER_LENGTH   LOOP_TICKS(ENCODER_AVERAGER_WINDOW_S)
+
+// ================== Crash Watchdog ===================== //
+// The control tick cuts the motors itself when the mouse is plainly stuck:
+// a wheel against a wall or post, a jammed gearbox. Each cause must hold for
+// its whole window, so a hard acceleration or a seam bump doesn't trip it.
+// Our own numbers, set against the physics sim (tests/crash_physim_test.cpp).
+//
+// Saturation: either wheel's command at or above this fraction of what the
+// motor can get, min(MAX_VOLTAGE, battery), for the whole window.
+#define CRASH_SATURATION_FRACTION 0.97f
+#define CRASH_SATURATION_TIME_S   0.100f
+// Stall: current above CRASH_STALL_AMPS while that wheel turns slower than
+// CRASH_STALL_SPEED_MMPS. Needs current sensing (the STM32 DRV8874's IPROPI);
+// the Pico has none, so this cause never fires there. Placeholder current
+// until IPROPI stall readings are measured (#39).
+#define CRASH_STALL_AMPS       0.8f
+#define CRASH_STALL_SPEED_MMPS 30.0f
+#define CRASH_STALL_TIME_S     0.100f
+// Runaway: the forward PD's accumulated error above CRASH_RUNAWAY_ERROR_MM
+// and still growing by CRASH_RUNAWAY_GROWTH_MM over each window. A healthy
+// move holds its error to a few mm.
+#define CRASH_RUNAWAY_ERROR_MM  20.0f
+#define CRASH_RUNAWAY_GROWTH_MM 5.0f
+#define CRASH_RUNAWAY_TIME_S    0.100f
 
 // ================ Forward Speed Limits ================= //
 #define ROBOT_MAX_SEARCH_SPEED_MMPS  400.0f  // Search mode cruise speed
 #define ROBOT_MAX_FAST_SPEED_MMPS    1500.0f // Stage 3+ explored-path cruise (Mouse::cruiseSpeed)
 #define ROBOT_SEARCH_TURN_SPEED_MMPS 300.0f  // Orion SEARCH_TURN_SPEED
+// Upper bound on any one wheel's speed, above fast cruise to cover the outer
+// wheel in turns. Sizes the encoder history (control/encoder_history.h).
+#define ROBOT_MAX_WHEEL_SPEED_MMPS 3000.0f
 
 // ================ Forward Acceleration ================= //
 #define ROBOT_BASE_ACCEL_MMPS2   2500.0f
 #define ROBOT_SEARCH_ACCEL_MMPS2 2000.0f // mazerunner-core (Orion) SEARCH_ACCELERATION
 
 // ================= Rotation Limits ===================== //
-// Jurababa-validated IMU spin-turn defaults. These are deliberately gentler
-// than Orion-class UKMARS values because our rotation feedback comes from the
-// BNO085 RVC stream rather than 500 Hz encoder yaw.
+// Jurababa-validated spin-turn defaults, deliberately gentler than
+// Orion-class UKMARS values. They date from when the rotation PD read the
+// BNO085; the notes below record the floor slip that keeps them there.
 #define ROBOT_MAX_TURN_SPEED_DEGPS       270.0f  // 360 slipped 1-8.6 deg short per 180 in search
 #define ROBOT_BASE_ANGULAR_ACCEL_DEGPS2  1200.0f // 1800 slipped on the maze floor (2026-10-10)
 #define ROBOT_MAX_SMOOTH_TURN_SPEED_MMPS 250.0f  // Linear speed during smooth turns
@@ -65,6 +100,7 @@
 // Smooth-turn arcs feed encoder yaw to the rotation PD: the BNO085 lags ~40 ms,
 // enough to reverse the inside wheel and overshoot the arc. Encoder yaw stays
 // on this long after the arc ends so the IMU lag has drained before it takes over.
+// Only matters with ROT_FEEDBACK_ENCODER 0; at 1 the PD reads encoder yaw throughout.
 #define SMOOTH_TURN_ENCODER_HOLDOVER_MS 100
 // 1: encoder yaw is the rotation PD's inner loop on every motion (mazerunner-
 // core); the IMU corrects absolute heading through heading hold and ToF

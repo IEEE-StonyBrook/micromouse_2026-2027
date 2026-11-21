@@ -49,9 +49,24 @@ void setCheeseHunting();
 // Solid green once Cheese Hunt has deactivated the beacon.
 void setBeaconFound();
 
+// Crash watchdog cause code (CrashCause, 1-3): flashes orange cause times,
+// then holds solid orange until the next LED change. Blocking ~cause * 300
+// ms; called from the main loop after the control tick has already cut the
+// motors, so the wait costs nothing.
+void showCrash(int cause);
+
 // LED off.
 void setIdle();
 
 } // namespace stage_led
+
+/**
+ * @brief The board's plain on-board LED, separate from the status NeoPixel.
+ */
+namespace board_led
+{
+// Blinks count times, 100 ms on and 100 ms off, blocking about count * 200 ms.
+void blink(int count);
+} // namespace board_led
 
 #endif

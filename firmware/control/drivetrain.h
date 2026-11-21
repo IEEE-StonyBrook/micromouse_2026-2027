@@ -6,6 +6,7 @@
 #include "common/log.h"
 #include "common/utils.h"
 #include "config/motion.h"
+#include "control/encoder_history.h"
 #include "drivers/battery.h"
 #include "drivers/encoder.h"
 #include "drivers/motor.h"
@@ -75,18 +76,34 @@ class Drivetrain
     float rotChangeDeg() const { return rot_change_deg_; }
 
     /**
+     * @brief Raw encoder counts a wheel moved in the last update(), unaveraged.
+     *        The run log sums them into each wheel's distance.
+     */
+    int32_t stepTicks(WheelSide side) const
+    {
+        return side == WheelSide::LEFT ? left_step_ticks_ : right_step_ticks_;
+    }
+
+    /**
      * @brief Sets motor voltages (scaled by current battery voltage)
      */
     void setVoltage(float left_volts, float right_volts);
 
     void stop();
 
-  private:
+    /**
+     * @brief Volts last commanded per wheel by setVoltage(); 0 after stop().
+     *        The crash watchdog compares them with the battery.
+     */
+    float leftVolts() const { return left_volts_; }
+    float rightVolts() const { return right_volts_; }
+
     // Returns current battery voltage; falls back to DEFAULT_BATTERY_VOLTAGE
     // when no battery driver is wired (sim, bench testing). Consumed by
     // setVoltage() to scale per-wheel volts.
     float batteryVoltage() const;
 
+  private:
     Motor*   left_motor_;
     Motor*   right_motor_;
     Encoder* left_encoder_;
@@ -95,6 +112,11 @@ class Drivetrain
 
     int32_t prev_left_ticks_  = 0;
     int32_t prev_right_ticks_ = 0;
+    int32_t left_step_ticks_  = 0;
+    int32_t right_step_ticks_ = 0;
+
+    float left_volts_  = 0.0f;
+    float right_volts_ = 0.0f;
 
     float left_velocity_mmps_  = 0.0f;
     float right_velocity_mmps_ = 0.0f;
@@ -106,15 +128,14 @@ class Drivetrain
     float rot_change_deg_ = 0.0f;
 
     // 8-tap moving averager state, mirroring ukmars/motorlab/src/encoders.h.
-    // Operates on integer tick deltas so the ring buffer can store int8_t
-    // exactly; conversion to mm happens after averaging. Same window for
-    // both wheels keeps fwd_change_mm_ consistent with the per-wheel
-    // velocities.
-    int8_t left_history_[ENCODER_AVERAGER_LENGTH]  = {};
-    int8_t right_history_[ENCODER_AVERAGER_LENGTH] = {};
-    int    left_history_total_                     = 0;
-    int    right_history_total_                    = 0;
-    int    averager_index_                         = 0;
+    // Operates on integer tick deltas so the ring buffer stores them exactly;
+    // conversion to mm happens after averaging. Same window for both wheels
+    // keeps fwd_change_mm_ consistent with the per-wheel velocities.
+    EncoderHistoryDelta left_history_[ENCODER_AVERAGER_LENGTH]  = {};
+    EncoderHistoryDelta right_history_[ENCODER_AVERAGER_LENGTH] = {};
+    int                 left_history_total_                     = 0;
+    int                 right_history_total_                    = 0;
+    int                 averager_index_                         = 0;
 
     // Feedforward coefficients (initialized from config, mutable for tuning)
     struct FFCoeffs

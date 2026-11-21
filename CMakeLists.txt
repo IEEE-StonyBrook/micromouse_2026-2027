@@ -19,6 +19,18 @@ if (EXISTS ${picoVscode})
     include(${picoVscode})
 endif()
 # ====================================================================================
+
+# Target platform. Each platform needs its own build directory, because the
+# compiler is fixed when a directory is first configured.
+set(JURABABA_PLATFORM pico CACHE STRING "Target platform: pico or stm32")
+set_property(CACHE JURABABA_PLATFORM PROPERTY STRINGS pico stm32)
+if(JURABABA_PLATFORM STREQUAL "stm32")
+    include(${CMAKE_CURRENT_LIST_DIR}/cmake/stm32/platform.cmake)
+    return()
+elseif(NOT JURABABA_PLATFORM STREQUAL "pico")
+    message(FATAL_ERROR "JURABABA_PLATFORM must be pico or stm32, not '${JURABABA_PLATFORM}'")
+endif()
+
 set(PICO_BOARD pico CACHE STRING "Board type")
 
 # Pull in Raspberry Pi Pico SDK (must be before project)
@@ -41,16 +53,20 @@ set(DRIVER_SOURCES
 )
 
 set(CONTROL_SOURCES
+    firmware/control/crash_detector.cpp
     firmware/control/pid.cpp
     firmware/control/profile.cpp
     firmware/control/drivetrain.cpp
     firmware/control/motion.cpp
+    firmware/control/run_log.cpp
     firmware/control/line_follower.cpp
 )
 
 set(MAZE_SOURCES
     firmware/maze/maze.cpp
     firmware/maze/maze_mouse.cpp
+    firmware/maze/maze_setting.cpp
+    firmware/maze/route_proof.cpp
 )
 
 set(NAVIGATION_SOURCES
@@ -58,17 +74,23 @@ set(NAVIGATION_SOURCES
     firmware/navigation/flood_fill.cpp
     firmware/navigation/path_converter.cpp
     firmware/navigation/path_utils.cpp
+    firmware/navigation/route_planner.cpp
+    firmware/navigation/run_time.cpp
     firmware/navigation/diagonalizer.cpp
 )
 
 set(APP_SOURCES
-    firmware/app/bluetooth.cpp
     firmware/app/mouse.cpp
     firmware/app/firmware_mouse.cpp
     firmware/app/start_gesture.cpp
     firmware/app/cli.cpp
-    firmware/app/bootsel_button.cpp
-    firmware/app/leds.cpp
+)
+
+# Board-specific halves of app/: the interfaces are the headers in app/.
+set(APP_PICO_SOURCES
+    firmware/app/pico/bluetooth.cpp
+    firmware/app/pico/bootsel_button.cpp
+    firmware/app/pico/leds.cpp
 )
 
 set(DRIVER_LAB_SOURCES
@@ -76,10 +98,22 @@ set(DRIVER_LAB_SOURCES
     firmware/driver_lab/profile.cpp
     firmware/driver_lab/reporter.cpp
     firmware/driver_lab/settings.cpp
+    firmware/driver_lab/pico/board_io.cpp
+)
+
+# Platform-neutral interfaces live in firmware/hal/; these are the Pico backends.
+set(HAL_SOURCES
+    firmware/hal/console.cpp
+    firmware/hal/pico/console.cpp
+    firmware/hal/pico/critical_section.cpp
+    firmware/hal/pico/irq.cpp
+    firmware/hal/pico/system.cpp
+    firmware/hal/pico/time.cpp
 )
 
 set(COMMON_SOURCES
     firmware/common/breadcrumb.cpp
+    firmware/common/reset_report.cpp
     firmware/common/log.cpp
 )
 
@@ -90,9 +124,11 @@ add_executable(Jurababa
     ${MAZE_SOURCES}
     ${NAVIGATION_SOURCES}
     ${APP_SOURCES}
+    ${APP_PICO_SOURCES}
     ${DRIVER_LAB_SOURCES}
     ${COMMON_SOURCES}
-    firmware/main.cpp
+    ${HAL_SOURCES}
+    firmware/main_pico.cpp
 )
 
 pico_generate_pio_header(Jurababa ${CMAKE_CURRENT_LIST_DIR}/firmware/drivers/ws2812.pio)
@@ -103,7 +139,7 @@ target_compile_definitions(Jurababa PRIVATE PICO_BUILD)
 pico_set_program_name(Jurababa "Jurababa")
 pico_set_program_version(Jurababa "1.0")
 
-# USB only. Bluetooth UART is owned manually by firmware/app/bluetooth.cpp and
+# USB only. Bluetooth UART is owned manually by firmware/app/pico/bluetooth.cpp and
 # DriverLab's stdio mirror, using PIN_BT_TX/PIN_BT_RX from config/pins.h.
 pico_enable_stdio_uart(Jurababa 0)
 pico_enable_stdio_usb(Jurababa 1)

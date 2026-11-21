@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "app/start_gesture.h"
+#include "config/motion.h"
 
 class Mouse;
 class Battery;
@@ -68,11 +69,15 @@ class CommandLineInterface
         SensorMode                      sensor_mode   = SensorMode::TOF;
         std::array<int, 2>              start_cell    = {0, 0};
         std::vector<std::array<int, 2>> goal_cells    = {};
+        // Side of the square maze being run, in cells. Goals must lie inside it.
+        int maze_size = 0;
     };
 
     explicit CommandLineInterface(const Deps& deps);
 
     void greet();
+    // Prints maze size and goals so a practice setting can't reach a contest unnoticed.
+    void printMazeSetting();
     void loop();
     void runCompetitionMode();
     void runCheeseHuntMode();
@@ -108,10 +113,17 @@ class CommandLineInterface
     void handle_stage_command(const Args& args);
     void handle_comp_command(const Args& args);
     void handle_style_command(const Args& args);
+    void handle_planner_command(const Args& args);
     void handle_path_command(const Args& args);
     void handle_center_command(const Args& args);
     void handle_line_command(const Args& args);
     void handle_smooth_command(const Args& args);
+    void handle_maze_command(const Args& args);
+    void handle_crash_command(const Args& args);
+    // Reports a new crash watchdog trip once: prints the cause, shows the
+    // LED cause code and halts any blocking run. Main loop only.
+    void reportCrash();
+    void reportLatchOverflows();
     void printSmoothTuning();
     bool run_smooth_turn_trial(bool turn_left);
     bool waitForLineStartButton();
@@ -146,6 +158,12 @@ class CommandLineInterface
         float drive_mm         = 0.0f; // Forward: value minus what adjacent smooth turns own.
         float final_speed_mmps = 0.0f; // Non-zero when rolling into a smooth turn.
     };
+    // Names the run in the run log's header (command text, battery);
+    // arm_trace() also arms the trace. TRACE dumps it.
+    void name_trace(const char* cmd);
+    void arm_trace(const char* cmd, uint16_t period_ms);
+    // Names a SMOOTH RUN trial's trace: test_SS90E arms it after its start advance.
+    void name_smooth_run_trace(bool turn_left);
     bool run_path_start_center();
     bool resolve_path_segments(std::vector<PathSegment>& segments);
     bool parse_path_sequence(const Args& args, int first_param_index,
@@ -180,11 +198,16 @@ class CommandLineInterface
 
     int  last_function_ = -1;
     bool halted_        = false;
+    // Crash watchdog trips already reported (CrashDetector::tripCount()).
+    uint32_t crash_trips_reported_     = 0;
+    uint32_t latch_overflows_reported_ = 0;
 
-    // LINE telemetry pacing — counts 500 Hz ticks while LineFollower is in
+    // LINE telemetry pacing — counts control ticks while LineFollower is in
     // FollowingLine state, prints a one-line PATH-style telemetry every
-    // kLineTelemetryTicks (250 = 500 ms). Reset on LINE START.
-    static constexpr uint32_t kLineTelemetryTicks       = 250;
+    // kLineTelemetryTicks (500 ms). Reset on LINE START.
+    static constexpr uint32_t kLineTelemetryTicks = LOOP_TICKS(0.500f);
+    // BOOTSEL poll period while following a line (100 ms).
+    static constexpr uint32_t LINE_BUTTON_POLL_TICKS    = LOOP_TICKS(0.100f);
     uint32_t                  line_telemetry_counter_   = 0;
     uint32_t                  line_button_poll_counter_ = 0;
     bool                      line_running_was_active_  = false;

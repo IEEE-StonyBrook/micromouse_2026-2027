@@ -3,10 +3,8 @@
 
 #include <cstdint>
 
-#include "hardware/i2c.h"
-#include "pico/stdlib.h"
-
 #include "config/config.h"
+#include "hal/peripherals.h"
 
 /**
  * @brief I2C driver for the YahBoom 8-channel infrared line patrol sensor
@@ -41,12 +39,13 @@ class LineSensor
 
     /**
      * @brief Constructs line sensor with I2C configuration
-     * @param i2c I2C instance (e.g. i2c0)
+     * @param bus I2C bus the sensor is wired to
      * @param sda_pin SDA GPIO pin
      * @param scl_pin SCL GPIO pin
      * @param addr 7-bit I2C address of the sensor
      */
-    LineSensor(i2c_inst_t* i2c, uint sda_pin, uint scl_pin, uint8_t addr = LINE_SENSOR_I2C_ADDR);
+    LineSensor(hal::I2cBus bus, unsigned sda_pin, unsigned scl_pin,
+               uint8_t addr = LINE_SENSOR_I2C_ADDR);
 
     /**
      * @brief Initializes I2C peripheral and GPIO pins
@@ -100,9 +99,9 @@ class LineSensor
     void    updateDerivedState();
     uint8_t classifyPaths(uint8_t active_mask) const;
 
-    i2c_inst_t*       i2c_;
-    uint              sda_pin_;
-    uint              scl_pin_;
+    hal::I2cBus       bus_;
+    unsigned          sda_pin_;
+    unsigned          scl_pin_;
     uint8_t           addr_;
     uint8_t           raw_data_                      = 0;
     uint8_t           active_mask_                   = 0;

@@ -2,15 +2,18 @@
  * @file breadcrumb.h
  * @brief Reset-surviving record so the next boot can explain an electrical fault.
  *
- * This firmware has no watchdog, so a software crash hangs rather than restarts.
- * A restart therefore means power was lost or sagged below brownout — but the
- * reset-cause register alone cannot say how far the rail fell or what the robot
- * was doing, and a warning logged at that moment dies unsent in the Bluetooth
- * queue. So we keep those few facts in SRAM instead.
+ * The Pico firmware has no watchdog, so a software crash hangs rather than
+ * restarts, and a restart means power was lost or sagged below brownout. The
+ * STM32 also resets on a brownout (BOR) or a watchdog timeout (a hung main
+ * loop). Either way the reset-cause register alone cannot say how far the rail
+ * fell or what the robot was doing, and a warning logged at that moment dies
+ * unsent in the Bluetooth queue. So we keep those few facts in SRAM instead
+ * (HAL_NOINIT), and resetReport() (common/reset_report.h) explains them.
  *
- * RP2040 SRAM keeps its contents through a brownout or software reset; only a
- * power-off long enough for it to decay destroys it. A magic word tells the two
- * apart, so a genuine cold boot is never reported as a brownout.
+ * RP2040 and STM32F405 SRAM keep their contents through a brownout, watchdog
+ * or software reset; only a power-off long enough for it to decay destroys it.
+ * A magic word tells the two apart, so a genuine cold boot is never reported as
+ * a brownout. On the host and in the simulator every call is a no-op.
  */
 #ifndef COMMON_BREADCRUMB_H
 #define COMMON_BREADCRUMB_H

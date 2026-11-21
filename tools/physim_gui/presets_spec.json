@@ -1,0 +1,65 @@
+{
+  "every": 5,
+  "presets": [
+    {
+      "id": "perfect",
+      "label": "Perfect world",
+      "caption": "Nominal model, no faults: the mouse tracks the profile and lands on the cell centre.",
+      "runs": [{ "scenario": "straight10", "knobs": {} }]
+    },
+    {
+      "id": "friction",
+      "label": "Friction: why 93°",
+      "caption": "A: a plant with no gearbox friction, so the feedforward's kS over-drives the spin to 93°. B: friction modelled, it lands on 90°.",
+      "runs": [
+        { "scenario": "ip90", "knobs": { "friction": 0 } },
+        { "scenario": "ip90", "knobs": {} }
+      ]
+    },
+    {
+      "id": "seam",
+      "label": "Floor seam fools the encoders",
+      "caption": "Each tyre rolls over a raised tile joint at 900 mm and counts 20 mm the body never travels, so B stops ~12 mm short.",
+      "runs": [
+        { "scenario": "straight10", "knobs": {} },
+        {
+          "scenario": "straight10",
+          "knobs": {
+            "seam-at": 900,
+            "seam-encoder": 20,
+            "seam-traction": 1,
+            "seam-pitch": 300,
+            "seam-accel": 20
+          }
+        }
+      ]
+    },
+    {
+      "id": "drift",
+      "label": "Gyro drift",
+      "caption": "A 5 °/s gyro bias: heading hold trusts the IMU, so B steers the real mouse ~9° off the straight while the IMU thinks it is holding.",
+      "runs": [
+        { "scenario": "straight10", "knobs": {} },
+        { "scenario": "straight10", "knobs": { "gyro-bias": 5 } }
+      ]
+    },
+    {
+      "id": "battery",
+      "label": "Low battery",
+      "caption": "At 5.0 V the motors hit the battery ceiling: B lags the profile, then overshoots the stop and veers.",
+      "runs": [
+        { "scenario": "straight10", "knobs": {} },
+        { "scenario": "straight10", "knobs": { "battery": 5.0 } }
+      ]
+    },
+    {
+      "id": "slippery",
+      "label": "Slippery floor",
+      "caption": "Grip cut to μ 0.15 with 8 slip events/s per wheel: B's tyres skid through the smooth turn and it comes out ~12° short.",
+      "runs": [
+        { "scenario": "ss90", "knobs": {} },
+        { "scenario": "ss90", "knobs": { "mu": 0.15, "slip-rate": 8 } }
+      ]
+    }
+  ]
+}

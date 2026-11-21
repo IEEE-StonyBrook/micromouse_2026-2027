@@ -350,36 +350,43 @@ Cell* Maze::cell(int x, int y)
 
 std::vector<Cell*> Maze::neighbors(Cell* c, bool include_diagonal)
 {
-    std::vector<Cell*> result;
-    int                x = c->x();
-    int                y = c->y();
-    int                w = width();
-    int                h = height();
+    std::array<Cell*, 8> found;
+    const int            n = neighbors(c, include_diagonal, found);
+    return std::vector<Cell*>(found.begin(), found.begin() + n);
+}
+
+int Maze::neighbors(Cell* c, bool include_diagonal, std::array<Cell*, 8>& out)
+{
+    int n = 0;
+    int x = c->x();
+    int y = c->y();
+    int w = width();
+    int h = height();
 
     // Cardinal directions
     if (x > 0)
-        result.push_back(cells_[x - 1][y]);
+        out[n++] = cells_[x - 1][y];
     if (x < w - 1)
-        result.push_back(cells_[x + 1][y]);
+        out[n++] = cells_[x + 1][y];
     if (y > 0)
-        result.push_back(cells_[x][y - 1]);
+        out[n++] = cells_[x][y - 1];
     if (y < h - 1)
-        result.push_back(cells_[x][y + 1]);
+        out[n++] = cells_[x][y + 1];
 
     // Diagonal directions
     if (include_diagonal)
     {
         if (x > 0 && y > 0)
-            result.push_back(cells_[x - 1][y - 1]);
+            out[n++] = cells_[x - 1][y - 1];
         if (x > 0 && y < h - 1)
-            result.push_back(cells_[x - 1][y + 1]);
+            out[n++] = cells_[x - 1][y + 1];
         if (x < w - 1 && y > 0)
-            result.push_back(cells_[x + 1][y - 1]);
+            out[n++] = cells_[x + 1][y - 1];
         if (x < w - 1 && y < h - 1)
-            result.push_back(cells_[x + 1][y + 1]);
+            out[n++] = cells_[x + 1][y + 1];
     }
 
-    return result;
+    return n;
 }
 
 int Maze::width() const

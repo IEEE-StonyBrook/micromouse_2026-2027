@@ -1,5 +1,5 @@
 /**
- * main.cpp — Raspberry Pi Pico Micromouse entry point.
+ * main_pico.cpp — Raspberry Pi Pico Micromouse entry point.
  *
  * Top-level operating modes:
  *
@@ -46,6 +46,7 @@
 #include "control/drivetrain.h"
 #include "control/line_follower.h"
 #include "control/motion.h"
+#include "control/run_log.h"
 #include "driver_lab/driver_lab.h"
 #include "drivers/battery.h"
 #include "drivers/beacon_ir.h"
@@ -54,6 +55,7 @@
 #include "drivers/line_sensor.h"
 #include "drivers/motor.h"
 #include "drivers/tof.h"
+#include "hal/pico/console.h"
 #include "maze/maze.h"
 #include "maze/maze_mouse.h"
 
@@ -402,12 +404,13 @@ static void runDriverLabMode(Battery* battery, SensorMode sensor_mode)
     uart_set_format(uart0, 8, 1, UART_PARITY_NONE);
     uart_set_fifo_enabled(uart0, true);
     stdio_set_driver_enabled(&bt_driver, true);
+    hal::console::pico::setUartRxPolling(true); // DriverLab reads the HC-05 by polling
 
     printf("\n=== DriverLab ===\n");
     printf("Battery: %.2f V\n", battery->voltage());
 
-    Encoder left_encoder(pio0, PIN_ENCODER_L_A, false);
-    Encoder right_encoder(pio0, PIN_ENCODER_R_A, true);
+    Encoder left_encoder(hal::PioBlock::kPio0, PIN_ENCODER_L_A, false);
+    Encoder right_encoder(hal::PioBlock::kPio0, PIN_ENCODER_R_A, true);
     Motor   left_motor(PIN_MOTOR_L_DIR, PIN_MOTOR_L_PWM, true);
     Motor   right_motor(PIN_MOTOR_R_DIR, PIN_MOTOR_R_PWM, true);
     IMU     imu(PIN_IMU_RX);
@@ -421,7 +424,7 @@ static void runDriverLabMode(Battery* battery, SensorMode sensor_mode)
 
     if (sensor_mode == SensorMode::LINE_SENSOR)
     {
-        static LineSensor line_sensor(i2c0, PIN_LINE_SDA, PIN_LINE_SCL);
+        static LineSensor line_sensor(hal::I2cBus::kI2c0, PIN_LINE_SDA, PIN_LINE_SCL);
         line_sensor.begin();
         line_sensor_p = &line_sensor;
         printf("LineSensor on I2C0\n");
@@ -448,11 +451,12 @@ static void runDriverLabMode(Battery* battery, SensorMode sensor_mode)
 
     while (true)
     {
-        battery->update();         // 500 Hz; 10-sample MA = 20 ms time constant
-        imu.update();              // no-op for omega; reserved for future fusion
-        driverlab.tick();          // advances active trial by exactly one 500 Hz step
-        driverlab.processSerial(); // poll keyboard for new commands
-        bt_drain();                // pump TX ring -> uart0 FIFO between printfs
+        battery->update();              // 500 Hz; 10-sample MA = 20 ms time constant
+        imu.update();                   // no-op for omega; reserved for future fusion
+        driverlab.tick();               // advances active trial by exactly one 500 Hz step
+        driverlab.processSerial();      // poll keyboard for new commands
+        Motor::reportBatteryFallback(); // log flags the motor tick raised
+        bt_drain();                     // pump TX ring -> uart0 FIFO between printfs
         sleep_until(next_tick);
         next_tick = delayed_by_us(next_tick, LOOP_PERIOD_US);
     }
@@ -520,11 +524,11 @@ static void runMouseAppMode(Battery* battery, SensorMode sensor_mode, bool compe
 
     if (sensor_mode == SensorMode::LINE_SENSOR)
     {
-        static LineSensor line_sensor(i2c0, PIN_LINE_SDA, PIN_LINE_SCL);
+        static LineSensor line_sensor(hal::I2cBus::kI2c0, PIN_LINE_SDA, PIN_LINE_SCL);
         line_sensor.begin();
 
-        static Encoder left_encoder(pio0, PIN_ENCODER_L_A, false);
-        static Encoder right_encoder(pio0, PIN_ENCODER_R_A, true);
+        static Encoder left_encoder(hal::PioBlock::kPio0, PIN_ENCODER_L_A, false);
+        static Encoder right_encoder(hal::PioBlock::kPio0, PIN_ENCODER_R_A, true);
         static Motor   left_motor(PIN_MOTOR_L_DIR, PIN_MOTOR_L_PWM, true);
         static Motor   right_motor(PIN_MOTOR_R_DIR, PIN_MOTOR_R_PWM, true);
         static IMU     imu(PIN_IMU_RX);
@@ -533,6 +537,7 @@ static void runMouseAppMode(Battery* battery, SensorMode sensor_mode, bool compe
                                        battery);
         static Motion       motion(&drivetrain, &imu);
         static LineFollower line_follower(&line_sensor, &motion);
+        motion.set_run_log(&runLog());
         line_follower_ptr = &line_follower;
         motion_ptr        = &motion;
 
@@ -545,8 +550,8 @@ static void runMouseAppMode(Battery* battery, SensorMode sensor_mode, bool compe
         // below. The CLI's main loop (cli.loop()) handles serial I/O and
         // polls ToFs at 50 Hz, exactly like mazerunner-core's Arduino
         // loop() / Timer2 split.
-        static Encoder    left_encoder(pio0, PIN_ENCODER_L_A, false);
-        static Encoder    right_encoder(pio0, PIN_ENCODER_R_A, true);
+        static Encoder    left_encoder(hal::PioBlock::kPio0, PIN_ENCODER_L_A, false);
+        static Encoder    right_encoder(hal::PioBlock::kPio0, PIN_ENCODER_R_A, true);
         static Motor      left_motor(PIN_MOTOR_L_DIR, PIN_MOTOR_L_PWM, true);
         static Motor      right_motor(PIN_MOTOR_R_DIR, PIN_MOTOR_R_PWM, true);
         static IMU        imu(PIN_IMU_RX);
@@ -556,6 +561,7 @@ static void runMouseAppMode(Battery* battery, SensorMode sensor_mode, bool compe
         static Drivetrain drivetrain(&left_motor, &right_motor, &left_encoder, &right_encoder,
                                      battery);
         static Motion     motion(&drivetrain, &imu);
+        motion.set_run_log(&runLog());
 
         mouse.set_motion(&motion);
         mouse.setTofSensors(&left_tof, &front_tof, &right_tof);
@@ -584,8 +590,10 @@ static void runMouseAppMode(Battery* battery, SensorMode sensor_mode, bool compe
         static CoreLoopCtx ctx{&motion, &left_tof, &front_tof, &right_tof};
 
         static repeating_timer_t systick_timer;
+        // Negative period => fire on an absolute schedule, so jitter never
+        // accumulates into drift.
         add_repeating_timer_us(
-            -2000 /* 500 Hz, negative => fire on absolute schedule */,
+            -static_cast<int64_t>(LOOP_INTERVAL_S * 1.0e6f),
             +[](repeating_timer_t* t) -> bool
             {
                 auto* c = static_cast<CoreLoopCtx*>(t->user_data);
@@ -594,7 +602,8 @@ static void runMouseAppMode(Battery* battery, SensorMode sensor_mode, bool compe
             },
             &ctx, &systick_timer);
 
-        printf("Motion @ 500 Hz on Core 0 (single-core UKMARS shape).\n");
+        printf("Motion @ %.0f Hz on Core 0 (single-core UKMARS shape).\n",
+               static_cast<double>(LOOP_FREQUENCY_HZ));
     }
 
     Cli::Deps deps;
@@ -613,8 +622,10 @@ static void runMouseAppMode(Battery* battery, SensorMode sensor_mode, bool compe
     deps.sensor_mode   = sensor_mode;
     deps.start_cell    = start_cell;
     deps.goal_cells    = goal_cells;
+    deps.maze_size     = MAZE_SIZE;
 
     Cli cli(deps);
+    cli.printMazeSetting();
     if (cheese_hunt_mode)
     {
         cli.runCheeseHuntMode();
@@ -678,8 +689,8 @@ int main()
     // Always hand a live Battery* downstream so hot-plug works: if VBAT is
     // absent at boot but plugged in later, BAT and voltage compensation pick
     // it up automatically. Motor::set_motor_volts() already handles the
-    // <1 V case with an edge-triggered fallback warning (motor.cpp), so no
-    // boot-time latch is needed here.
+    // <1 V case, and the main loop reports it through
+    // Motor::reportBatteryFallback(), so no boot-time latch is needed here.
     Battery* battery_ptr = &battery;
     if (battery.voltage() < 1.0f)
     {

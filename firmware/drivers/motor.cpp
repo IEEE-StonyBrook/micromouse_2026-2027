@@ -1,5 +1,11 @@
 #include "drivers/motor.h"
 
+#include "hardware/gpio.h"
+#include "hardware/pwm.h"
+#include "pico/stdlib.h"
+
+std::atomic<bool> Motor::battery_fallback_{false};
+
 Motor::Motor(int dir_pin, int pwm_pin, bool invert_direction)
     : dir_pin_(dir_pin), pwm_pin_(pwm_pin), invert_direction_(invert_direction)
 {
@@ -48,25 +54,32 @@ void Motor::set_motor_pwm(float duty_cycle)
 
 void Motor::set_motor_volts(float desired_volts, float battery_volts)
 {
-    // Edge-triggered warning: motors run from battery rails, not USB,
-    // so a sub-1V reading means the pack is off. Log once per transition
-    // instead of every control cycle (called 200 Hz across both motors).
-    static bool fallback_active = false;
-    if (battery_volts < 1.0f)
-    {
-        if (!fallback_active)
-        {
-            LOG_DEBUG("Battery <1V; using default voltage (USB only? motors will not move)");
-            fallback_active = true;
-        }
+    // Motors run from the battery rail, not USB, so a sub-1 V reading means
+    // the pack is off. This runs in the 500 Hz control interrupt, so it only
+    // raises a flag; reportBatteryFallback() logs it from the main loop.
+    const bool fallback = battery_volts < 1.0f;
+    battery_fallback_.store(fallback, std::memory_order_relaxed);
+    if (fallback)
         battery_volts = DEFAULT_BATTERY_VOLTAGE;
+    set_motor_pwm(desired_volts / battery_volts);
+}
+
+void Motor::reportBatteryFallback()
+{
+    // Edge-triggered: one line per transition, not one per poll.
+    static bool reported = false;
+    const bool  fallback = battery_fallback_.load(std::memory_order_relaxed);
+    if (fallback == reported)
+        return;
+    reported = fallback;
+    if (fallback)
+    {
+        LOG_DEBUG("Battery <1V; using default voltage (USB only? motors will not move)");
     }
-    else if (fallback_active)
+    else
     {
         LOG_DEBUG("Battery voltage restored");
-        fallback_active = false;
     }
-    set_motor_pwm(desired_volts / battery_volts);
 }
 
 void Motor::stop()

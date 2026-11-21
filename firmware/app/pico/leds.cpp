@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "hardware/clocks.h"
+#include "hardware/gpio.h"
 #include "hardware/pio.h"
 #include "pico/stdlib.h"
 
@@ -121,9 +122,39 @@ void setBeaconFound()
     putPixel(grbPixel(0, kGoalBrightness, 0));
 }
 
+void showCrash(int cause)
+{
+    // Orange is used by nothing else, so a crash reads apart from an abort.
+    const uint32_t orange = grbPixel(kAbortBrightness, kAbortBrightness / 4, 0);
+    for (int i = 0; i < cause; ++i)
+    {
+        putPixel(orange);
+        sleep_ms(150);
+        putPixel(0);
+        sleep_ms(150);
+    }
+    putPixel(orange);
+}
+
 void setIdle()
 {
     putPixel(0);
 }
 
 } // namespace stage_led
+
+namespace board_led
+{
+void blink(int count)
+{
+    gpio_init(PICO_DEFAULT_LED_PIN);
+    gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
+    for (int i = 0; i < count; ++i)
+    {
+        gpio_put(PICO_DEFAULT_LED_PIN, 1);
+        sleep_ms(100);
+        gpio_put(PICO_DEFAULT_LED_PIN, 0);
+        sleep_ms(100);
+    }
+}
+} // namespace board_led

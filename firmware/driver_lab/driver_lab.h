@@ -2,12 +2,11 @@
 #define DRIVER_LAB_DRIVER_LAB_H
 
 #include "config/config.h"
+#include "control/encoder_history.h"
 #include "control/pid.h"
 #include "driver_lab/profile.h"
 #include "driver_lab/reporter.h"
 #include "driver_lab/settings.h"
-
-#include "pico/stdlib.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -178,9 +177,9 @@ class DriverLab
         int   step_index;      // 0-based step number (for headers)
 
         // Velocity-window state for trailing-window speed estimation.
-        // Even with deterministic dt, a 5-tick window smooths quantization
-        // from int encoder ticks at low speeds.
-        static constexpr int VEL_WIN = 5;
+        // Even with deterministic dt, a 10 ms window (5 ticks at 500 Hz)
+        // smooths quantization from int encoder ticks at low speeds.
+        static constexpr int VEL_WIN = LOOP_TICKS(0.010f);
         float                left_pos_buf[VEL_WIN];
         float                right_pos_buf[VEL_WIN];
         int                  v_idx;
@@ -214,10 +213,10 @@ class DriverLab
         int   duration_loops;
         int   loop_count;
 
-        // 5-tick trailing-window velocity (mirrors OpenLoopTrial::VEL_WIN).
-        // Smooths integer encoder quantization at the 2 ms loop rate; without
+        // 10 ms trailing-window velocity (mirrors OpenLoopTrial::VEL_WIN).
+        // Smooths integer encoder quantization at the loop rate; without
         // this, dense Tm-fit samples would be dominated by tick-count noise.
-        static constexpr int VEL_WIN = 5;
+        static constexpr int VEL_WIN = LOOP_TICKS(0.010f);
         float                left_pos_buf[VEL_WIN];
         float                right_pos_buf[VEL_WIN];
         int                  v_idx;
@@ -343,11 +342,11 @@ class DriverLab
     // encoders directly (HAL-sharing rule) so it owns its own MA state and
     // applies the same algorithm — gains tuned in DriverLab transfer cleanly
     // to maze-running because both paths see the same smoothed signal.
-    int8_t dl_left_history_[ENCODER_AVERAGER_LENGTH]  = {};
-    int8_t dl_right_history_[ENCODER_AVERAGER_LENGTH] = {};
-    int    dl_left_history_total_                     = 0;
-    int    dl_right_history_total_                    = 0;
-    int    dl_averager_index_                         = 0;
+    EncoderHistoryDelta dl_left_history_[ENCODER_AVERAGER_LENGTH]  = {};
+    EncoderHistoryDelta dl_right_history_[ENCODER_AVERAGER_LENGTH] = {};
+    int                 dl_left_history_total_                     = 0;
+    int                 dl_right_history_total_                    = 0;
+    int                 dl_averager_index_                         = 0;
 
     // Active trial dispatch
     TrialState        trial_;

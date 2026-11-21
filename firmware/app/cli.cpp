@@ -11,8 +11,6 @@
 #include <string>
 #include <vector>
 
-#include "pico/stdlib.h"
-
 #include "app/bluetooth.h"
 #include "app/bootsel_button.h"
 #include "app/leds.h"
@@ -25,11 +23,16 @@
 #include "config/smooth_turn.h"
 #include "control/line_follower.h"
 #include "control/motion.h"
+#include "control/run_log.h"
 #include "drivers/battery.h"
 #include "drivers/beacon_ir.h"
+#include "drivers/motor.h"
 #include "drivers/tof.h"
+#include "hal/console.h"
+#include "hal/time.h"
 #include "maze/maze.h"
 #include "maze/maze_mouse.h"
+#include "maze/maze_setting.h"
 #include "navigation/path_utils.h"
 
 namespace
@@ -328,7 +331,7 @@ void CommandLineInterface::print(const char* text)
     if (text == nullptr)
         return;
 
-    std::fputs(text, stdout);
+    hal::console::write(text, std::strlen(text));
     if (deps_.bluetooth != nullptr)
     {
         deps_.bluetooth->write(text);
@@ -385,6 +388,55 @@ void CommandLineInterface::drainConsole()
     deps_.bluetooth->drain();
 }
 
+void CommandLineInterface::printMazeSetting()
+{
+    MazeSetting setting;
+    setting.size  = deps_.maze_size;
+    setting.goals = deps_.goal_cells;
+    printFormat("Maze: %s\n", mazeSettingText(setting).c_str());
+}
+
+void CommandLineInterface::handle_maze_command(const Args& args)
+{
+    if (args.argc < 2)
+    {
+        printMazeSetting();
+        return;
+    }
+    if (comp_armed_)
+    {
+        printFormat("MAZE refused while COMP is armed.\n");
+        return;
+    }
+
+    // tokenise() splits on commas too, so "16 7,7..8,8" arrives as
+    // 16 | 7 | 7..8 | 8. Rejoin the goal tokens with commas for the parser.
+    std::string text = args.argv[1];
+    for (int i = 2; i < args.argc; ++i)
+        text += (i == 2 ? " " : ",") + std::string(args.argv[i]);
+
+    // The Maze grid is allocated once at boot and keeps its boundary walls there;
+    // a smaller size only bounds the goals. It can never exceed the grid.
+    const int   max_size = deps_.maze != nullptr ? deps_.maze->width() : MAZE_SIZE;
+    MazeSetting setting;
+    std::string error;
+    if (!parseMazeSetting(text, max_size, setting, error))
+    {
+        printFormat("MAZE rejected: %s\n", error.c_str());
+        return;
+    }
+
+    deps_.maze_size  = setting.size;
+    deps_.goal_cells = setting.goals;
+    // setUp() carries the goals into Mouse and MazeMouse; it also returns the
+    // pose to the start cell. Known walls are kept.
+    if (deps_.mouse != nullptr)
+        deps_.mouse->setUp(deps_.start_cell, deps_.goal_cells);
+    else if (deps_.maze_mouse != nullptr)
+        deps_.maze_mouse->reset(deps_.start_cell, "n", deps_.goal_cells);
+    printMazeSetting();
+}
+
 void CommandLineInterface::greet()
 {
     print("\n");
@@ -403,11 +455,11 @@ void CommandLineInterface::loop()
     //   3. Battery filter update at 500 Hz (cheap; ADC is non-blocking)
     //
     // Motion::update() runs concurrently via the 500 Hz hardware timer
-    // alarm registered in main.cpp for ToF mode. LineSensor mode has no
+    // alarm registered in main_pico.cpp for ToF mode. LineSensor mode has no
     // timer; the CLI loop advances LineFollower + Motion on this same 500 Hz
     // cadence.
-    const uint32_t  loop_period_us = static_cast<uint32_t>(LOOP_INTERVAL_S * 1.0e6f);
-    absolute_time_t next_tick      = make_timeout_time_us(loop_period_us);
+    const uint32_t loop_period_us = static_cast<uint32_t>(LOOP_INTERVAL_S * 1.0e6f);
+    uint64_t       next_tick_us   = hal::time::nowUs() + loop_period_us;
     while (true)
     {
         process_serial_data();
@@ -443,10 +495,10 @@ void CommandLineInterface::loop()
                     line_telemetry_counter_ = 0;
                     printLineRunningTelemetry();
                 }
-                // BOOTSEL poll at ~10 Hz (50 ticks @ 500 Hz). Reading the
+                // BOOTSEL poll at ~10 Hz (LINE_BUTTON_POLL_TICKS). Reading the
                 // BOOTSEL pin briefly suspends XIP, so we keep the cadence
                 // low. A 100 ms latency on a panic-stop press is fine.
-                if (++line_button_poll_counter_ >= 50)
+                if (++line_button_poll_counter_ >= LINE_BUTTON_POLL_TICKS)
                 {
                     line_button_poll_counter_ = 0;
                     if (abortRequested())
@@ -457,8 +509,8 @@ void CommandLineInterface::loop()
                         // Wait for release so the next LINE START doesn't
                         // immediately consume this still-held press.
                         while (abortRequested())
-                            sleep_ms(20);
-                        sleep_ms(150);
+                            hal::time::sleepMs(20);
+                        hal::time::sleepMs(150);
                     }
                 }
             }
@@ -471,8 +523,8 @@ void CommandLineInterface::loop()
             }
         }
 
-        sleep_until(next_tick);
-        next_tick = delayed_by_us(next_tick, loop_period_us);
+        hal::time::sleepUntilUs(next_tick_us);
+        next_tick_us += loop_period_us;
     }
 }
 
@@ -480,6 +532,9 @@ bool CommandLineInterface::process_serial_data()
 {
     handleBluetoothCommand();
     drainConsole();
+    Motor::reportBatteryFallback();
+    reportCrash();
+    reportLatchOverflows();
 
     if (deps_.battery != nullptr && deps_.sensor_mode != SensorMode::TOF)
         deps_.battery->update();
@@ -498,8 +553,8 @@ bool CommandLineInterface::process_serial_data()
 
     while (true)
     {
-        int c = getchar_timeout_us(0);
-        if (c == PICO_ERROR_TIMEOUT || c < 0)
+        int c = hal::console::getcNonBlocking();
+        if (c < 0)
             break;
 
         char ch = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
@@ -724,6 +779,11 @@ void CommandLineInterface::run_long_cmd(const Args& args)
         handle_style_command(args);
         return;
     }
+    if (std::strcmp(args.argv[0], "PLANNER") == 0)
+    {
+        handle_planner_command(args);
+        return;
+    }
     if (std::strcmp(args.argv[0], "PATH") == 0)
     {
         handle_path_command(args);
@@ -756,6 +816,16 @@ void CommandLineInterface::run_long_cmd(const Args& args)
     if (std::strcmp(args.argv[0], "SMOOTH") == 0)
     {
         handle_smooth_command(args);
+        return;
+    }
+    if (std::strcmp(args.argv[0], "MAZE") == 0)
+    {
+        handle_maze_command(args);
+        return;
+    }
+    if (std::strcmp(args.argv[0], "CRASH") == 0)
+    {
+        handle_crash_command(args);
         return;
     }
     if (std::strcmp(args.argv[0], "HALT") == 0)
@@ -795,11 +865,14 @@ void CommandLineInterface::handle_search_command(const Args& args)
 
     deps_.mouse->set_hand_start(true);
     printFormat("Search to %d,%d\n", x, y);
-    // 20 ms samples: the 1500-sample buffer covers ~30 s, a whole bench search.
+    // 20 ms samples: the run log covers ~33 s, a whole bench search.
     // TRACE prints it.
-    deps_.motion->start_trace(10);
+    char cmd[32];
+    std::snprintf(cmd, sizeof cmd, "SEARCH %d %d", x, y);
+    arm_trace(cmd, 20);
     std::vector<std::array<int, 2>> goals = {{x, y}};
     const bool                      ok    = deps_.mouse->search_to(goals);
+    deps_.motion->stop_trace();
     printFormat(ok ? "Search done.\n" : "Search failed.\n");
 }
 
@@ -879,12 +952,16 @@ void CommandLineInterface::runCompetitionMode()
 
     auto pause_after_abort = [&]() -> bool
     {
-        stage_led::setPaused();
+        // A crash keeps its cause code on the LED instead of plain red.
+        if (deps_.motion != nullptr && deps_.motion->crashDetector().tripped())
+            stage_led::showCrash(static_cast<int>(deps_.motion->crashDetector().cause()));
+        else
+            stage_led::setPaused();
         printFormat("COMP paused. BOOTSEL again to resume; HALT or X to exit.\n");
 
         while (abortRequested())
-            sleep_ms(20);
-        sleep_ms(150);
+            hal::time::sleepMs(20);
+        hal::time::sleepMs(150);
 
         while (true)
         {
@@ -899,16 +976,16 @@ void CommandLineInterface::runCompetitionMode()
                 if (bt->hasCommand() && bt->command() == Bluetooth::Command::HALT)
                     return false;
             }
-            int c = getchar_timeout_us(0);
+            int c = hal::console::getcNonBlocking();
             if (c == 'X' || c == 'x')
                 return false;
 
-            sleep_ms(20);
+            hal::time::sleepMs(20);
         }
 
         while (abortRequested())
-            sleep_ms(20);
-        sleep_ms(150);
+            hal::time::sleepMs(20);
+        hal::time::sleepMs(150);
 
         printFormat("COMP resume.\n");
         return true;
@@ -918,6 +995,9 @@ void CommandLineInterface::runCompetitionMode()
     // Each iteration: arm, wait for a gesture, dispatch, return to arm.
     while (true)
     {
+        // Re-arming after a crash is the operator's reset: release the latch.
+        if (deps_.motion != nullptr && deps_.motion->crashDetector().tripped())
+            deps_.motion->clear_crash();
         halted_               = false;
         comp_pending_trigger_ = StartTrigger::NONE;
         comp_armed_           = true;
@@ -961,7 +1041,7 @@ void CommandLineInterface::runCompetitionMode()
                     active_stage     = 2;
                     trusted_snapshot = take_trusted_snapshot();
                     stage_led::setGoalReached();
-                    sleep_ms(1000);
+                    hal::time::sleepMs(1000);
                     ok = run_competition_stage(2, /*wait_for_start=*/false);
                 }
                 if (ok)
@@ -982,7 +1062,7 @@ void CommandLineInterface::runCompetitionMode()
                         deps_.mouse->turn_IP180() &&
                         deps_.mouse->move_physical(-kBackToWallMm, kBackSpeedMmps, kBackAccelMmps2);
                     if (ok)
-                        sleep_ms(2500);
+                        hal::time::sleepMs(2500);
                 }
                 break;
 
@@ -1106,6 +1186,21 @@ void CommandLineInterface::handle_style_command(const Args& args)
     printFormat("STYLE expects STATIONARY or SMOOTH.\n");
 }
 
+void CommandLineInterface::handle_planner_command(const Args& args)
+{
+    if (args.argc >= 2 && std::strcmp(args.argv[1], "LENGTH") == 0)
+        PathUtils::set_route_planner(RoutePlanner::PathLength);
+    else if (args.argc >= 2 && std::strcmp(args.argv[1], "TIME") == 0)
+        PathUtils::set_route_planner(RoutePlanner::RunTime);
+    else if (args.argc >= 2)
+    {
+        printFormat("PLANNER expects LENGTH or TIME.\n");
+        return;
+    }
+    printFormat("PLANNER: %s\n",
+                PathUtils::routePlanner() == RoutePlanner::RunTime ? "TIME" : "LENGTH");
+}
+
 void CommandLineInterface::append_path_forward_cells(std::vector<PathSegment>& segments, int cells)
 {
     const float distance_mm = cells * CELL_SIZE_MM;
@@ -1202,6 +1297,34 @@ bool CommandLineInterface::parse_path_sequence(const Args& args, int first_param
     return true;
 }
 
+void CommandLineInterface::name_trace(const char* cmd)
+{
+    // NAN, not a guess, when no battery monitor is wired: volts replay needs
+    // the real figure or none.
+    runLog().set_header(cmd, deps_.battery != nullptr ? deps_.battery->voltage() : NAN);
+}
+
+void CommandLineInterface::arm_trace(const char* cmd, uint16_t period_ms)
+{
+    if (deps_.motion == nullptr)
+        return;
+    name_trace(cmd);
+    deps_.motion->start_trace(period_ms);
+}
+
+void CommandLineInterface::name_smooth_run_trace(bool turn_left)
+{
+    const Motion::SmoothTurnTuning& tune = deps_.motion->smoothTurnTuning();
+    char                            cmd[RunLog::CMD_BYTES];
+    std::snprintf(cmd, sizeof cmd,
+                  "SMOOTH RUN %s speed=%.0f omega=%.0f alpha=%.0f entry=%.1f exit=%.1f",
+                  turn_left ? "L" : "R", static_cast<double>(tune.speed_mmps),
+                  static_cast<double>(tune.omega_degps), static_cast<double>(tune.alpha_degps2),
+                  static_cast<double>(tune.side(turn_left).entry_mm),
+                  static_cast<double>(tune.side(turn_left).exit_mm));
+    name_trace(cmd);
+}
+
 bool CommandLineInterface::run_path_start_center()
 {
     // The hand-start nudge: the mouse begins against the back wall, so advance
@@ -1269,8 +1392,13 @@ bool CommandLineInterface::run_path_segments(std::vector<PathSegment>& segments,
         printFormat("PATH requires Motion/Mouse in ToF CLI mode.\n");
         return false;
     }
-    // Record the run for TRACE; the buffer holds the first 2.4 s.
-    deps_.motion->start_trace();
+    // The caller armed the trace before any start advance. Stop it on every
+    // way out, so nothing after the run overwrites its start in the ring.
+    struct TraceStop
+    {
+        Motion* motion;
+        ~TraceStop() { motion->stop_trace(); }
+    } trace_stop{deps_.motion};
 
     if (smooth_turns)
     {
@@ -1312,6 +1440,8 @@ bool CommandLineInterface::run_path_segments(std::vector<PathSegment>& segments,
         const PathSegment& segment        = segments[i];
         bool               ok             = true;
         const float        yaw_before_deg = deps_.motion->yaw_deg();
+        // Numbered as the PATH lines print it; 0 is the start advance.
+        runLog().set_segment(static_cast<uint8_t>((i + 1) % 64));
 
         if (segment.type == PathSegmentType::Forward)
         {
@@ -1440,6 +1570,16 @@ bool CommandLineInterface::run_smooth_fast_path(const std::vector<std::array<int
     std::vector<PathSegment> segments;
     if (!parse_path_chunk(lfr.c_str(), segments))
         return false;
+    char cmd[RunLog::CMD_BYTES];
+    std::snprintf(cmd, sizeof cmd,
+                  "FASTPATH %s speed=%.0f accel=%.0f omega=%.0f alpha=%.0f smooth=1 raw=0 "
+                  "back_wall=%d",
+                  lfr.c_str(), static_cast<double>(ROBOT_MAX_FAST_SPEED_MMPS),
+                  static_cast<double>(ROBOT_BASE_ACCEL_MMPS2),
+                  static_cast<double>(ROBOT_MAX_TURN_SPEED_DEGPS),
+                  static_cast<double>(ROBOT_BASE_ANGULAR_ACCEL_DEGPS2),
+                  start_from_back_wall ? 1 : 0);
+    arm_trace(cmd, RunLog::DEFAULT_PERIOD_MS);
     // From the back wall, fold the advance to the start cell centre into the
     // first straight so the run doesn't stop there; a path that opens with a
     // turn still needs the stop.
@@ -1448,7 +1588,10 @@ bool CommandLineInterface::run_smooth_fast_path(const std::vector<std::array<int
         if (segments.front().type == PathSegmentType::Forward)
             segments.front().value += START_CENTER_DISTANCE_MM;
         else if (!run_path_start_center())
+        {
+            deps_.motion->stop_trace();
             return false;
+        }
     }
     if (!run_path_segments(segments, ROBOT_MAX_FAST_SPEED_MMPS, ROBOT_BASE_ACCEL_MMPS2,
                            ROBOT_MAX_TURN_SPEED_DEGPS, ROBOT_BASE_ANGULAR_ACCEL_DEGPS2,
@@ -1483,7 +1626,7 @@ bool CommandLineInterface::wait_path_segment_motion()
             deps_.motion->emergency_stop();
             return false;
         }
-        sleep_ms(2);
+        hal::time::sleepMs(2);
     }
     return true;
 }
@@ -1537,6 +1680,8 @@ bool CommandLineInterface::run_smooth_turn_trial(bool turn_left)
     halted_ = false;
     deps_.motion->emergency_stop();
     deps_.mouse->set_hand_start(true);
+    // test_SS90E arms the trace itself, once the start advance is done.
+    name_smooth_run_trace(turn_left);
     const bool ok = deps_.mouse->test_SS90E(turn_left);
     printFormat(ok ? "SMOOTH RUN %s done. See SS90E turn_yaw_error above.\n"
                    : "SMOOTH RUN %s failed.\n",
@@ -1687,10 +1832,25 @@ void CommandLineInterface::handle_path_command(const Args& args)
         return;
     }
 
+    // Armed before the start advance, so the trace holds the whole run.
+    std::string cmd = "PATH";
+    for (int i = 1; i < first_param_index; ++i)
+        cmd += std::string(" ") + args.argv[i];
+    char params[96];
+    std::snprintf(
+        params, sizeof params, " speed=%.0f accel=%.0f omega=%.0f alpha=%.0f smooth=%d raw=%d",
+        static_cast<double>(speed), static_cast<double>(accel), static_cast<double>(omega),
+        static_cast<double>(alpha), smooth_turns ? 1 : 0, raw_mode ? 1 : 0);
+    cmd += params;
+    arm_trace(cmd.c_str(), RunLog::DEFAULT_PERIOD_MS);
+
     // The mouse is placed against the back wall, so advance it to the first
     // cell's centre before driving the path. RAW skips it, as it always has.
     if (!raw_mode && !run_path_start_center())
+    {
+        deps_.motion->stop_trace();
         return;
+    }
 
     run_path_segments(segments, speed, accel, omega, alpha, smooth_turns, raw_mode);
 }
@@ -2016,7 +2176,13 @@ void CommandLineInterface::handleBluetoothCommand()
 
 void CommandLineInterface::pollHaltOnly()
 {
-    int c = getchar_timeout_us(0);
+    // Runs every tick of a blocking run, so the control interrupt's flags get
+    // reported while process_serial_data() is not being polled.
+    Motor::reportBatteryFallback();
+    reportCrash();
+    reportLatchOverflows();
+
+    int c = hal::console::getcNonBlocking();
     if (c >= 0)
     {
         char ch = static_cast<char>(c);
@@ -2075,9 +2241,9 @@ void CommandLineInterface::run_function(int cmd)
             if (deps_.mouse != nullptr)
                 deps_.mouse->setPhaseColor('y');
             printFormat("Searching maze...\n");
-            if (deps_.motion != nullptr)
-                deps_.motion->start_trace(10); // 20 ms: TRACE after the run
+            arm_trace("SEARCH MAZE", 20); // 20 ms: TRACE after the run
             printFormat(deps_.mouse->search_maze() ? "Search done.\n" : "Search failed.\n");
+            deps_.motion->stop_trace();
             break;
 
         case 3:
@@ -2103,6 +2269,8 @@ void CommandLineInterface::run_function(int cmd)
                 deps_.motion->emergency_stop();
             printFormat("Test SS90E Turn: starting immediately.\n");
             deps_.mouse->set_hand_start(true);
+            if (deps_.motion != nullptr)
+                name_smooth_run_trace(/*turn_left=*/false);
             printFormat(deps_.mouse->test_SS90E(/*turn_left=*/false) ? "SS90E right done.\n"
                                                                      : "SS90E failed.\n");
             break;
@@ -2321,7 +2489,7 @@ void CommandLineInterface::printLineStartBanner()
                 static_cast<double>(tune.kd_base_deg_per_slot),
                 static_cast<double>(LINE_GAIN_REF_SPEED_MMPS),
                 static_cast<double>(LINE_GAIN_SCHED_FLOOR_MMPS),
-                static_cast<double>(LINE_ERROR_FILTER_ALPHA),
+                static_cast<double>(lineErrorFilterAlpha(LOOP_FREQUENCY_HZ)),
                 static_cast<double>(LINE_LOOKAHEAD_TIME_S * 1000.0f));
     printFormat("LINE brake: gain=%.0f mm/s/slot lost_hold=%u ms lost_stop=%u ms recovery=%.2f\n",
                 static_cast<double>(LINE_BRAKE_GAIN_MMPS_PER_SLOT),
@@ -2364,7 +2532,7 @@ bool CommandLineInterface::waitForLineStartButton()
             if (bt->hasCommand() && bt->command() == Bluetooth::Command::HALT)
                 return false;
         }
-        int c = getchar_timeout_us(0);
+        int c = hal::console::getcNonBlocking();
         if (c == 'X' || c == 'x')
             return false;
 
@@ -2378,14 +2546,14 @@ bool CommandLineInterface::waitForLineStartButton()
         {
             // Debounce + wait for release so the in-loop BOOTSEL stop poll
             // doesn't immediately trigger from the same press.
-            sleep_ms(20);
+            hal::time::sleepMs(20);
             while (abortRequested())
-                sleep_ms(20);
-            sleep_ms(100);
+                hal::time::sleepMs(20);
+            hal::time::sleepMs(100);
             return true;
         }
 
-        sleep_ms(20);
+        hal::time::sleepMs(20);
     }
 }
 
@@ -2616,7 +2784,7 @@ void CommandLineInterface::handle_calibrate_encoders_command()
     halted_           = false;
     while (true)
     {
-        if (getchar_timeout_us(0) >= 0)
+        if (hal::console::getcNonBlocking() >= 0)
             break;
         pollHaltOnly(); // BT HALT / BOOTSEL also end the stream
         if (halted_)
@@ -2630,7 +2798,7 @@ void CommandLineInterface::handle_calibrate_encoders_command()
         const float angle    = (right_mm - left_mm) * DEG_PER_MM_DIFFERENCE;
         printFormat("L:%5ld R:%5ld P:%7.2f A:%7.2f\n", left_counts, right_counts,
                     static_cast<double>(position), static_cast<double>(angle));
-        sleep_ms(10);
+        hal::time::sleepMs(10);
     }
     halted_ = false;
 
@@ -2729,10 +2897,75 @@ void CommandLineInterface::stop()
     printFormat("STOP\n");
 }
 
+void CommandLineInterface::reportCrash()
+{
+    if (deps_.motion == nullptr)
+        return;
+    const CrashDetector& crash = deps_.motion->crashDetector();
+    const uint32_t       trips = crash.tripCount();
+    if (trips == crash_trips_reported_)
+        return;
+    crash_trips_reported_  = trips;
+    const CrashCause cause = crash.cause();
+    printFormat("CRASH: %s (code %d), motors cut. CRASH CLEAR or RESET to re-arm.\n",
+                crashCauseName(cause), static_cast<int>(cause));
+    stage_led::showCrash(static_cast<int>(cause));
+    // Abort any blocking run: its move is frozen and will never finish.
+    halted_ = true;
+}
+
+void CommandLineInterface::reportLatchOverflows()
+{
+    // Main loop only: Motion::issue() counts a burst that filled the latch
+    // and was applied with interrupts masked; say so once per new burst.
+    if (deps_.motion == nullptr)
+        return;
+    const uint32_t overflows = deps_.motion->latchOverflows();
+    if (overflows == latch_overflows_reported_)
+        return;
+    latch_overflows_reported_ = overflows;
+    LOG_WARNING("Motion latch overflowed (" + std::to_string(overflows) +
+                " total): a command burst was applied from the main loop");
+}
+
+void CommandLineInterface::handle_crash_command(const Args& args)
+{
+    if (deps_.motion == nullptr)
+    {
+        printFormat("CRASH requires Motion.\n");
+        return;
+    }
+    CrashDetector& crash = deps_.motion->crashDetector();
+    if (args.argc >= 2 && std::strcmp(args.argv[1], "ON") == 0)
+        crash.set_enabled(true);
+    else if (args.argc >= 2 && std::strcmp(args.argv[1], "OFF") == 0)
+        crash.set_enabled(false);
+    else if (args.argc >= 2 && std::strcmp(args.argv[1], "CLEAR") == 0)
+    {
+        deps_.motion->clear_crash();
+        hal::time::sleepMs(10); // the latch releases on the next control tick
+    }
+    else if (args.argc >= 3 && std::strcmp(args.argv[1], "INHIBIT") == 0)
+        crash.set_inhibit(std::strcmp(args.argv[2], "ON") == 0);
+    else if (args.argc >= 2 && std::strcmp(args.argv[1], "STATUS") != 0)
+    {
+        printFormat("CRASH [ON|OFF|CLEAR|INHIBIT ON|INHIBIT OFF|STATUS]\n");
+        return;
+    }
+    printFormat("CRASH watchdog %s, inhibit %s, %s, trips %lu\n", crash.enabled() ? "ON" : "OFF",
+                crash.inhibited() ? "ON" : "OFF",
+                crash.tripped() ? crashCauseName(crash.cause()) : "clear",
+                static_cast<unsigned long>(crash.tripCount()));
+    printFormat("MOTION latch overflows %lu\n",
+                static_cast<unsigned long>(deps_.motion->latchOverflows()));
+}
+
 void CommandLineInterface::reset()
 {
     if (deps_.sensor_mode == SensorMode::TOF && deps_.motion != nullptr)
         deps_.motion->emergency_stop();
+    if (deps_.motion != nullptr && deps_.motion->crashDetector().tripped())
+        deps_.motion->clear_crash();
     if (deps_.line_follower != nullptr)
         deps_.line_follower->reset();
 
@@ -2819,6 +3052,7 @@ void CommandLineInterface::help()
     printFormat(" 14 = \n");
     printFormat(" 15 = \n");
     printFormat("SEARCH x y : search to location (x,y)\n");
+    printFormat("MAZE [size goals] : show or set maze size and goals, e.g. MAZE 16 7,7..8,8\n");
     printFormat("S : sensor snapshot (ToF or LineSensor)\n");
     printFormat("LINE STATUS : readable line sensor snapshot\n");
     printFormat("LINE START/STOP/LEFT/RIGHT : LineSensor mode control\n");
@@ -2831,6 +3065,7 @@ void CommandLineInterface::help_debug()
 {
     printFormat("Jurababa debug extensions:\n");
     printFormat("STYLE [STATIONARY|SMOOTH] : select path execution style\n");
+    printFormat("PLANNER [LENGTH|TIME] : speed-run route by fewest cells or least est. time\n");
     printFormat(
         "PATH seq [spd acc omg alp] [SMOOTH] [RAW] : manual path, RAW disables heading hold\n");
     printFormat("SMOOTH [SET <name> <val>|DEFAULTS|RUN <L|R>] : tune/measure arc turns\n");
@@ -2860,5 +3095,6 @@ void CommandLineInterface::help_debug()
     printFormat("       (abort rolls back wall data; HALT/X while paused exits COMP)\n");
     printFormat("CHEESE : one-front-wave Cheese Hunt beacon search\n");
     printFormat("RESET : reset search state without rebooting\n");
+    printFormat("CRASH [ON|OFF|CLEAR|INHIBIT ON|OFF|STATUS] : crash watchdog (Pico default OFF)\n");
     printFormat("HALT : stop motion\n");
 }
