@@ -72,7 +72,7 @@ class RunLog
         return static_cast<uint8_t>((events & SEGMENT_MASK) >> SEGMENT_SHIFT);
     }
 
-    static constexpr size_t CMD_BYTES = 96; // command text, NUL included
+    static constexpr size_t CMD_BYTES = 128; // command text, NUL included: PATH and its params
     /// What the run was, for the dump's header line.
     struct Header
     {
@@ -93,7 +93,7 @@ class RunLog
     static constexpr uint16_t CAPACITY          = 1680; // 13.44 s at 8 ms, 63840 bytes
     static constexpr uint16_t DEFAULT_PERIOD_MS = 8;
     static constexpr size_t   ROW_BYTES         = 224; // formatRow() buffer size
-    static constexpr size_t   HEADER_BYTES      = 448; // formatHeader() buffer size
+    static constexpr size_t   HEADER_BYTES      = 480; // formatHeader() buffer size
     /// Column names of formatRow(): the old turn-trace columns, the encoder
     /// distances and `ev`. Parsers go by name: columns only ever get inserted.
     static constexpr const char* COLUMNS =
