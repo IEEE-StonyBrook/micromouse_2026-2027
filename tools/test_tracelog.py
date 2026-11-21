@@ -54,8 +54,9 @@ def new_row(t, yaw, enc_l, enc_r, segment):
 
 
 # The extended format: header keys, cumulative encoder columns, segment bits.
-# Segment 0 drives 100 mm along +x, segment 1 turns left in place (the yaw
-# crosses +180 to show unwrapping), segment 2 drives 100 mm along -x.
+# Segment 0 (the start advance, as on the Pico) drives 100 mm along +x,
+# segment 1 turns left in place (the yaw crosses +180 to show unwrapping),
+# segment 2 drives 100 mm along -x.
 NEW_LOG = "\n".join(
     [
         f'TRACE n=7 dt_ms=8 cols={NEW_COLS} run=3 loop_hz=500 batt_v=7.80 wrapped=0 '
@@ -157,10 +158,17 @@ class Fixture(unittest.TestCase):
         self.assertTrue(self.run_.header["cmd"].startswith("PATH FFRFFLF "))
         self.assertEqual(self.run_.header["wrapped"], 0)
 
+    def test_segments_run_from_the_start_advance(self):
+        # Segment 0 is the advance off the back wall, then F2 R F2 L F.
+        order = [s for i, s in enumerate(self.run_.segment) if i == 0 or s != self.run_.segment[i - 1]]
+        self.assertEqual(order, [0, 1, 2, 3, 4, 5])
+
     def test_dead_reckoning_ends_near_the_expected_cell(self):
-        # F F R F F L F: 2 cells along +x, 2 along -y, 1 along +x; 180 mm cells.
-        self.assertAlmostEqual(self.run_.x_mm[-1], 540.0, delta=30.0)
-        self.assertAlmostEqual(self.run_.y_mm[-1], -360.0, delta=30.0)
+        # From the first cell's centre, where segment 1 starts: F F R F F L F
+        # is 2 cells along +x, 2 along -y, 1 along +x; 180 mm cells.
+        start = self.run_.segment.index(1)
+        self.assertAlmostEqual(self.run_.x_mm[-1] - self.run_.x_mm[start], 540.0, delta=30.0)
+        self.assertAlmostEqual(self.run_.y_mm[-1] - self.run_.y_mm[start], -360.0, delta=30.0)
         self.assertAlmostEqual(self.run_.yaw_unwrapped_deg[-1], 0.0, delta=5.0)
 
     def test_compare_a_run_with_itself(self):

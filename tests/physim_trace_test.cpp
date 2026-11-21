@@ -106,6 +106,32 @@ TEST_CASE("physim trace: PATH arguments parse as the Pico's PATH command does")
     CHECK_FALSE(physim::parsePathCommand("FF 600 3000 240 800 5", &c, &error));
 }
 
+TEST_CASE("physim trace: a PATH trace starts at the start advance and numbers its segments")
+{
+    std::vector<std::string> trace;
+    physim::RunOptions       opt;
+    opt.trace = &trace;
+    physim::PathCommand c;
+    std::string         error;
+    REQUIRE(physim::parsePathCommand("FFRFFLF", &c, &error)); // F2 R F2 L F: 5 segments
+    REQUIRE(physim::runPath(c, physim::nominal(), opt).finished);
+    REQUIRE(trace.size() > 3);
+
+    // Ev bits 8-13, as the Pico's PATH i/n lines count: 0 while the start
+    // advance runs, then 1..5 in order.
+    std::vector<int> order;
+    for (size_t i = 1; i + 1 < trace.size(); ++i)
+    {
+        const int segment = (std::stoi(split(trace[i], ',').back()) >> 8) & 0x3F;
+        if (order.empty() || order.back() != segment)
+            order.push_back(segment);
+    }
+    CHECK(order == std::vector<int>{0, 1, 2, 3, 4, 5});
+    // The first sample is the mouse at the back wall, before the advance.
+    const auto first = split(trace[1], ',');
+    CHECK(std::stof(first[first.size() - 3]) < 1.0f);
+}
+
 TEST_CASE("physim trace: a run longer than the ring dumps its last samples, flagged wrapped")
 {
     // 18 cells and a spin at 180 mm/s is ~21 s of samples, past the ring's 13.44 s.

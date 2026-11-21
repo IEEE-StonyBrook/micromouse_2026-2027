@@ -326,10 +326,13 @@ std::string traceHeader(unsigned count, int dt_ms, float batt_v, bool wrapped,
     return head + cols + tail + cmd + "\"";
 }
 
-// RunLog::formatRow() with the truth columns spliced in before ev, the last.
-std::string traceRow(uint16_t index, uint16_t dt_ms, const RunLog::Sample& sample,
-                     float true_dist_mm, float true_yaw_deg)
+// RunLog::formatRow() with the truth columns spliced in before ev, the last,
+// and the PATH segment index in ev bits 8-13 (0 = start advance, then 1..n),
+// as the Pico's RunLog::set_segment() numbers them.
+std::string traceRow(uint16_t index, uint16_t dt_ms, RunLog::Sample sample, float true_dist_mm,
+                     float true_yaw_deg, uint8_t segment = 0)
 {
+    sample.events = static_cast<uint16_t>(sample.events | (segment % 64u) << 8);
     char row[RunLog::ROW_BYTES];
     RunLog::formatRow(row, sizeof row, index, dt_ms, sample);
     char truth[48];
@@ -351,8 +354,9 @@ float normalizeYawDelta(float deg)
 
 struct Truth
 {
-    float distance_mm;
-    float yaw_deg;
+    float   distance_mm;
+    float   yaw_deg;
+    uint8_t segment;
 };
 
 struct Rig
@@ -362,6 +366,7 @@ struct Rig
     Motion                                    motion;
     RunLog                                    log;
     std::vector<Truth>                        truth; // one per sample the log recorded
+    uint8_t                                   segment = 0; // the PATH segment driving
     float                                     battery_v;
     Result                                    result{};
     const std::function<void(const Sample&)>& on_sample;
@@ -394,7 +399,7 @@ struct Rig
             ends_before[1] = RunLog::pack(log.sample(before - 1));
         }
         // Truth at the instant Motion samples: before this tick's plant step.
-        const Truth now{robot.distanceMm(), robot.yawDeg()};
+        const Truth now{robot.distanceMm(), robot.yawDeg(), segment};
         motion.update();
         if (log.count() < before)
             truth.clear(); // restarted
@@ -476,8 +481,9 @@ struct Rig
         out->push_back(traceHeader(count, dt_ms, battery_v, first > 0, cmd));
         for (uint16_t i = 0; i < count; ++i)
         {
-            const Truth t = first + i < truth.size() ? truth[first + i] : Truth{NAN, NAN};
-            out->push_back(traceRow(i, dt_ms, log.sample(i), t.distance_mm, t.yaw_deg));
+            const Truth t = first + i < truth.size() ? truth[first + i] : Truth{NAN, NAN, 0};
+            out->push_back(
+                traceRow(i, dt_ms, log.sample(i), t.distance_mm, t.yaw_deg, t.segment));
         }
         out->push_back("TRACE end");
     }
@@ -860,6 +866,8 @@ Result runPath(const PathCommand& c, const Params& params, const RunOptions& opt
         return r->result;
     }
 
+    // Armed before the start advance (segment 0), as handle_path_command() does.
+    m.start_trace();
     // run_path_start_center(): from against the back wall to the first cell's centre.
     if (!c.raw)
     {
@@ -870,6 +878,9 @@ Result runPath(const PathCommand& c, const Params& params, const RunOptions& opt
         m.end_motion_sequence();
         if (!r->result.finished)
         {
+            m.stop_trace();
+            if (options.trace != nullptr)
+                r->dumpTrace(describe(c), options.trace);
             fillResult(*r); // PATH stops here too
             return r->result;
         }
@@ -878,11 +889,11 @@ Result runPath(const PathCommand& c, const Params& params, const RunOptions& opt
     const float y0_mm    = r->robot.yMm();
     const float yaw0_rad = r->robot.yawDeg() * PI / 180.0f;
 
-    m.start_trace();
     m.begin_motion_sequence();
     float expected_yaw_deg = m.yaw_deg();
     for (const Segment& s : segments)
     {
+        r->segment = static_cast<uint8_t>((&s - segments.data() + 1) % 64);
         if (s.type == SegmentType::kForward)
         {
             if (!c.raw)
@@ -935,6 +946,7 @@ Result runPath(const PathCommand& c, const Params& params, const RunOptions& opt
     m.stop_forward(c.accel_mmps2, STOP_AT_CENTRE_PROFILE_TIMEOUT_MS);
     m.stop();
     m.end_motion_sequence();
+    m.stop_trace(); // run_path_segments() stops it on the way out
     r->settle();
     if (options.trace != nullptr)
         r->dumpTrace(describe(c), options.trace);
