@@ -359,6 +359,12 @@ void moveCommand(const char* arg)
     motors.set_duty(0.0f, 0.0f); // drop a raw `motor` command
     motion.reset_drive_system();
     tick_mode = TickMode::kMotion;
+    // Trace the move for `log`; reportMove() stops the trace when it ends.
+    char cmd[RunLog::CMD_BYTES];
+    std::snprintf(cmd, sizeof cmd, "move %.1f speed=%.0f accel=%.0f", static_cast<double>(mm),
+                  static_cast<double>(speed), static_cast<double>(ROBOT_SEARCH_ACCEL_MMPS2));
+    runLog().set_header(cmd, battery.voltage());
+    motion.start_trace();
     motion.start_move(mm, speed, 0.0f, ROBOT_SEARCH_ACCEL_MMPS2);
     move_reported = false; // move_finished() already sees the queued move
     std::printf("move: %.1f mm at %.0f mm/s\n", static_cast<double>(mm),
@@ -372,6 +378,7 @@ void reportMove()
     if (move_reported || !motion.move_finished())
         return;
     move_reported = true;
+    motion.stop_trace();
     std::printf("move: done at %.1f mm, encoders left %" PRId32 " right %" PRId32
                 " counts, yaw %.2f deg\n",
                 static_cast<double>(motion.position()), motion.encoder_ticks(WheelSide::LEFT),
