@@ -92,6 +92,10 @@ jobs:
       - name: Physics sim GUI server
         run: python3 -m unittest discover -s tools/physim_gui -v
 
+      # The TRACE parser, and command and volts replay on the capture fixture.
+      - name: Real-vs-sim trace tools
+        run: python3 -m unittest tools/test_tracelog.py -v
+
       - name: No logging or heap in ISR context
         run: python3 tools/check_isr_logging.py
 

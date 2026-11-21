@@ -122,6 +122,17 @@ A/B comparison and demo story presets. Edit the stories in
 `tools/physim_gui/presets_spec.json`, then rerun the server with
 `--make-presets` to refresh `presets.js`, the page's offline fallback; its
 tests run with `python3 -m unittest discover -s tools/physim_gui`.
+Real against sim: `python3 tools/tracelog.py tools/logs/latest.log [--csv
+out.csv] [--json out.json] [--compare sim.log]` parses every TRACE dump in a
+serial_term capture (old and extended headers, by column name) and
+dead-reckons it. `tests/physim --script "FFRFFLF 600 3000 SMOOTH" --format
+trace` drives the Pico's `PATH` on an open floor through the real Motion and
+prints the same TRACE (plus `true_dist_mm,true_yaw_deg`); `tests/physim
+--replay-volts latest.log` holds the logged volts on the plant open loop and
+prints its RMS wheel-speed gap, so plant error shows apart from the
+controller's; `--emit-pico-trace` wraps output as a capture.
+`tools/fixtures/path_ffrfflf_capture.log` is an off-nominal sim run standing
+in for the mouse (`python3 -m unittest tools/test_tracelog.py`).
 Add a test case to a `*_test.cpp` file; the Makefile picks new files up.
 
 Run `ls firmware/<layer>` for the current file list; it is authoritative and

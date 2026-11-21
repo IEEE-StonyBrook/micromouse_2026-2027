@@ -18,6 +18,8 @@
 
 #include <cstdint>
 #include <functional>
+#include <string>
+#include <vector>
 
 #include "control/crash_detector.h"
 #include "drivers/encoder.h"
@@ -130,6 +132,9 @@ class Robot
     // Truth.
     float timeS() const { return time_s_; }
     float distanceMm() const { return distance_m_ * 1000.0f; }
+    // Body centre in the start frame: x along the start heading, y to its left.
+    float xMm() const { return x_m_ * 1000.0f; }
+    float yMm() const { return y_m_ * 1000.0f; }
     float yawDeg() const;
     float wheelMmps(bool left) const;  // tyre surface speed
     float groundMmps(bool left) const; // contact-point ground speed
@@ -177,6 +182,8 @@ class Robot
     float    omega_radps_      = 0.0f;
     double   yaw_rad_          = 0.0;
     double   distance_m_       = 0.0;
+    double   x_m_              = 0.0;
+    double   y_m_              = 0.0;
     double   imu_yaw_deg_      = 0.0;
     double   time_s_           = 0.0;
     float    seam_t_s_         = -1.0f; // time since the body reached the seam; < 0 before
@@ -207,6 +214,10 @@ struct RunOptions
     bool crash_inhibit     = false;
     bool sense_current     = false;
     void (*on_crash_cut)() = nullptr;
+    // If set, receives the run's TRACE dump as the firmware prints it (header,
+    // one "T," row per RunLog sample, "TRACE end"), plus the sim-only truth
+    // columns true_dist_mm,true_yaw_deg before ev. The log starts with the run.
+    std::vector<std::string>* trace = nullptr;
 };
 
 /// One control tick of a run, for traces.
@@ -238,6 +249,8 @@ struct Result
     float      duration_s;  // including the settle time after the last move
     float      distance_mm; // true body-centre path length
     float      yaw_deg;     // true heading, + = CCW
+    float      x_mm;        // true body centre, start frame (x ahead, y left)
+    float      y_mm;
     float      imu_yaw_deg;
     float      encoder_mm; // mean of the two encoders
     float      peak_pitch_rate_degps;
@@ -251,6 +264,74 @@ struct Result
 /// Runs a scenario; on_sample (if set) sees every control tick.
 Result run(Scenario scenario, const Params& params, const RunOptions& options = {},
            const std::function<void(const Sample&)>& on_sample = nullptr);
+/**
+ * @brief The Pico's PATH command: `[PATH] <F/L/R/B...> [speed accel omega
+ * alpha] [SMOOTH] [RAW]` (app/cli.cpp), defaults CLI_PATH_*. Also takes the
+ * key=value form a TRACE header's cmd= carries (speed=600 smooth=1 ...).
+ */
+struct PathCommand
+{
+    std::string sequence; // F, F<n>, L, R, B tokens, e.g. "FFRF2L"
+    float       speed_mmps   = 0.0f;
+    float       accel_mmps2  = 0.0f;
+    float       omega_degps  = 0.0f;
+    float       alpha_degps2 = 0.0f;
+    bool        smooth       = false;
+    bool        raw          = false;
+};
+
+bool parsePathCommand(const std::string& args, PathCommand* out, std::string* error);
+/// The command as a TRACE header's cmd= text; parsePathCommand() reads it back.
+std::string describe(const PathCommand& command);
+
+/**
+ * @brief Drives a PATH as the Pico's PATH command does, on an open floor: the
+ * hand-start advance to the first cell's centre (unless RAW), then the run
+ * log, then the segments resolved as run_path_segments() resolves them
+ * (spin turns, or SMOOTH arcs with half-cell trims and turn-speed hand-offs),
+ * and a brake to rest. No walls: the ToFs read out of range, so wall steering
+ * stays zero and only heading hold steers. Result x/y start at the first
+ * cell's centre.
+ */
+Result runPath(const PathCommand& command, const Params& params, const RunOptions& options = {},
+               const std::function<void(const Sample&)>& on_sample = nullptr);
+
+/// One TRACE dump read back from a serial capture or a raw dump.
+struct TraceRun
+{
+    int                             dt_ms  = 0;
+    float                           batt_v = 0.0f;   // NaN when the header has none
+    std::string                     cmd;             // empty when the header has none
+    bool                            wrapped = false; // the ring lost the run's start
+    std::vector<std::string>        columns;
+    std::vector<std::vector<float>> rows;
+
+    int column(const char* name) const; // index, or -1
+};
+
+/// Reads dump `index` (0 = first) of `text`; strips `[ms] ` and `[INFO] `
+/// prefixes. A row with the wrong number of fields reads as all NaN.
+bool parseTrace(const std::string& text, int index, TraceRun* out, std::string* error);
+
+struct ReplayResult
+{
+    int   samples;
+    float rms_left_mmps; // plant's measured wheel speed against the logged one
+    float rms_right_mmps;
+};
+
+/**
+ * @brief Open-loop plant replay: holds each logged left_v/right_v for its
+ * sample period (no controller) and measures the wheels with the firmware's
+ * Drivetrain. The plant starts at rest, so a wrapped log (which starts
+ * mid-run) replays from the wrong state; and Motion logs nothing on idle
+ * ticks, so a pause between moves drops out of the timeline. The battery is the header's batt_v
+ * when it has one, else params.battery_v. If trace is set it gets a TRACE dump with one row per
+ * logged row at the same t_ms: the plant's left_mmps/right_mmps, IMU yaw_deg,
+ * the replayed volts and the truth columns; the other fields are zero.
+ */
+ReplayResult replayVolts(const TraceRun& logged, const Params& params,
+                         std::vector<std::string>* trace);
 } // namespace physim
 
 #endif // TESTS_SIM_PHYSIM_H
