@@ -2189,7 +2189,9 @@ void Mouse::print_turn_trace(float target_yaw_deg)
     // console's TX DMA cannot read.
     const uint16_t count = log.count();
     const uint16_t dt_ms = log.dtMs();
-    LOG_INFO("TRACE n=" << count << " dt_ms=" << dt_ms << " cols=" << RunLog::COLUMNS);
+    char           header[RunLog::HEADER_BYTES];
+    log.formatHeader(header, sizeof(header));
+    LOG_INFO(header);
     Log::drainBluetooth();
     for (uint16_t i = 0; i < count; ++i)
     {

@@ -243,6 +243,7 @@ void flood()
 void fillRunLog()
 {
     RunLog& log = runLog();
+    log.set_header("logfill", battery.voltage());
     log.start();
     for (int i = 0; i < RunLog::CAPACITY + 7; ++i)
     {
@@ -258,16 +259,18 @@ void fillRunLog()
                 static_cast<unsigned>(sizeof(RunLog)), static_cast<void*>(&log));
 }
 
-// Each sample is unpacked into a stack copy and formatted into a stack row
-// (both SRAM) before the console copies it into its DMA ring: DMA cannot
-// read CCM. Paced so the 2 KB TX ring never drops a row.
+// The header and each sample are formatted into stack buffers (SRAM) before
+// the console copies them into its DMA ring: DMA cannot read CCM. Paced so
+// the 2 KB TX ring never drops a row.
 void dumpRunLog()
 {
     RunLog& log = runLog();
     log.stop();
     const uint16_t count = log.count();
     const uint16_t dt_ms = log.dtMs();
-    std::printf("TRACE n=%u dt_ms=%u cols=%s\n", count, dt_ms, RunLog::COLUMNS);
+    char           header[RunLog::HEADER_BYTES];
+    log.formatHeader(header, sizeof header);
+    std::printf("%s\n", header);
     for (uint16_t i = 0; i < count; ++i)
     {
         char row[RunLog::ROW_BYTES];
