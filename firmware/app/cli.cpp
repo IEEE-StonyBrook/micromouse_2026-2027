@@ -23,6 +23,7 @@
 #include "config/smooth_turn.h"
 #include "control/line_follower.h"
 #include "control/motion.h"
+#include "control/run_log.h"
 #include "drivers/battery.h"
 #include "drivers/beacon_ir.h"
 #include "drivers/motor.h"
@@ -866,9 +867,12 @@ void CommandLineInterface::handle_search_command(const Args& args)
     printFormat("Search to %d,%d\n", x, y);
     // 20 ms samples: the run log covers ~33 s, a whole bench search.
     // TRACE prints it.
-    deps_.motion->start_trace(20);
+    char cmd[32];
+    std::snprintf(cmd, sizeof cmd, "SEARCH %d %d", x, y);
+    arm_trace(cmd, 20);
     std::vector<std::array<int, 2>> goals = {{x, y}};
     const bool                      ok    = deps_.mouse->search_to(goals);
+    deps_.motion->stop_trace();
     printFormat(ok ? "Search done.\n" : "Search failed.\n");
 }
 
@@ -1293,6 +1297,34 @@ bool CommandLineInterface::parse_path_sequence(const Args& args, int first_param
     return true;
 }
 
+void CommandLineInterface::name_trace(const char* cmd)
+{
+    // NAN, not a guess, when no battery monitor is wired: volts replay needs
+    // the real figure or none.
+    runLog().set_header(cmd, deps_.battery != nullptr ? deps_.battery->voltage() : NAN);
+}
+
+void CommandLineInterface::arm_trace(const char* cmd, uint16_t period_ms)
+{
+    if (deps_.motion == nullptr)
+        return;
+    name_trace(cmd);
+    deps_.motion->start_trace(period_ms);
+}
+
+void CommandLineInterface::name_smooth_run_trace(bool turn_left)
+{
+    const Motion::SmoothTurnTuning& tune = deps_.motion->smoothTurnTuning();
+    char                            cmd[RunLog::CMD_BYTES];
+    std::snprintf(cmd, sizeof cmd,
+                  "SMOOTH RUN %s speed=%.0f omega=%.0f alpha=%.0f entry=%.1f exit=%.1f",
+                  turn_left ? "L" : "R", static_cast<double>(tune.speed_mmps),
+                  static_cast<double>(tune.omega_degps), static_cast<double>(tune.alpha_degps2),
+                  static_cast<double>(tune.side(turn_left).entry_mm),
+                  static_cast<double>(tune.side(turn_left).exit_mm));
+    name_trace(cmd);
+}
+
 bool CommandLineInterface::run_path_start_center()
 {
     // The hand-start nudge: the mouse begins against the back wall, so advance
@@ -1360,8 +1392,13 @@ bool CommandLineInterface::run_path_segments(std::vector<PathSegment>& segments,
         printFormat("PATH requires Motion/Mouse in ToF CLI mode.\n");
         return false;
     }
-    // Record the run for TRACE; the ring keeps its last 13.4 s.
-    deps_.motion->start_trace();
+    // The caller armed the trace before any start advance. Stop it on every
+    // way out, so nothing after the run overwrites its start in the ring.
+    struct TraceStop
+    {
+        Motion* motion;
+        ~TraceStop() { motion->stop_trace(); }
+    } trace_stop{deps_.motion};
 
     if (smooth_turns)
     {
@@ -1403,6 +1440,8 @@ bool CommandLineInterface::run_path_segments(std::vector<PathSegment>& segments,
         const PathSegment& segment        = segments[i];
         bool               ok             = true;
         const float        yaw_before_deg = deps_.motion->yaw_deg();
+        // Numbered as the PATH lines print it; 0 is the start advance.
+        runLog().set_segment(static_cast<uint8_t>((i + 1) % 64));
 
         if (segment.type == PathSegmentType::Forward)
         {
@@ -1531,6 +1570,16 @@ bool CommandLineInterface::run_smooth_fast_path(const std::vector<std::array<int
     std::vector<PathSegment> segments;
     if (!parse_path_chunk(lfr.c_str(), segments))
         return false;
+    char cmd[RunLog::CMD_BYTES];
+    std::snprintf(cmd, sizeof cmd,
+                  "FASTPATH %s speed=%.0f accel=%.0f omega=%.0f alpha=%.0f smooth=1 raw=0 "
+                  "back_wall=%d",
+                  lfr.c_str(), static_cast<double>(ROBOT_MAX_FAST_SPEED_MMPS),
+                  static_cast<double>(ROBOT_BASE_ACCEL_MMPS2),
+                  static_cast<double>(ROBOT_MAX_TURN_SPEED_DEGPS),
+                  static_cast<double>(ROBOT_BASE_ANGULAR_ACCEL_DEGPS2),
+                  start_from_back_wall ? 1 : 0);
+    arm_trace(cmd, RunLog::DEFAULT_PERIOD_MS);
     // From the back wall, fold the advance to the start cell centre into the
     // first straight so the run doesn't stop there; a path that opens with a
     // turn still needs the stop.
@@ -1539,7 +1588,10 @@ bool CommandLineInterface::run_smooth_fast_path(const std::vector<std::array<int
         if (segments.front().type == PathSegmentType::Forward)
             segments.front().value += START_CENTER_DISTANCE_MM;
         else if (!run_path_start_center())
+        {
+            deps_.motion->stop_trace();
             return false;
+        }
     }
     if (!run_path_segments(segments, ROBOT_MAX_FAST_SPEED_MMPS, ROBOT_BASE_ACCEL_MMPS2,
                            ROBOT_MAX_TURN_SPEED_DEGPS, ROBOT_BASE_ANGULAR_ACCEL_DEGPS2,
@@ -1628,6 +1680,8 @@ bool CommandLineInterface::run_smooth_turn_trial(bool turn_left)
     halted_ = false;
     deps_.motion->emergency_stop();
     deps_.mouse->set_hand_start(true);
+    // test_SS90E arms the trace itself, once the start advance is done.
+    name_smooth_run_trace(turn_left);
     const bool ok = deps_.mouse->test_SS90E(turn_left);
     printFormat(ok ? "SMOOTH RUN %s done. See SS90E turn_yaw_error above.\n"
                    : "SMOOTH RUN %s failed.\n",
@@ -1778,10 +1832,25 @@ void CommandLineInterface::handle_path_command(const Args& args)
         return;
     }
 
+    // Armed before the start advance, so the trace holds the whole run.
+    std::string cmd = "PATH";
+    for (int i = 1; i < first_param_index; ++i)
+        cmd += std::string(" ") + args.argv[i];
+    char params[96];
+    std::snprintf(
+        params, sizeof params, " speed=%.0f accel=%.0f omega=%.0f alpha=%.0f smooth=%d raw=%d",
+        static_cast<double>(speed), static_cast<double>(accel), static_cast<double>(omega),
+        static_cast<double>(alpha), smooth_turns ? 1 : 0, raw_mode ? 1 : 0);
+    cmd += params;
+    arm_trace(cmd.c_str(), RunLog::DEFAULT_PERIOD_MS);
+
     // The mouse is placed against the back wall, so advance it to the first
     // cell's centre before driving the path. RAW skips it, as it always has.
     if (!raw_mode && !run_path_start_center())
+    {
+        deps_.motion->stop_trace();
         return;
+    }
 
     run_path_segments(segments, speed, accel, omega, alpha, smooth_turns, raw_mode);
 }
@@ -2172,8 +2241,9 @@ void CommandLineInterface::run_function(int cmd)
             if (deps_.mouse != nullptr)
                 deps_.mouse->setPhaseColor('y');
             printFormat("Searching maze...\n");
-            deps_.motion->start_trace(20); // 20 ms: TRACE after the run
+            arm_trace("SEARCH MAZE", 20); // 20 ms: TRACE after the run
             printFormat(deps_.mouse->search_maze() ? "Search done.\n" : "Search failed.\n");
+            deps_.motion->stop_trace();
             break;
 
         case 3:
@@ -2199,6 +2269,8 @@ void CommandLineInterface::run_function(int cmd)
                 deps_.motion->emergency_stop();
             printFormat("Test SS90E Turn: starting immediately.\n");
             deps_.mouse->set_hand_start(true);
+            if (deps_.motion != nullptr)
+                name_smooth_run_trace(/*turn_left=*/false);
             printFormat(deps_.mouse->test_SS90E(/*turn_left=*/false) ? "SS90E right done.\n"
                                                                      : "SS90E failed.\n");
             break;

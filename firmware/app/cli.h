@@ -158,6 +158,12 @@ class CommandLineInterface
         float drive_mm         = 0.0f; // Forward: value minus what adjacent smooth turns own.
         float final_speed_mmps = 0.0f; // Non-zero when rolling into a smooth turn.
     };
+    // Names the run in the run log's header (command text, battery);
+    // arm_trace() also arms the trace. TRACE dumps it.
+    void name_trace(const char* cmd);
+    void arm_trace(const char* cmd, uint16_t period_ms);
+    // Names a SMOOTH RUN trial's trace: test_SS90E arms it after its start advance.
+    void name_smooth_run_trace(bool turn_left);
     bool run_path_start_center();
     bool resolve_path_segments(std::vector<PathSegment>& segments);
     bool parse_path_sequence(const Args& args, int first_param_index,
