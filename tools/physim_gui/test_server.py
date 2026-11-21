@@ -113,10 +113,127 @@ class RunEndpointTest(unittest.TestCase):
             self.assertEqual(err.code, 400)
             self.assertIn("battery", json.loads(err.read())["error"])
 
+    def post(self, path, obj):
+        req = urllib.request.Request(
+            self.base + path, data=json.dumps(obj).encode(), headers={"Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return r.status, json.loads(r.read())
+
+    def test_logs_lists_the_fixture(self):
+        status, body = self.get("/logs")
+        self.assertEqual(status, 200)
+        self.assertIn("fixtures/path_ffrfflf_capture.log", [l["name"] for l in json.loads(body)["logs"]])
+
+    def test_realsim_replays_the_fixture_both_ways(self):
+        status, data = self.post("/realsim", {"log": "fixtures/path_ffrfflf_capture.log"})
+        self.assertEqual(status, 200)
+        n = data["real"]["header"]["n"]
+        self.assertEqual(data["path"], "FFRFFLF 400 2000 240 800")
+        self.assertGreater(len(data["cmd"]["cols"]["t_ms"]), 400)
+        self.assertEqual(len(data["volts"]["cols"]["t_ms"]), n)
+        self.assertEqual(data["argv"]["cmd"][:3], ["physim", "--script", "FFRFFLF 400 2000 240 800"])
+        # The header's battery drives both replays when the knob is blank.
+        self.assertIn("8.35", data["argv"]["cmd"])
+
+    def test_realsim_takes_an_uploaded_log_a_typed_path_and_knobs(self):
+        text = server.FIXTURES.joinpath("path_ffrfflf_capture.log").read_text()
+        _, nominal = self.post("/realsim", {"text": text})
+        status, data = self.post(
+            "/realsim", {"text": text, "path": "FFRFFLF 400 2000", "knobs": {"friction": "0.9", "mu": "0.6"}}
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(data["path"], "FFRFFLF 400 2000")
+        self.assertIn("--friction", data["argv"]["volts"])
+        # The knobs that made the fixture fit its volts far better than nominal does.
+        self.assertLess(sum(data["volts_rms"].values()), 0.5 * sum(nominal["volts_rms"].values()))
+
+    def test_realsim_refuses_a_bad_request(self):
+        for body in (
+            {"log": "../../CLAUDE.md"},
+            {"log": "fixtures/path_ffrfflf_capture.log", "path": "FF;ls"},
+            {"log": "fixtures/path_ffrfflf_capture.log", "knobs": {"every": "1"}},
+            {"text": "no trace here"},
+            {},
+        ):
+            with self.subTest(body=body), self.assertRaises(urllib.error.HTTPError) as ctx:
+                self.post("/realsim", body)
+            with ctx.exception as err:
+                self.assertEqual(err.code, 400)
+                self.assertIn("error", json.loads(err.read()))
+
+    def test_static_files_stay_inside_the_gui_folder(self):
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self.get("/../../CLAUDE.md")
+        ctx.exception.close()
+
     def test_serves_the_page(self):
         status, body = self.get("/index.html")
         self.assertEqual(status, 200)
         self.assertIn(b"<html", body)
+
+
+class LogNameTest(unittest.TestCase):
+    def test_resolves_a_listed_fixture(self):
+        path = server.resolve_log("fixtures/path_ffrfflf_capture.log")
+        self.assertEqual(path, server.REPO / "tools" / "fixtures" / "path_ffrfflf_capture.log")
+
+    def test_rejects_anything_outside_the_two_folders(self):
+        for name in (
+            "../fixtures/path_ffrfflf_capture.log",
+            "fixtures/../../CLAUDE.md",
+            "fixtures/../fixtures/path_ffrfflf_capture.log",
+            "/etc/passwd",
+            "fixtures/%2e%2e/x.log",
+            "tests/physim",
+            "fixtures/missing.log",
+            "fixtures/path_ffrfflf_capture.txt",
+            "fixtures\\path_ffrfflf_capture.log",
+            "",
+        ):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                server.resolve_log(name)
+
+    def test_lists_the_fixture(self):
+        names = [log["name"] for log in server.list_logs()]
+        self.assertIn("fixtures/path_ffrfflf_capture.log", names)
+        self.assertTrue(all(n.startswith(("logs/", "fixtures/")) and n.endswith(".log") for n in names))
+
+
+class RealsimArgsTest(unittest.TestCase):
+    def test_path_text_is_checked_word_by_word(self):
+        self.assertEqual(server.check_path("FFRFFLF 400 2000 SMOOTH"), "FFRFFLF 400 2000 SMOOTH")
+        self.assertEqual(server.check_path("  ffr F2 l 600 "), "ffr F2 l 600")
+        for text in ("", "FFX", "FF; rm -rf /", "FF --battery 99", "F" * 300, "FF 1e9", "FF -5"):
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                server.check_path(text)
+
+    def test_only_plant_knobs_pass(self):
+        self.assertEqual(server.plant_args({"mu": "0.6", "seed": "7"}), ["--mu", "0.6", "--seed", "7"])
+        for query in ({"every": "2"}, {"speed": "600"}, {"script": "F"}, {"mu": "9"}):
+            with self.subTest(query=query), self.assertRaises(ValueError):
+                server.plant_args(query)
+
+
+class ParseLogTest(unittest.TestCase):
+    def test_returns_each_run_and_the_picked_one_by_column(self):
+        text = server.FIXTURES.joinpath("path_ffrfflf_capture.log").read_text()
+        out = server.parse_log(text, -1)
+        self.assertEqual(len(out["runs"]), 1)
+        self.assertEqual(out["runs"][0]["path"], "FFRFFLF 400 2000 240 800")
+        real = out["real"]
+        self.assertEqual(real["header"]["dt_ms"], 8)
+        self.assertEqual(len(real["cols"]["t_ms"]), real["header"]["n"])
+        for name in ("left_mmps", "yaw_unwrapped_deg", "x_mm", "y_mm", "segment", "ev"):
+            self.assertIn(name, real["cols"])
+        json.dumps(real, allow_nan=False)  # NaN goes out as null, never NaN
+
+    def test_no_trace_is_an_error(self):
+        with self.assertRaises(ValueError):
+            server.parse_log("hello\n", 0)
+        text = server.FIXTURES.joinpath("path_ffrfflf_capture.log").read_text()
+        with self.assertRaises(ValueError):
+            server.parse_log(text, 3)
 
 
 if __name__ == "__main__":
